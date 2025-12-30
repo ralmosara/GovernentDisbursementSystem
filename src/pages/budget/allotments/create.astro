@@ -1,0 +1,206 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import { budgetService } from '../../../lib/services/budget.service';
+import { db } from '../../../lib/db/connection';
+import { objectOfExpenditure, mfoPap } from '../../../lib/db/schema';
+import { eq } from 'drizzle-orm';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+const currentYear = new Date().getFullYear();
+
+// Get appropriation ID from query parameter
+const appropriationParam = Astro.url.searchParams.get('appropriation');
+
+// Get appropriations
+const appropriations = await budgetService.getAppropriations(currentYear);
+
+// Get object of expenditure
+const objectOfExpenditureList = await db
+  .select()
+  .from(objectOfExpenditure);
+
+// Get MFO/PAP
+const mfoPapList = await db.select().from(mfoPap);
+---
+
+<MainLayout title="Create Allotment">
+  <div class="container-fluid py-6">
+    <!-- Page Header -->
+    <div class="page-header">
+      <div class="flex items-center gap-4 mb-2">
+        <a href="/budget/allotments" class="text-gray-600 hover:text-gray-900">
+          <i class="pi pi-arrow-left"></i>
+        </a>
+        <h1 class="page-title">Create New Allotment</h1>
+      </div>
+      <p class="page-description">Release budget allotment from appropriation</p>
+    </div>
+
+    <!-- Form Card -->
+    <div class="card max-w-3xl">
+      <div class="card-body">
+        <form id="allotment-form" method="POST" action="/api/budget/allotments">
+          <div class="space-y-6">
+            <!-- Appropriation -->
+            <div class="form-group">
+              <label for="appropriationId" class="form-label form-label-required">Appropriation</label>
+              <select name="appropriationId" id="appropriationId" class="form-select" required>
+                <option value="">Select Appropriation</option>
+                {appropriations.map(app => (
+                  <option value={app.id} selected={appropriationParam && app.id === parseInt(appropriationParam)}>
+                    {app.reference} - {app.fundCluster?.name || 'N/A'} ({app.year}) - ₱{parseFloat(app.amount.toString()).toLocaleString('en-PH')}
+                  </option>
+                ))}
+              </select>
+              <p class="form-help">Select the source appropriation for this allotment</p>
+            </div>
+
+            <!-- Object of Expenditure -->
+            <div class="form-group">
+              <label for="objectOfExpenditureId" class="form-label form-label-required">Object of Expenditure (UACS)</label>
+              <select name="objectOfExpenditureId" id="objectOfExpenditureId" class="form-select" required>
+                <option value="">Select Object of Expenditure</option>
+                {['Personnel Services', 'MOOE', 'Capital Outlay', 'Financial Assistance'].map(category => {
+                  const items = objectOfExpenditureList.filter(obj => obj.category === category);
+                  return items.length > 0 ? (
+                    <optgroup label={category}>
+                      {items.map(obj => (
+                        <option value={obj.id}>
+                          {obj.code} - {obj.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : null;
+                })}
+              </select>
+              <p class="form-help">Select the UACS object of expenditure</p>
+              <p class="text-xs text-gray-500 mt-1">Total available: {objectOfExpenditureList.length} items</p>
+            </div>
+
+            <!-- MFO/PAP (Optional) -->
+            <div class="form-group">
+              <label for="mfoPapId" class="form-label">MFO/PAP</label>
+              <select name="mfoPapId" id="mfoPapId" class="form-select">
+                <option value="">Select MFO/PAP (Optional)</option>
+                {mfoPapList.map(mfo => (
+                  <option value={mfo.id}>
+                    {mfo.code} - {mfo.name}
+                  </option>
+                ))}
+              </select>
+              <p class="form-help">Major Final Output / Programs, Activities, and Projects</p>
+            </div>
+
+            <!-- Allotment Class -->
+            <div class="form-group">
+              <label for="allotmentClass" class="form-label form-label-required">Allotment Class</label>
+              <select name="allotmentClass" id="allotmentClass" class="form-select" required>
+                <option value="">Select Allotment Class</option>
+                <option value="PS">PS - Personnel Services</option>
+                <option value="MOOE">MOOE - Maintenance and Other Operating Expenses</option>
+                <option value="CO">CO - Capital Outlay</option>
+                <option value="FA">FA - Financial Assistance</option>
+              </select>
+            </div>
+
+            <!-- Amount -->
+            <div class="form-group">
+              <label for="amount" class="form-label form-label-required">Amount</label>
+              <div class="relative">
+                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">₱</span>
+                <input
+                  type="number"
+                  name="amount"
+                  id="amount"
+                  class="form-input pl-8"
+                  step="0.01"
+                  min="0"
+                  placeholder="0.00"
+                  required
+                />
+              </div>
+              <p class="form-help">Enter the allotment amount</p>
+            </div>
+
+            <!-- Purpose -->
+            <div class="form-group">
+              <label for="purpose" class="form-label form-label-required">Purpose</label>
+              <textarea
+                name="purpose"
+                id="purpose"
+                rows="3"
+                class="form-textarea"
+                placeholder="Describe the purpose of this allotment..."
+                required
+              ></textarea>
+            </div>
+          </div>
+
+          <!-- Form Actions -->
+          <div class="divider"></div>
+          <div class="flex items-center justify-end gap-3">
+            <a href="/budget/allotments" class="btn btn-secondary btn-md">
+              Cancel
+            </a>
+            <button type="submit" class="btn btn-primary btn-md" id="submit-btn">
+              <i class="pi pi-check mr-2"></i>
+              Create Allotment
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('allotment-form') as HTMLFormElement;
+    const submitBtn = document.getElementById('submit-btn') as HTMLButtonElement;
+
+    form?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      // Disable submit button
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<i class="pi pi-spin pi-spinner mr-2"></i> Creating...';
+
+      try {
+        const formData = new FormData(form);
+        const data = {
+          appropriationId: parseInt(formData.get('appropriationId') as string),
+          objectOfExpenditureId: parseInt(formData.get('objectOfExpenditureId') as string),
+          mfoPapId: formData.get('mfoPapId') ? parseInt(formData.get('mfoPapId') as string) : undefined,
+          allotmentClass: formData.get('allotmentClass') as string,
+          amount: parseFloat(formData.get('amount') as string),
+          purpose: formData.get('purpose') as string
+        };
+
+        const response = await fetch('/api/budget/allotments', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(data)
+        });
+
+        if (response.ok) {
+          window.location.href = '/budget/allotments';
+        } else {
+          const error = await response.json();
+          alert('Error: ' + (error.message || 'Failed to create allotment'));
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = '<i class="pi pi-check mr-2"></i> Create Allotment';
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        alert('An error occurred. Please try again.');
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<i class="pi pi-check mr-2"></i> Create Allotment';
+      }
+    });
+  </script>
+</MainLayout>

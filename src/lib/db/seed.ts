@@ -152,7 +152,7 @@ export async function seed() {
 
     for (const obj of objectOfExpenditureData) {
       await db.insert(objectOfExpenditure).values(obj).onDuplicateKeyUpdate({
-        set: { name: obj.name, description: obj.description }
+        set: { name: obj.name, category: obj.category, description: obj.description }
       });
     }
     console.log('[OK] Object of Expenditure seeded\n');

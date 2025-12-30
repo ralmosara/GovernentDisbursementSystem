@@ -86,12 +86,8 @@ export const objectOfExpenditure = mysqlTable('object_of_expenditure', {
   id: int('id').primaryKey().autoincrement(),
   code: varchar('code', { length: 50 }).unique().notNull(),
   name: varchar('name', { length: 255 }).notNull(),
-  category: mysqlEnum('category', [
-    'personnel_services',
-    'mooe',
-    'financial_expenses',
-    'capital_outlays'
-  ]).notNull(),
+  category: varchar('category', { length: 100 }).notNull(),
+  description: text('description'),
   parentId: int('parent_id'),
   isActive: boolean('is_active').default(true),
   createdAt: timestamp('created_at').defaultNow(),
@@ -104,11 +100,10 @@ export const objectOfExpenditure = mysqlTable('object_of_expenditure', {
 export const registryAppropriations = mysqlTable('registry_appropriations', {
   id: int('id').primaryKey().autoincrement(),
   fundClusterId: int('fund_cluster_id').notNull(),
-  fiscalYear: int('fiscal_year').notNull(),
-  appropriationAct: varchar('appropriation_act', { length: 100 }).notNull(),
-  totalAmount: decimal('total_amount', { precision: 15, scale: 2 }).notNull(),
-  remarks: text('remarks'),
-  createdBy: int('created_by').notNull(),
+  year: int('year').notNull(),
+  reference: varchar('reference', { length: 100 }).notNull(),
+  description: text('description'),
+  amount: decimal('amount', { precision: 15, scale: 2 }).notNull(),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
 });
@@ -116,16 +111,11 @@ export const registryAppropriations = mysqlTable('registry_appropriations', {
 export const registryAllotments = mysqlTable('registry_allotments', {
   id: int('id').primaryKey().autoincrement(),
   appropriationId: int('appropriation_id').notNull(),
-  fundClusterId: int('fund_cluster_id').notNull(),
+  objectOfExpenditureId: int('object_of_expenditure_id').notNull(),
   mfoPapId: int('mfo_pap_id'),
-  objectExpenditureId: int('object_expenditure_id').notNull(),
-  allotmentClass: varchar('allotment_class', { length: 100 }),
-  allotmentAmount: decimal('allotment_amount', { precision: 15, scale: 2 }).notNull(),
-  allotmentDate: datetime('allotment_date').notNull(),
-  allotmentReference: varchar('allotment_reference', { length: 100 }),
-  fiscalYear: int('fiscal_year').notNull(),
-  remarks: text('remarks'),
-  createdBy: int('created_by').notNull(),
+  allotmentClass: varchar('allotment_class', { length: 100 }).notNull(),
+  amount: decimal('amount', { precision: 15, scale: 2 }).notNull(),
+  purpose: text('purpose').notNull(),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
 });
@@ -133,16 +123,17 @@ export const registryAllotments = mysqlTable('registry_allotments', {
 export const registryObligations = mysqlTable('registry_obligations', {
   id: int('id').primaryKey().autoincrement(),
   allotmentId: int('allotment_id').notNull(),
-  fundClusterId: int('fund_cluster_id').notNull(),
-  orsBursNo: varchar('ors_burs_no', { length: 50 }).unique().notNull(),
-  obligationDate: datetime('obligation_date').notNull(),
-  payeeName: varchar('payee_name', { length: 255 }).notNull(),
+  payee: varchar('payee', { length: 255 }).notNull(),
   particulars: text('particulars').notNull(),
-  objectExpenditureId: int('object_expenditure_id').notNull(),
-  obligationAmount: decimal('obligation_amount', { precision: 15, scale: 2 }).notNull(),
-  fiscalYear: int('fiscal_year').notNull(),
-  status: mysqlEnum('status', ['pending', 'approved', 'cancelled']).default('pending'),
+  amount: decimal('amount', { precision: 15, scale: 2 }).notNull(),
+  orsNumber: varchar('ors_number', { length: 50 }),
+  bursNumber: varchar('burs_number', { length: 50 }),
+  obligationDate: datetime('obligation_date').notNull(),
+  status: varchar('status', { length: 20 }).default('pending'),
+  remarks: text('remarks'),
   createdBy: int('created_by').notNull(),
+  approvedBy: int('approved_by'),
+  approvedAt: datetime('approved_at'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
 });
@@ -670,3 +661,38 @@ export const systemSettings = mysqlTable('system_settings', {
   updatedBy: int('updated_by'),
   updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
 });
+
+// ============================================
+// RELATIONS
+// ============================================
+
+export const registryAppropriationsRelations = relations(registryAppropriations, ({ one, many }) => ({
+  fundCluster: one(fundClusters, {
+    fields: [registryAppropriations.fundClusterId],
+    references: [fundClusters.id],
+  }),
+  allotments: many(registryAllotments),
+}));
+
+export const registryAllotmentsRelations = relations(registryAllotments, ({ one, many }) => ({
+  appropriation: one(registryAppropriations, {
+    fields: [registryAllotments.appropriationId],
+    references: [registryAppropriations.id],
+  }),
+  objectOfExpenditure: one(objectOfExpenditure, {
+    fields: [registryAllotments.objectOfExpenditureId],
+    references: [objectOfExpenditure.id],
+  }),
+  mfoPap: one(mfoPap, {
+    fields: [registryAllotments.mfoPapId],
+    references: [mfoPap.id],
+  }),
+  obligations: many(registryObligations),
+}));
+
+export const registryObligationsRelations = relations(registryObligations, ({ one }) => ({
+  allotment: one(registryAllotments, {
+    fields: [registryObligations.allotmentId],
+    references: [registryAllotments.id],
+  }),
+}));

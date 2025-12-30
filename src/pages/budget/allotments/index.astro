@@ -1,0 +1,187 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import { budgetService } from '../../../lib/services/budget.service';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+// Get query parameters
+const appropriationId = Astro.url.searchParams.get('appropriation');
+
+// Get allotments
+const allotments = await budgetService.getAllotments(
+  appropriationId ? parseInt(appropriationId) : undefined
+);
+
+// Calculate total allotment
+const totalAllotment = allotments.reduce((sum, allot) => sum + allot.amount, 0);
+---
+
+<MainLayout title="Registry of Allotments">
+  <div class="container-fluid py-6">
+    <!-- Page Header -->
+    <div class="page-header flex items-center justify-between">
+      <div>
+        <h1 class="page-title">Registry of Allotments</h1>
+        <p class="page-description">Manage budget allotments and releases</p>
+      </div>
+      <a href="/budget/allotments/create" class="btn btn-primary btn-md">
+        <i class="pi pi-plus mr-2"></i>
+        New Allotment
+      </a>
+    </div>
+
+    <!-- Summary Card -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+      <div class="card">
+        <div class="card-body">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm text-gray-600 mb-1">Total Allotments</p>
+              <p class="text-2xl font-bold text-gray-900">{allotments.length}</p>
+            </div>
+            <div class="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+              <i class="pi pi-list text-blue-600 text-xl"></i>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-body">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm text-gray-600 mb-1">Total Amount</p>
+              <p class="text-2xl font-bold text-primary-600">
+                ₱{totalAllotment.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+              </p>
+            </div>
+            <div class="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
+              <i class="pi pi-wallet text-green-600 text-xl"></i>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-body">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm text-gray-600 mb-1">Active Allotments</p>
+              <p class="text-2xl font-bold text-gray-900">{allotments.length}</p>
+            </div>
+            <div class="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
+              <i class="pi pi-chart-bar text-purple-600 text-xl"></i>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Allotments Table -->
+    <div class="card">
+      <div class="card-body">
+        {allotments.length === 0 ? (
+          <div class="text-center py-12">
+            <i class="pi pi-inbox text-4xl text-gray-400 mb-4"></i>
+            <p class="text-gray-500 mb-4">No allotments found</p>
+            <a href="/budget/allotments/create" class="btn btn-primary btn-md">
+              <i class="pi pi-plus mr-2"></i>
+              Create First Allotment
+            </a>
+          </div>
+        ) : (
+          <div class="overflow-x-auto">
+            <table class="table table-hover">
+              <thead>
+                <tr>
+                  <th>Appropriation</th>
+                  <th>Fund Cluster</th>
+                  <th>Object of Expenditure</th>
+                  <th>MFO/PAP</th>
+                  <th>Class</th>
+                  <th class="text-right">Amount</th>
+                  <th>Purpose</th>
+                  <th class="text-center">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {allotments.map(allotment => (
+                  <tr>
+                    <td>
+                      <div class="text-sm">
+                        <div class="font-medium text-gray-900">
+                          {allotment.appropriation.reference}
+                        </div>
+                        <div class="text-xs text-gray-500">
+                          Year: {allotment.appropriation.year}
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      <div>
+                        <div class="font-medium text-gray-900">
+                          {allotment.appropriation.fundCluster.code}
+                        </div>
+                        <div class="text-xs text-gray-500">
+                          {allotment.appropriation.fundCluster.name}
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      <div class="text-sm">
+                        <div class="font-medium text-gray-900">
+                          {allotment.objectOfExpenditure.code}
+                        </div>
+                        <div class="text-xs text-gray-500">
+                          {allotment.objectOfExpenditure.name}
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      {allotment.mfoPap ? (
+                        <span class="text-sm text-gray-700">{allotment.mfoPap.code}</span>
+                      ) : (
+                        <span class="text-xs text-gray-400">N/A</span>
+                      )}
+                    </td>
+                    <td>
+                      <span class="badge badge-info text-xs">{allotment.allotmentClass}</span>
+                    </td>
+                    <td class="text-right font-medium">
+                      ₱{allotment.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                    </td>
+                    <td class="text-sm text-gray-700 max-w-xs truncate">
+                      {allotment.purpose}
+                    </td>
+                    <td class="text-center">
+                      <div class="flex items-center justify-center gap-2">
+                        <a
+                          href={`/budget/allotments/${allotment.id}`}
+                          class="text-blue-600 hover:text-blue-800"
+                          title="View Details"
+                        >
+                          <i class="pi pi-eye"></i>
+                        </a>
+                        <a
+                          href={`/budget/obligations?allotment=${allotment.id}`}
+                          class="text-green-600 hover:text-green-800"
+                          title="View Obligations"
+                        >
+                          <i class="pi pi-file"></i>
+                        </a>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  </div>
+</MainLayout>

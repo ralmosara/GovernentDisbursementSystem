@@ -13,6 +13,7 @@
     "db:studio": "drizzle-kit studio",
     "db:setup": "tsx scripts/setup-database.ts",
     "db:seed": "tsx src/lib/db/seed.ts",
+    "db:reset-budget": "tsx scripts/reset-budget-tables.ts",
     "seed": "tsx src/lib/db/seed.ts"
   },
   "dependencies": {

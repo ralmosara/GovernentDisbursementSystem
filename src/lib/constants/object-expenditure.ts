@@ -6,7 +6,7 @@
 
 export const EXPENDITURE_CATEGORIES = {
   PERSONNEL_SERVICES: 'personnel_services',
-  MOOE: 'mooe', // Maintenance and Other Operating Expenses
+  MOOE: 'MOOE',// Maintenance and Other Operating Expenses
   FINANCIAL_EXPENSES: 'financial_expenses',
   CAPITAL_OUTLAYS: 'capital_outlays',
 } as const;

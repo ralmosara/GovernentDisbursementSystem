@@ -1,7 +1,21 @@
 ---
 import MainLayout from '../layouts/MainLayout.astro';
+import { budgetService } from '../lib/services/budget.service';
 
 const user = Astro.locals.user;
+
+// Get current year
+const currentYear = new Date().getFullYear();
+
+// Get budget summary
+const budgetSummary = await budgetService.getOverallBudgetSummary(currentYear);
+
+// Get obligations
+const pendingObligations = await budgetService.getObligations('pending');
+const approvedObligations = await budgetService.getObligations('approved');
+
+// Get allotments
+const allotments = await budgetService.getAllotments();
 ---
 
 <MainLayout title="Dashboard - Philippine Government FMS">
@@ -12,60 +26,62 @@ const user = Astro.locals.user;
 
   <!-- Summary Cards -->
   <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
-    <!-- Pending DVs -->
+    <!-- Pending Obligations -->
     <div class="card">
       <div class="card-body">
         <div class="flex items-center justify-between">
           <div>
-            <p class="text-sm text-gray-500 mb-1">Pending DVs</p>
-            <p class="text-3xl font-bold text-gray-900">0</p>
+            <p class="text-sm text-gray-500 mb-1">Pending Obligations</p>
+            <p class="text-3xl font-bold text-gray-900">{pendingObligations.length}</p>
           </div>
           <div class="w-12 h-12 bg-yellow-100 rounded-lg flex items-center justify-center">
             <i class="pi pi-clock text-yellow-600 text-2xl"></i>
           </div>
         </div>
         <div class="mt-4">
-          <a href="/disbursements/pending" class="text-sm text-primary-600 hover:text-primary-700">
+          <a href="/budget/obligations?status=pending" class="text-sm text-primary-600 hover:text-primary-700">
             View all →
           </a>
         </div>
       </div>
     </div>
 
-    <!-- Approved DVs -->
+    <!-- Approved Obligations -->
     <div class="card">
       <div class="card-body">
         <div class="flex items-center justify-between">
           <div>
-            <p class="text-sm text-gray-500 mb-1">Approved DVs</p>
-            <p class="text-3xl font-bold text-gray-900">0</p>
+            <p class="text-sm text-gray-500 mb-1">Approved Obligations</p>
+            <p class="text-3xl font-bold text-gray-900">{approvedObligations.length}</p>
           </div>
           <div class="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
             <i class="pi pi-check-circle text-green-600 text-2xl"></i>
           </div>
         </div>
         <div class="mt-4">
-          <a href="/disbursements?status=approved" class="text-sm text-primary-600 hover:text-primary-700">
+          <a href="/budget/obligations?status=approved" class="text-sm text-primary-600 hover:text-primary-700">
             View all →
           </a>
         </div>
       </div>
     </div>
 
-    <!-- Total Disbursements -->
+    <!-- Total Allotments -->
     <div class="card">
       <div class="card-body">
         <div class="flex items-center justify-between">
           <div>
-            <p class="text-sm text-gray-500 mb-1">Total Disbursements</p>
-            <p class="text-3xl font-bold text-gray-900">₱0.00</p>
+            <p class="text-sm text-gray-500 mb-1">Total Allotments</p>
+            <p class="text-2xl font-bold text-gray-900">
+              ₱{(budgetSummary.allotment || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </p>
           </div>
           <div class="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
             <i class="pi pi-wallet text-blue-600 text-2xl"></i>
           </div>
         </div>
         <div class="mt-4">
-          <p class="text-sm text-gray-500">This month</p>
+          <p class="text-sm text-gray-500">FY {currentYear}</p>
         </div>
       </div>
     </div>
@@ -76,7 +92,7 @@ const user = Astro.locals.user;
         <div class="flex items-center justify-between">
           <div>
             <p class="text-sm text-gray-500 mb-1">Budget Utilization</p>
-            <p class="text-3xl font-bold text-gray-900">0%</p>
+            <p class="text-3xl font-bold text-gray-900">{budgetSummary.utilizationRate.toFixed(1)}%</p>
           </div>
           <div class="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
             <i class="pi pi-chart-pie text-purple-600 text-2xl"></i>
@@ -87,6 +103,95 @@ const user = Astro.locals.user;
             View details →
           </a>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Budget Overview -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+    <!-- Budget Summary Card -->
+    <div class="card">
+      <div class="card-header">
+        <h3 class="text-lg font-semibold text-gray-900">Budget Summary FY {currentYear}</h3>
+      </div>
+      <div class="card-body">
+        <div class="space-y-4">
+          <div class="flex items-center justify-between pb-3 border-b border-gray-200">
+            <span class="text-sm text-gray-600">Total Appropriation</span>
+            <span class="text-lg font-semibold text-gray-900">
+              ₱{(budgetSummary.appropriation || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+            </span>
+          </div>
+          <div class="flex items-center justify-between pb-3 border-b border-gray-200">
+            <span class="text-sm text-gray-600">Total Allotment</span>
+            <span class="text-lg font-semibold text-gray-900">
+              ₱{(budgetSummary.allotment || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+            </span>
+          </div>
+          <div class="flex items-center justify-between pb-3 border-b border-gray-200">
+            <span class="text-sm text-gray-600">Total Obligation</span>
+            <span class="text-lg font-semibold text-blue-600">
+              ₱{(budgetSummary.obligation || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+            </span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-sm font-medium text-gray-900">Unobligated Balance</span>
+            <span class="text-lg font-bold text-green-600">
+              ₱{budgetSummary.unobligatedBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+            </span>
+          </div>
+        </div>
+        <div class="mt-6">
+          <div class="flex items-center justify-between text-sm text-gray-600 mb-2">
+            <span>Utilization Rate</span>
+            <span>{budgetSummary.utilizationRate.toFixed(2)}%</span>
+          </div>
+          <div class="w-full bg-gray-200 rounded-full h-3">
+            <div
+              class="bg-primary-600 h-3 rounded-full transition-all"
+              style={`width: ${Math.min(budgetSummary.utilizationRate, 100)}%`}
+            ></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Recent Allotments -->
+    <div class="card">
+      <div class="card-header flex items-center justify-between">
+        <h3 class="text-lg font-semibold text-gray-900">Recent Allotments</h3>
+        <a href="/budget/allotments" class="text-sm text-primary-600 hover:text-primary-700">
+          View all →
+        </a>
+      </div>
+      <div class="card-body">
+        {allotments.length === 0 ? (
+          <div class="text-center py-8">
+            <i class="pi pi-inbox text-3xl text-gray-400 mb-3"></i>
+            <p class="text-gray-500 text-sm">No allotments created yet</p>
+          </div>
+        ) : (
+          <div class="space-y-3">
+            {allotments.slice(0, 5).map(allotment => (
+              <div class="flex items-center justify-between py-2 border-b border-gray-100 last:border-0">
+                <div class="flex-1">
+                  <p class="text-sm font-medium text-gray-900">
+                    {allotment.objectOfExpenditure.name}
+                  </p>
+                  <p class="text-xs text-gray-500 mt-1">
+                    {allotment.appropriation.fundCluster.name}
+                  </p>
+                </div>
+                <div class="text-right">
+                  <p class="text-sm font-semibold text-gray-900">
+                    ₱{allotment.amount.toLocaleString('en-PH', { maximumFractionDigits: 0 })}
+                  </p>
+                  <span class="badge badge-info text-xs mt-1">{allotment.allotmentClass}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   </div>

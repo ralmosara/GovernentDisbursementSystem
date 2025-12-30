@@ -1,0 +1,261 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import { budgetService } from '../../../lib/services/budget.service';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+// Get allotments for selection
+const allotments = await budgetService.getAllotments();
+---
+
+<MainLayout title="Create Obligation">
+  <div class="container-fluid py-6">
+    <!-- Page Header -->
+    <div class="page-header">
+      <div class="flex items-center gap-4 mb-2">
+        <a href="/budget/obligations" class="text-gray-600 hover:text-gray-900">
+          <i class="pi pi-arrow-left"></i>
+        </a>
+        <h1 class="page-title">Create New Obligation</h1>
+      </div>
+      <p class="page-description">Record a new budget obligation with ORS/BURS</p>
+    </div>
+
+    <!-- Form Card -->
+    <div class="card max-w-3xl">
+      <div class="card-body">
+        <form id="obligation-form" method="POST" action="/api/budget/obligations">
+          <div class="space-y-6">
+            <!-- Allotment Selection -->
+            <div class="form-group">
+              <label for="allotmentId" class="form-label form-label-required">Allotment</label>
+              <select name="allotmentId" id="allotmentId" class="form-select" required>
+                <option value="">Select Allotment</option>
+                {allotments.map(allot => (
+                  <option value={allot.id} data-available={allot.amount}>
+                    {allot.appropriation.fundCluster.code} - {allot.objectOfExpenditure.code} - {allot.objectOfExpenditure.name} (₱{allot.amount.toLocaleString('en-PH')})
+                  </option>
+                ))}
+              </select>
+              <p class="form-help">Select the allotment to charge this obligation</p>
+              <div id="budget-availability" class="hidden mt-2 p-3 bg-blue-50 border border-blue-200 rounded-md">
+                <p class="text-sm font-medium text-blue-900">Budget Availability</p>
+                <div class="mt-1 text-sm text-blue-700">
+                  <div>Allotment: <span id="allot-amount" class="font-semibold">₱0.00</span></div>
+                  <div>Unobligated Balance: <span id="unobligated" class="font-semibold">₱0.00</span></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ORS Number -->
+            <div class="form-group">
+              <label for="orsNumber" class="form-label">ORS Number</label>
+              <input
+                type="text"
+                name="orsNumber"
+                id="orsNumber"
+                class="form-input"
+                placeholder="e.g., ORS-2024-001"
+              />
+              <p class="form-help">Obligation Request and Status number (optional)</p>
+            </div>
+
+            <!-- BURS Number -->
+            <div class="form-group">
+              <label for="bursNumber" class="form-label">BURS Number</label>
+              <input
+                type="text"
+                name="bursNumber"
+                id="bursNumber"
+                class="form-input"
+                placeholder="e.g., BURS-2024-001"
+              />
+              <p class="form-help">Budget Utilization Request and Status number (optional)</p>
+            </div>
+
+            <!-- Payee -->
+            <div class="form-group">
+              <label for="payee" class="form-label form-label-required">Payee</label>
+              <input
+                type="text"
+                name="payee"
+                id="payee"
+                class="form-input"
+                placeholder="Name of payee/supplier"
+                required
+              />
+            </div>
+
+            <!-- Particulars -->
+            <div class="form-group">
+              <label for="particulars" class="form-label form-label-required">Particulars</label>
+              <textarea
+                name="particulars"
+                id="particulars"
+                rows="3"
+                class="form-textarea"
+                placeholder="Describe the goods/services to be procured..."
+                required
+              ></textarea>
+            </div>
+
+            <!-- Amount -->
+            <div class="form-group">
+              <label for="amount" class="form-label form-label-required">Amount</label>
+              <div class="relative">
+                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">₱</span>
+                <input
+                  type="number"
+                  name="amount"
+                  id="amount"
+                  class="form-input pl-8"
+                  step="0.01"
+                  min="0"
+                  placeholder="0.00"
+                  required
+                />
+              </div>
+              <p class="form-help" id="amount-help">Enter the obligation amount</p>
+            </div>
+
+            <!-- Obligation Date -->
+            <div class="form-group">
+              <label for="obligationDate" class="form-label form-label-required">Obligation Date</label>
+              <input
+                type="date"
+                name="obligationDate"
+                id="obligationDate"
+                class="form-input"
+                value={new Date().toISOString().split('T')[0]}
+                required
+              />
+            </div>
+          </div>
+
+          <!-- Form Actions -->
+          <div class="divider"></div>
+          <div class="flex items-center justify-end gap-3">
+            <a href="/budget/obligations" class="btn btn-secondary btn-md">
+              Cancel
+            </a>
+            <button type="submit" class="btn btn-primary btn-md" id="submit-btn">
+              <i class="pi pi-check mr-2"></i>
+              Create Obligation
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('obligation-form') as HTMLFormElement;
+    const submitBtn = document.getElementById('submit-btn') as HTMLButtonElement;
+    const allotmentSelect = document.getElementById('allotmentId') as HTMLSelectElement;
+    const amountInput = document.getElementById('amount') as HTMLInputElement;
+    const budgetAvailabilityDiv = document.getElementById('budget-availability');
+
+    // Handle allotment selection - check budget availability
+    allotmentSelect?.addEventListener('change', async () => {
+      const allotmentId = allotmentSelect.value;
+
+      if (!allotmentId) {
+        budgetAvailabilityDiv?.classList.add('hidden');
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/budget/availability/${allotmentId}`);
+        if (response.ok) {
+          const data = await response.json();
+
+          // Show budget availability
+          budgetAvailabilityDiv?.classList.remove('hidden');
+          document.getElementById('allot-amount')!.textContent =
+            `₱${data.allotment.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
+          document.getElementById('unobligated')!.textContent =
+            `₱${data.unobligatedBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
+        }
+      } catch (error) {
+        console.error('Error fetching budget availability:', error);
+      }
+    });
+
+    // Validate amount against available budget
+    amountInput?.addEventListener('input', async () => {
+      const allotmentId = allotmentSelect.value;
+      const amount = parseFloat(amountInput.value);
+      const amountHelp = document.getElementById('amount-help');
+
+      if (!allotmentId || !amount) {
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/budget/availability/${allotmentId}`);
+        if (response.ok) {
+          const data = await response.json();
+
+          if (amount > data.unobligatedBalance) {
+            amountHelp!.textContent = `Warning: Amount exceeds unobligated balance of ₱${data.unobligatedBalance.toLocaleString('en-PH')}`;
+            amountHelp!.classList.remove('form-help');
+            amountHelp!.classList.add('form-error');
+          } else {
+            amountHelp!.textContent = 'Enter the obligation amount';
+            amountHelp!.classList.remove('form-error');
+            amountHelp!.classList.add('form-help');
+          }
+        }
+      } catch (error) {
+        console.error('Error checking amount:', error);
+      }
+    });
+
+    form?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      // Disable submit button
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<i class="pi pi-spin pi-spinner mr-2"></i> Creating...';
+
+      try {
+        const formData = new FormData(form);
+        const data = {
+          allotmentId: parseInt(formData.get('allotmentId') as string),
+          payee: formData.get('payee') as string,
+          particulars: formData.get('particulars') as string,
+          amount: parseFloat(formData.get('amount') as string),
+          orsNumber: formData.get('orsNumber') as string || undefined,
+          bursNumber: formData.get('bursNumber') as string || undefined,
+          obligationDate: formData.get('obligationDate') as string
+        };
+
+        const response = await fetch('/api/budget/obligations', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(data)
+        });
+
+        if (response.ok) {
+          window.location.href = '/budget/obligations';
+        } else {
+          const error = await response.json();
+          alert('Error: ' + (error.message || 'Failed to create obligation'));
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = '<i class="pi pi-check mr-2"></i> Create Obligation';
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        alert('An error occurred. Please try again.');
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<i class="pi pi-check mr-2"></i> Create Obligation';
+      }
+    });
+  </script>
+</MainLayout>

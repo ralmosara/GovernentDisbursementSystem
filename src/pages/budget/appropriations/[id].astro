@@ -1,0 +1,217 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import { budgetService } from '../../../lib/services/budget.service';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+const id = parseInt(Astro.params.id as string);
+
+if (!id || isNaN(id)) {
+  return Astro.redirect('/budget/appropriations');
+}
+
+// Get appropriation details
+const appropriation = await budgetService.getAppropriationById(id);
+
+if (!appropriation) {
+  return Astro.redirect('/budget/appropriations');
+}
+
+// Get allotments for this appropriation
+const allotments = await budgetService.getAllotments(id);
+
+// Calculate totals
+const totalAllotment = allotments.reduce((sum, allot) => sum + parseFloat(allot.amount.toString()), 0);
+const unallotedBalance = parseFloat(appropriation.amount.toString()) - totalAllotment;
+---
+
+<MainLayout title={`Appropriation: ${appropriation.reference}`}>
+  <div class="container-fluid py-6">
+    <!-- Page Header -->
+    <div class="page-header mb-6">
+      <div class="flex items-center justify-between">
+        <div>
+          <div class="flex items-center gap-3 mb-2">
+            <a href="/budget/appropriations" class="text-gray-500 hover:text-gray-700">
+              <i class="pi pi-arrow-left"></i>
+            </a>
+            <h1 class="page-title">Appropriation Details</h1>
+          </div>
+          <p class="page-description">View appropriation information and allotments</p>
+        </div>
+        <div class="flex gap-3">
+          <a href={`/budget/allotments/create?appropriation=${id}`} class="btn btn-primary btn-md">
+            <i class="pi pi-plus mr-2"></i>
+            Create Allotment
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Appropriation Info Card -->
+    <div class="card mb-6">
+      <div class="card-header">
+        <h3 class="text-lg font-semibold text-gray-900">Appropriation Information</h3>
+      </div>
+      <div class="card-body">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <label class="text-sm font-medium text-gray-600">Reference Number</label>
+            <p class="text-lg font-semibold text-gray-900 mt-1">{appropriation.reference}</p>
+          </div>
+          <div>
+            <label class="text-sm font-medium text-gray-600">Fund Cluster</label>
+            <p class="text-lg font-semibold text-gray-900 mt-1">
+              {appropriation.fundCluster.code} - {appropriation.fundCluster.name}
+            </p>
+          </div>
+          <div>
+            <label class="text-sm font-medium text-gray-600">Fiscal Year</label>
+            <p class="text-lg font-semibold text-gray-900 mt-1">{appropriation.year}</p>
+          </div>
+          <div>
+            <label class="text-sm font-medium text-gray-600">Total Amount</label>
+            <p class="text-lg font-semibold text-primary-600 mt-1">
+              ₱{parseFloat(appropriation.amount.toString()).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+            </p>
+          </div>
+          <div class="md:col-span-2">
+            <label class="text-sm font-medium text-gray-600">Description</label>
+            <p class="text-gray-900 mt-1">{appropriation.description || 'No description provided'}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Budget Summary Card -->
+    <div class="card mb-6">
+      <div class="card-header">
+        <h3 class="text-lg font-semibold text-gray-900">Budget Summary</h3>
+      </div>
+      <div class="card-body">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div class="text-center p-4 bg-blue-50 rounded-lg">
+            <p class="text-sm text-gray-600 mb-2">Total Appropriation</p>
+            <p class="text-2xl font-bold text-blue-600">
+              ₱{parseFloat(appropriation.amount.toString()).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+            </p>
+          </div>
+          <div class="text-center p-4 bg-green-50 rounded-lg">
+            <p class="text-sm text-gray-600 mb-2">Total Allotment</p>
+            <p class="text-2xl font-bold text-green-600">
+              ₱{totalAllotment.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+            </p>
+          </div>
+          <div class="text-center p-4 bg-yellow-50 rounded-lg">
+            <p class="text-sm text-gray-600 mb-2">Unalloted Balance</p>
+            <p class="text-2xl font-bold text-yellow-600">
+              ₱{unallotedBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+            </p>
+          </div>
+        </div>
+        <div class="mt-6">
+          <div class="flex items-center justify-between text-sm text-gray-600 mb-2">
+            <span>Allotment Rate</span>
+            <span>{((totalAllotment / parseFloat(appropriation.amount.toString())) * 100).toFixed(2)}%</span>
+          </div>
+          <div class="w-full bg-gray-200 rounded-full h-3">
+            <div
+              class="bg-green-600 h-3 rounded-full transition-all"
+              style={`width: ${Math.min((totalAllotment / parseFloat(appropriation.amount.toString())) * 100, 100)}%`}
+            ></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Allotments Table -->
+    <div class="card">
+      <div class="card-header flex items-center justify-between">
+        <h3 class="text-lg font-semibold text-gray-900">Allotments</h3>
+        <a href={`/budget/allotments/create?appropriation=${id}`} class="btn btn-primary btn-sm">
+          <i class="pi pi-plus mr-2"></i>
+          Add Allotment
+        </a>
+      </div>
+      <div class="card-body">
+        {allotments.length === 0 ? (
+          <div class="text-center py-12">
+            <i class="pi pi-inbox text-4xl text-gray-400 mb-4"></i>
+            <p class="text-gray-500 mb-4">No allotments created for this appropriation</p>
+            <a href={`/budget/allotments/create?appropriation=${id}`} class="btn btn-primary btn-md">
+              <i class="pi pi-plus mr-2"></i>
+              Create First Allotment
+            </a>
+          </div>
+        ) : (
+          <div class="overflow-x-auto">
+            <table class="table table-hover">
+              <thead>
+                <tr>
+                  <th>Object of Expenditure</th>
+                  <th>Allotment Class</th>
+                  <th>Purpose</th>
+                  <th class="text-right">Amount</th>
+                  <th>Date Created</th>
+                  <th class="text-center">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {allotments.map(allotment => (
+                  <tr>
+                    <td>
+                      <div>
+                        <div class="font-medium text-gray-900">
+                          {allotment.objectOfExpenditure.name}
+                        </div>
+                        <div class="text-xs text-gray-500">
+                          {allotment.objectOfExpenditure.code}
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      <span class="badge badge-info">{allotment.allotmentClass}</span>
+                    </td>
+                    <td>
+                      <span class="text-sm text-gray-700">{allotment.purpose}</span>
+                    </td>
+                    <td class="text-right font-medium">
+                      ₱{parseFloat(allotment.amount.toString()).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                    </td>
+                    <td class="text-sm text-gray-600">
+                      {new Date(allotment.createdAt).toLocaleDateString('en-PH')}
+                    </td>
+                    <td class="text-center">
+                      <div class="flex items-center justify-center gap-2">
+                        <a
+                          href={`/budget/obligations/create?allotment=${allotment.id}`}
+                          class="text-green-600 hover:text-green-800"
+                          title="Create Obligation"
+                        >
+                          <i class="pi pi-plus-circle"></i>
+                        </a>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr class="bg-gray-50">
+                  <td colspan="3" class="font-semibold text-gray-900">Total</td>
+                  <td class="text-right font-bold text-gray-900">
+                    ₱{totalAllotment.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                  </td>
+                  <td colspan="2"></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  </div>
+</MainLayout>

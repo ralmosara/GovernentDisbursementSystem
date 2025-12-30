@@ -1,0 +1,258 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import { budgetService } from '../../../lib/services/budget.service';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+// Get query parameters
+const status = Astro.url.searchParams.get('status') || '';
+
+// Get obligations
+const obligations = await budgetService.getObligations(status || undefined);
+
+// Calculate totals
+const totalObligations = obligations.length;
+const pendingCount = obligations.filter(o => o.status === 'pending').length;
+const approvedCount = obligations.filter(o => o.status === 'approved').length;
+const rejectedCount = obligations.filter(o => o.status === 'rejected').length;
+const totalAmount = obligations.reduce((sum, obl) => sum + obl.amount, 0);
+---
+
+<MainLayout title="Registry of Obligations">
+  <div class="container-fluid py-6">
+    <!-- Page Header -->
+    <div class="page-header flex items-center justify-between">
+      <div>
+        <h1 class="page-title">Registry of Obligations</h1>
+        <p class="page-description">Manage budget obligations and ORS/BURS tracking</p>
+      </div>
+      <a href="/budget/obligations/create" class="btn btn-primary btn-md">
+        <i class="pi pi-plus mr-2"></i>
+        New Obligation
+      </a>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+      <div class="card">
+        <div class="card-body">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm text-gray-600 mb-1">Total Obligations</p>
+              <p class="text-2xl font-bold text-gray-900">{totalObligations}</p>
+            </div>
+            <div class="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+              <i class="pi pi-file text-blue-600 text-xl"></i>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-body">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm text-gray-600 mb-1">Pending</p>
+              <p class="text-2xl font-bold text-yellow-600">{pendingCount}</p>
+            </div>
+            <div class="w-12 h-12 bg-yellow-100 rounded-lg flex items-center justify-center">
+              <i class="pi pi-clock text-yellow-600 text-xl"></i>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-body">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm text-gray-600 mb-1">Approved</p>
+              <p class="text-2xl font-bold text-green-600">{approvedCount}</p>
+            </div>
+            <div class="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
+              <i class="pi pi-check-circle text-green-600 text-xl"></i>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-body">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm text-gray-600 mb-1">Total Amount</p>
+              <p class="text-xl font-bold text-primary-600">
+                ₱{totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </p>
+            </div>
+            <div class="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
+              <i class="pi pi-wallet text-purple-600 text-xl"></i>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="card mb-6">
+      <div class="card-body">
+        <form method="GET" class="flex items-end gap-4">
+          <div class="form-group mb-0">
+            <label for="status" class="form-label">Status</label>
+            <select name="status" id="status" class="form-select w-48" onchange="this.form.submit()">
+              <option value="">All Status</option>
+              <option value="pending" selected={status === 'pending'}>Pending</option>
+              <option value="approved" selected={status === 'approved'}>Approved</option>
+              <option value="rejected" selected={status === 'rejected'}>Rejected</option>
+            </select>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Obligations Table -->
+    <div class="card">
+      <div class="card-body">
+        {obligations.length === 0 ? (
+          <div class="text-center py-12">
+            <i class="pi pi-inbox text-4xl text-gray-400 mb-4"></i>
+            <p class="text-gray-500 mb-4">No obligations found</p>
+            <a href="/budget/obligations/create" class="btn btn-primary btn-md">
+              <i class="pi pi-plus mr-2"></i>
+              Create First Obligation
+            </a>
+          </div>
+        ) : (
+          <div class="overflow-x-auto">
+            <table class="table table-hover">
+              <thead>
+                <tr>
+                  <th>ORS/BURS Number</th>
+                  <th>Payee</th>
+                  <th>Fund Cluster</th>
+                  <th>Object of Expenditure</th>
+                  <th class="text-right">Amount</th>
+                  <th>Date</th>
+                  <th>Status</th>
+                  <th class="text-center">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {obligations.map(obligation => (
+                  <tr>
+                    <td>
+                      <div class="text-sm">
+                        {obligation.orsNumber && (
+                          <div class="font-medium text-gray-900">
+                            ORS: {obligation.orsNumber}
+                          </div>
+                        )}
+                        {obligation.bursNumber && (
+                          <div class="text-xs text-gray-600">
+                            BURS: {obligation.bursNumber}
+                          </div>
+                        )}
+                        {!obligation.orsNumber && !obligation.bursNumber && (
+                          <span class="text-xs text-gray-400">Not assigned</span>
+                        )}
+                      </div>
+                    </td>
+                    <td>
+                      <div>
+                        <div class="font-medium text-gray-900">{obligation.payee}</div>
+                        <div class="text-xs text-gray-500 truncate max-w-xs">
+                          {obligation.particulars}
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      <span class="text-sm">
+                        {obligation.allotment.appropriation.fundCluster.code}
+                      </span>
+                    </td>
+                    <td>
+                      <div class="text-sm">
+                        <div class="font-medium">{obligation.allotment.objectOfExpenditure.code}</div>
+                        <div class="text-xs text-gray-500">
+                          {obligation.allotment.objectOfExpenditure.name}
+                        </div>
+                      </div>
+                    </td>
+                    <td class="text-right font-medium">
+                      ₱{obligation.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                    </td>
+                    <td class="text-sm text-gray-600">
+                      {new Date(obligation.obligationDate).toLocaleDateString('en-PH')}
+                    </td>
+                    <td>
+                      {obligation.status === 'pending' && (
+                        <span class="status-pending">Pending</span>
+                      )}
+                      {obligation.status === 'approved' && (
+                        <span class="status-approved">Approved</span>
+                      )}
+                      {obligation.status === 'rejected' && (
+                        <span class="status-rejected">Rejected</span>
+                      )}
+                    </td>
+                    <td class="text-center">
+                      <div class="flex items-center justify-center gap-2">
+                        <a
+                          href={`/budget/obligations/${obligation.id}`}
+                          class="text-blue-600 hover:text-blue-800"
+                          title="View Details"
+                        >
+                          <i class="pi pi-eye"></i>
+                        </a>
+                        {obligation.status === 'pending' && (
+                          <button
+                            class="text-green-600 hover:text-green-800"
+                            title="Approve"
+                            onclick={`approveObligation(${obligation.id})`}
+                          >
+                            <i class="pi pi-check"></i>
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  </div>
+
+  <script>
+    (window as any).approveObligation = async (id: number) => {
+      if (!confirm('Are you sure you want to approve this obligation?')) {
+        return;
+      }
+
+      try {
+        const response = await fetch(`/api/budget/obligations/${id}/approve`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          }
+        });
+
+        if (response.ok) {
+          window.location.reload();
+        } else {
+          const error = await response.json();
+          alert('Error: ' + (error.message || 'Failed to approve obligation'));
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        alert('An error occurred. Please try again.');
+      }
+    };
+  </script>
+</MainLayout>
