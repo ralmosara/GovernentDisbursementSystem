@@ -1,0 +1,140 @@
+---
+import MainLayout from '../../../components/layout/MainLayout.astro';
+import { budgetService } from '../../../lib/services/budget.service';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+// Get current year
+const currentYear = new Date().getFullYear();
+const year = parseInt(Astro.url.searchParams.get('year') || currentYear.toString());
+
+// Get appropriations
+const appropriations = await budgetService.getAppropriations(year);
+
+// Calculate total appropriation
+const totalAppropriation = appropriations.reduce((sum, app) => sum + app.amount, 0);
+---
+
+<MainLayout title="Registry of Appropriations">
+  <div class="container-fluid py-6">
+    <!-- Page Header -->
+    <div class="page-header flex items-center justify-between">
+      <div>
+        <h1 class="page-title">Registry of Appropriations</h1>
+        <p class="page-description">Manage budget appropriations and authorizations</p>
+      </div>
+      <a href="/budget/appropriations/create" class="btn btn-primary btn-md">
+        <i class="pi pi-plus mr-2"></i>
+        New Appropriation
+      </a>
+    </div>
+
+    <!-- Filters -->
+    <div class="card mb-6">
+      <div class="card-body">
+        <form method="GET" class="flex items-end gap-4">
+          <div class="form-group mb-0">
+            <label for="year" class="form-label">Fiscal Year</label>
+            <select name="year" id="year" class="form-select w-48" onchange="this.form.submit()">
+              {[currentYear - 2, currentYear - 1, currentYear, currentYear + 1].map(y => (
+                <option value={y} selected={y === year}>{y}</option>
+              ))}
+            </select>
+          </div>
+          <div class="form-group mb-0">
+            <p class="text-sm text-gray-600">
+              Total Appropriation: <span class="font-semibold text-primary-600">
+                ₱{totalAppropriation.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+              </span>
+            </p>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Appropriations Table -->
+    <div class="card">
+      <div class="card-body">
+        {appropriations.length === 0 ? (
+          <div class="text-center py-12">
+            <i class="pi pi-inbox text-4xl text-gray-400 mb-4"></i>
+            <p class="text-gray-500 mb-4">No appropriations found for {year}</p>
+            <a href="/budget/appropriations/create" class="btn btn-primary btn-md">
+              <i class="pi pi-plus mr-2"></i>
+              Create First Appropriation
+            </a>
+          </div>
+        ) : (
+          <div class="overflow-x-auto">
+            <table class="table table-hover">
+              <thead>
+                <tr>
+                  <th>Reference</th>
+                  <th>Fund Cluster</th>
+                  <th>Description</th>
+                  <th class="text-right">Amount</th>
+                  <th>Year</th>
+                  <th>Date Created</th>
+                  <th class="text-center">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {appropriations.map(appropriation => (
+                  <tr>
+                    <td>
+                      <span class="font-medium text-gray-900">{appropriation.reference}</span>
+                    </td>
+                    <td>
+                      <div>
+                        <div class="font-medium text-gray-900">
+                          {appropriation.fundCluster.code}
+                        </div>
+                        <div class="text-xs text-gray-500">
+                          {appropriation.fundCluster.name}
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      <span class="text-sm text-gray-700">{appropriation.description}</span>
+                    </td>
+                    <td class="text-right font-medium">
+                      ₱{appropriation.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                    </td>
+                    <td>
+                      <span class="badge badge-primary">{appropriation.year}</span>
+                    </td>
+                    <td class="text-sm text-gray-600">
+                      {new Date(appropriation.createdAt).toLocaleDateString('en-PH')}
+                    </td>
+                    <td class="text-center">
+                      <div class="flex items-center justify-center gap-2">
+                        <a
+                          href={`/budget/appropriations/${appropriation.id}`}
+                          class="text-blue-600 hover:text-blue-800"
+                          title="View Details"
+                        >
+                          <i class="pi pi-eye"></i>
+                        </a>
+                        <a
+                          href={`/budget/allotments?appropriation=${appropriation.id}`}
+                          class="text-green-600 hover:text-green-800"
+                          title="View Allotments"
+                        >
+                          <i class="pi pi-list"></i>
+                        </a>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  </div>
+</MainLayout>

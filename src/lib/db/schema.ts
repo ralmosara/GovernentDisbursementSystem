@@ -1,0 +1,672 @@
+import { mysqlTable, varchar, text, int, decimal, datetime, boolean, json, mysqlEnum, timestamp, primaryKey } from 'drizzle-orm/mysql-core';
+import { relations } from 'drizzle-orm';
+
+// ============================================
+// 1. AUTHENTICATION & USER MANAGEMENT
+// ============================================
+
+export const users = mysqlTable('users', {
+  id: int('id').primaryKey().autoincrement(),
+  employeeNo: varchar('employee_no', { length: 50 }).unique().notNull(),
+  username: varchar('username', { length: 100 }).unique().notNull(),
+  email: varchar('email', { length: 255 }).unique().notNull(),
+  passwordHash: varchar('password_hash', { length: 255 }).notNull(),
+  firstName: varchar('first_name', { length: 100 }).notNull(),
+  lastName: varchar('last_name', { length: 100 }).notNull(),
+  middleName: varchar('middle_name', { length: 100 }),
+  position: varchar('position', { length: 100 }),
+  divisionOffice: varchar('division_office', { length: 100 }),
+  isActive: boolean('is_active').default(true),
+  lastLoginAt: datetime('last_login_at'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
+  deletedAt: datetime('deleted_at'),
+});
+
+export const roles = mysqlTable('roles', {
+  id: int('id').primaryKey().autoincrement(),
+  name: varchar('name', { length: 50 }).unique().notNull(),
+  displayName: varchar('display_name', { length: 100 }).notNull(),
+  description: text('description'),
+  permissions: json('permissions'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
+});
+
+export const userRoles = mysqlTable('user_roles', {
+  id: int('id').primaryKey().autoincrement(),
+  userId: int('user_id').notNull(),
+  roleId: int('role_id').notNull(),
+  assignedAt: timestamp('assigned_at').defaultNow(),
+  assignedBy: int('assigned_by'),
+}, (table) => ({
+  unique: [table.userId, table.roleId]
+}));
+
+export const sessions = mysqlTable('sessions', {
+  id: varchar('id', { length: 255 }).primaryKey(),
+  userId: int('user_id').notNull(),
+  expiresAt: datetime('expires_at').notNull(),
+  ipAddress: varchar('ip_address', { length: 45 }),
+  userAgent: text('user_agent'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+// ============================================
+// 2. FUND CLUSTERS & BUDGET STRUCTURE
+// ============================================
+
+export const fundClusters = mysqlTable('fund_clusters', {
+  id: int('id').primaryKey().autoincrement(),
+  code: varchar('code', { length: 10 }).unique().notNull(),
+  name: varchar('name', { length: 200 }).notNull(),
+  description: text('description'),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
+});
+
+export const mfoPap = mysqlTable('mfo_pap', {
+  id: int('id').primaryKey().autoincrement(),
+  code: varchar('code', { length: 50 }).unique().notNull(),
+  name: varchar('name', { length: 255 }).notNull(),
+  description: text('description'),
+  mfoCategory: mysqlEnum('mfo_category', [
+    'regulation_lgu_finance',
+    'policy_formulation',
+    'revenue_evaluation',
+    'special_projects',
+    'training'
+  ]).notNull(),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const objectOfExpenditure = mysqlTable('object_of_expenditure', {
+  id: int('id').primaryKey().autoincrement(),
+  code: varchar('code', { length: 50 }).unique().notNull(),
+  name: varchar('name', { length: 255 }).notNull(),
+  category: mysqlEnum('category', [
+    'personnel_services',
+    'mooe',
+    'financial_expenses',
+    'capital_outlays'
+  ]).notNull(),
+  parentId: int('parent_id'),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+// ============================================
+// 3. BUDGET MANAGEMENT
+// ============================================
+
+export const registryAppropriations = mysqlTable('registry_appropriations', {
+  id: int('id').primaryKey().autoincrement(),
+  fundClusterId: int('fund_cluster_id').notNull(),
+  fiscalYear: int('fiscal_year').notNull(),
+  appropriationAct: varchar('appropriation_act', { length: 100 }).notNull(),
+  totalAmount: decimal('total_amount', { precision: 15, scale: 2 }).notNull(),
+  remarks: text('remarks'),
+  createdBy: int('created_by').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
+});
+
+export const registryAllotments = mysqlTable('registry_allotments', {
+  id: int('id').primaryKey().autoincrement(),
+  appropriationId: int('appropriation_id').notNull(),
+  fundClusterId: int('fund_cluster_id').notNull(),
+  mfoPapId: int('mfo_pap_id'),
+  objectExpenditureId: int('object_expenditure_id').notNull(),
+  allotmentClass: varchar('allotment_class', { length: 100 }),
+  allotmentAmount: decimal('allotment_amount', { precision: 15, scale: 2 }).notNull(),
+  allotmentDate: datetime('allotment_date').notNull(),
+  allotmentReference: varchar('allotment_reference', { length: 100 }),
+  fiscalYear: int('fiscal_year').notNull(),
+  remarks: text('remarks'),
+  createdBy: int('created_by').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
+});
+
+export const registryObligations = mysqlTable('registry_obligations', {
+  id: int('id').primaryKey().autoincrement(),
+  allotmentId: int('allotment_id').notNull(),
+  fundClusterId: int('fund_cluster_id').notNull(),
+  orsBursNo: varchar('ors_burs_no', { length: 50 }).unique().notNull(),
+  obligationDate: datetime('obligation_date').notNull(),
+  payeeName: varchar('payee_name', { length: 255 }).notNull(),
+  particulars: text('particulars').notNull(),
+  objectExpenditureId: int('object_expenditure_id').notNull(),
+  obligationAmount: decimal('obligation_amount', { precision: 15, scale: 2 }).notNull(),
+  fiscalYear: int('fiscal_year').notNull(),
+  status: mysqlEnum('status', ['pending', 'approved', 'cancelled']).default('pending'),
+  createdBy: int('created_by').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
+});
+
+// ============================================
+// 4. DISBURSEMENT VOUCHERS
+// ============================================
+
+export const disbursementVouchers = mysqlTable('disbursement_vouchers', {
+  id: int('id').primaryKey().autoincrement(),
+  dvNo: varchar('dv_no', { length: 50 }).unique().notNull(),
+  fundClusterId: int('fund_cluster_id').notNull(),
+  orsBursNo: varchar('ors_burs_no', { length: 50 }).notNull(),
+  dvDate: datetime('dv_date').notNull(),
+  fiscalYear: int('fiscal_year').notNull(),
+
+  // Payee Information
+  payeeName: varchar('payee_name', { length: 255 }).notNull(),
+  payeeTin: varchar('payee_tin', { length: 50 }),
+  payeeAddress: text('payee_address'),
+
+  // Transaction Details
+  particulars: text('particulars').notNull(),
+  responsibilityCenter: varchar('responsibility_center', { length: 100 }),
+  mfoPapId: int('mfo_pap_id'),
+  objectExpenditureId: int('object_expenditure_id').notNull(),
+  amount: decimal('amount', { precision: 15, scale: 2 }).notNull(),
+
+  // Payment Mode
+  paymentMode: mysqlEnum('payment_mode', ['mds_check', 'commercial_check', 'ada', 'other']).notNull(),
+
+  // Approval Workflow Status
+  status: mysqlEnum('status', [
+    'draft',
+    'pending_budget',
+    'pending_accounting',
+    'pending_director',
+    'approved',
+    'paid',
+    'rejected',
+    'cancelled'
+  ]).default('draft'),
+
+  // Certification Boxes
+  certBoxAUserId: int('cert_box_a_user_id'),
+  certBoxADate: datetime('cert_box_a_date'),
+  certBoxASignature: text('cert_box_a_signature'),
+
+  certBoxBAccountingEntry: json('cert_box_b_accounting_entry'),
+
+  certBoxCUserId: int('cert_box_c_user_id'),
+  certBoxCDate: datetime('cert_box_c_date'),
+  certBoxCCashAvailable: boolean('cert_box_c_cash_available'),
+  certBoxCSubjectToAda: boolean('cert_box_c_subject_to_ada'),
+
+  certBoxDUserId: int('cert_box_d_user_id'),
+  certBoxDDate: datetime('cert_box_d_date'),
+  certBoxDApproved: boolean('cert_box_d_approved'),
+
+  certBoxEPayeeSignature: text('cert_box_e_payee_signature'),
+  certBoxEReceiptDate: datetime('cert_box_e_receipt_date'),
+  certBoxECheckNo: varchar('cert_box_e_check_no', { length: 50 }),
+  certBoxEBankName: varchar('cert_box_e_bank_name', { length: 100 }),
+  certBoxEAccountNo: varchar('cert_box_e_account_no', { length: 50 }),
+  certBoxEOrNo: varchar('cert_box_e_or_no', { length: 50 }),
+  certBoxEOrDate: datetime('cert_box_e_or_date'),
+
+  // Journal Entry
+  jevNo: varchar('jev_no', { length: 50 }),
+  jevDate: datetime('jev_date'),
+
+  // Metadata
+  createdBy: int('created_by').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
+  deletedAt: datetime('deleted_at'),
+});
+
+// ============================================
+// 5. APPROVAL WORKFLOW
+// ============================================
+
+export const approvalWorkflows = mysqlTable('approval_workflows', {
+  id: int('id').primaryKey().autoincrement(),
+  dvId: int('dv_id').notNull(),
+  stage: mysqlEnum('stage', ['division', 'budget', 'accounting', 'director']).notNull(),
+  stageOrder: int('stage_order').notNull(),
+  approverRoleId: int('approver_role_id').notNull(),
+  approverUserId: int('approver_user_id'),
+  status: mysqlEnum('status', ['pending', 'approved', 'rejected', 'skipped']).default('pending'),
+  comments: text('comments'),
+  actionDate: datetime('action_date'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+// ============================================
+// 6. PAYMENTS (CHECKS & ADA)
+// ============================================
+
+export const payments = mysqlTable('payments', {
+  id: int('id').primaryKey().autoincrement(),
+  dvId: int('dv_id').notNull(),
+  paymentType: mysqlEnum('payment_type', ['check_mds', 'check_commercial', 'ada', 'cash']).notNull(),
+  paymentDate: datetime('payment_date').notNull(),
+  amount: decimal('amount', { precision: 15, scale: 2 }).notNull(),
+
+  // Check Details
+  checkNo: varchar('check_no', { length: 50 }),
+  bankName: varchar('bank_name', { length: 100 }),
+  bankAccountNo: varchar('bank_account_no', { length: 50 }),
+
+  // ADA Details
+  adaReference: varchar('ada_reference', { length: 100 }),
+  adaIssuedDate: datetime('ada_issued_date'),
+
+  // Payment Status
+  status: mysqlEnum('status', ['pending', 'issued', 'cleared', 'cancelled', 'stale']).default('pending'),
+  clearedDate: datetime('cleared_date'),
+
+  // Payee Receipt
+  receivedBy: varchar('received_by', { length: 255 }),
+  receivedDate: datetime('received_date'),
+  orNo: varchar('or_no', { length: 50 }),
+  orDate: datetime('or_date'),
+
+  remarks: text('remarks'),
+  createdBy: int('created_by').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
+});
+
+export const checkDisbursementRecords = mysqlTable('check_disbursement_records', {
+  id: int('id').primaryKey().autoincrement(),
+  paymentId: int('payment_id').notNull(),
+  fundClusterId: int('fund_cluster_id').notNull(),
+  recordDate: datetime('record_date').notNull(),
+  ncaBalance: decimal('nca_balance', { precision: 15, scale: 2 }),
+  bankBalance: decimal('bank_balance', { precision: 15, scale: 2 }),
+  createdBy: int('created_by').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+// ============================================
+// 7. TRAVEL MANAGEMENT
+// ============================================
+
+export const itineraryOfTravel = mysqlTable('itinerary_of_travel', {
+  id: int('id').primaryKey().autoincrement(),
+  iotNo: varchar('iot_no', { length: 50 }).unique().notNull(),
+  fundClusterId: int('fund_cluster_id').notNull(),
+  employeeId: int('employee_id').notNull(),
+
+  // Travel Details
+  purpose: text('purpose').notNull(),
+  departureDate: datetime('departure_date').notNull(),
+  returnDate: datetime('return_date').notNull(),
+  destination: varchar('destination', { length: 255 }).notNull(),
+
+  // Itinerary
+  itineraryBefore: json('itinerary_before'),
+  itineraryActual: json('itinerary_actual'),
+
+  // Financial
+  estimatedCost: decimal('estimated_cost', { precision: 15, scale: 2 }).notNull(),
+  cashAdvanceAmount: decimal('cash_advance_amount', { precision: 15, scale: 2 }),
+  dvId: int('dv_id'),
+
+  status: mysqlEnum('status', ['draft', 'pending_approval', 'approved', 'in_progress', 'completed', 'cancelled']).default('draft'),
+
+  approvedBy: int('approved_by'),
+  approvedDate: datetime('approved_date'),
+
+  createdBy: int('created_by').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
+});
+
+export const certificateTravelCompleted = mysqlTable('certificate_travel_completed', {
+  id: int('id').primaryKey().autoincrement(),
+  iotId: int('iot_id').notNull(),
+  ctcNo: varchar('ctc_no', { length: 50 }).unique().notNull(),
+
+  // Certification
+  travelCompleted: boolean('travel_completed').notNull(),
+  actualDepartureDate: datetime('actual_departure_date').notNull(),
+  actualReturnDate: datetime('actual_return_date').notNull(),
+  completionRemarks: text('completion_remarks'),
+
+  // Signatures
+  certifiedBy: int('certified_by').notNull(),
+  certifiedDate: datetime('certified_date').notNull(),
+  verifiedBy: int('verified_by'),
+  verifiedDate: datetime('verified_date'),
+
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
+});
+
+export const liquidationReports = mysqlTable('liquidation_reports', {
+  id: int('id').primaryKey().autoincrement(),
+  lrNo: varchar('lr_no', { length: 50 }).unique().notNull(),
+  iotId: int('iot_id').notNull(),
+  ctcId: int('ctc_id'),
+  fundClusterId: int('fund_cluster_id').notNull(),
+
+  // Cash Advance
+  cashAdvanceAmount: decimal('cash_advance_amount', { precision: 15, scale: 2 }).notNull(),
+  cashAdvanceDvId: int('cash_advance_dv_id'),
+
+  // Actual Expenses
+  totalExpenses: decimal('total_expenses', { precision: 15, scale: 2 }).notNull(),
+
+  // Balance
+  refundAmount: decimal('refund_amount', { precision: 15, scale: 2 }),
+  additionalClaim: decimal('additional_claim', { precision: 15, scale: 2 }),
+
+  status: mysqlEnum('status', ['draft', 'pending_review', 'approved', 'settled']).default('draft'),
+
+  submittedBy: int('submitted_by').notNull(),
+  submittedDate: datetime('submitted_date'),
+  reviewedBy: int('reviewed_by'),
+  reviewedDate: datetime('reviewed_date'),
+
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
+});
+
+export const liquidationExpenseItems = mysqlTable('liquidation_expense_items', {
+  id: int('id').primaryKey().autoincrement(),
+  lrId: int('lr_id').notNull(),
+  expenseDate: datetime('expense_date').notNull(),
+  expenseCategory: varchar('expense_category', { length: 100 }).notNull(),
+  description: text('description').notNull(),
+  amount: decimal('amount', { precision: 15, scale: 2 }).notNull(),
+  orInvoiceNo: varchar('or_invoice_no', { length: 100 }),
+  orInvoiceDate: datetime('or_invoice_date'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+// ============================================
+// 8. CASH MANAGEMENT
+// ============================================
+
+export const officialReceiptSeries = mysqlTable('official_receipt_series', {
+  id: int('id').primaryKey().autoincrement(),
+  seriesCode: varchar('series_code', { length: 20 }).unique().notNull(),
+  startNumber: int('start_number').notNull(),
+  endNumber: int('end_number').notNull(),
+  currentNumber: int('current_number').notNull(),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const cashReceipts = mysqlTable('cash_receipts', {
+  id: int('id').primaryKey().autoincrement(),
+  orNo: varchar('or_no', { length: 50 }).unique().notNull(),
+  orSeriesId: int('or_series_id').notNull(),
+  receiptDate: datetime('receipt_date').notNull(),
+  payorName: varchar('payor_name', { length: 255 }).notNull(),
+  amount: decimal('amount', { precision: 15, scale: 2 }).notNull(),
+  paymentMode: mysqlEnum('payment_mode', ['cash', 'check', 'online']).notNull(),
+  checkNo: varchar('check_no', { length: 50 }),
+  checkDate: datetime('check_date'),
+  checkBank: varchar('check_bank', { length: 100 }),
+  particulars: text('particulars').notNull(),
+  fundClusterId: int('fund_cluster_id').notNull(),
+  revenueSourceId: int('revenue_source_id'),
+  createdBy: int('created_by').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const bankAccounts = mysqlTable('bank_accounts', {
+  id: int('id').primaryKey().autoincrement(),
+  accountName: varchar('account_name', { length: 255 }).notNull(),
+  accountNumber: varchar('account_number', { length: 50 }).unique().notNull(),
+  bankName: varchar('bank_name', { length: 100 }).notNull(),
+  bankBranch: varchar('bank_branch', { length: 100 }),
+  accountType: mysqlEnum('account_type', ['checking', 'savings', 'current']).notNull(),
+  fundClusterId: int('fund_cluster_id'),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const bankDeposits = mysqlTable('bank_deposits', {
+  id: int('id').primaryKey().autoincrement(),
+  depositSlipNo: varchar('deposit_slip_no', { length: 50 }).unique().notNull(),
+  bankAccountId: int('bank_account_id').notNull(),
+  depositDate: datetime('deposit_date').notNull(),
+  totalAmount: decimal('total_amount', { precision: 15, scale: 2 }).notNull(),
+  depositedBy: varchar('deposited_by', { length: 255 }),
+  status: mysqlEnum('status', ['pending', 'confirmed', 'cancelled']).default('pending'),
+  createdBy: int('created_by').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const bankReconciliations = mysqlTable('bank_reconciliations', {
+  id: int('id').primaryKey().autoincrement(),
+  bankAccountId: int('bank_account_id').notNull(),
+  reconciliationDate: datetime('reconciliation_date').notNull(),
+  periodMonth: int('period_month').notNull(),
+  periodYear: int('period_year').notNull(),
+  bookBalance: decimal('book_balance', { precision: 15, scale: 2 }).notNull(),
+  bankBalance: decimal('bank_balance', { precision: 15, scale: 2 }).notNull(),
+  outstandingChecks: json('outstanding_checks'),
+  depositsInTransit: json('deposits_in_transit'),
+  bankCharges: decimal('bank_charges', { precision: 15, scale: 2 }),
+  bankInterest: decimal('bank_interest', { precision: 15, scale: 2 }),
+  adjustedBookBalance: decimal('adjusted_book_balance', { precision: 15, scale: 2 }),
+  adjustedBankBalance: decimal('adjusted_bank_balance', { precision: 15, scale: 2 }),
+  status: mysqlEnum('status', ['draft', 'completed']).default('draft'),
+  preparedBy: int('prepared_by').notNull(),
+  preparedDate: datetime('prepared_date').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+// ============================================
+// 9. REVENUE MANAGEMENT
+// ============================================
+
+export const revenueSources = mysqlTable('revenue_sources', {
+  id: int('id').primaryKey().autoincrement(),
+  code: varchar('code', { length: 50 }).unique().notNull(),
+  name: varchar('name', { length: 255 }).notNull(),
+  category: varchar('category', { length: 100 }).notNull(),
+  description: text('description'),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const revenueEntries = mysqlTable('revenue_entries', {
+  id: int('id').primaryKey().autoincrement(),
+  entryNo: varchar('entry_no', { length: 50 }).unique().notNull(),
+  revenueSourceId: int('revenue_source_id').notNull(),
+  fundClusterId: int('fund_cluster_id').notNull(),
+  entryDate: datetime('entry_date').notNull(),
+  amount: decimal('amount', { precision: 15, scale: 2 }).notNull(),
+  payorName: varchar('payor_name', { length: 255 }),
+  particulars: text('particulars'),
+  fiscalYear: int('fiscal_year').notNull(),
+  createdBy: int('created_by').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const accountsReceivable = mysqlTable('accounts_receivable', {
+  id: int('id').primaryKey().autoincrement(),
+  arNo: varchar('ar_no', { length: 50 }).unique().notNull(),
+  revenueSourceId: int('revenue_source_id').notNull(),
+  debtorName: varchar('debtor_name', { length: 255 }).notNull(),
+  invoiceNo: varchar('invoice_no', { length: 50 }),
+  invoiceDate: datetime('invoice_date').notNull(),
+  dueDate: datetime('due_date').notNull(),
+  amount: decimal('amount', { precision: 15, scale: 2 }).notNull(),
+  amountCollected: decimal('amount_collected', { precision: 15, scale: 2 }).default('0'),
+  balance: decimal('balance', { precision: 15, scale: 2 }).notNull(),
+  status: mysqlEnum('status', ['outstanding', 'partial', 'paid', 'written_off']).default('outstanding'),
+  createdBy: int('created_by').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
+});
+
+export const collections = mysqlTable('collections', {
+  id: int('id').primaryKey().autoincrement(),
+  collectionNo: varchar('collection_no', { length: 50 }).unique().notNull(),
+  arId: int('ar_id').notNull(),
+  orNo: varchar('or_no', { length: 50 }),
+  collectionDate: datetime('collection_date').notNull(),
+  amount: decimal('amount', { precision: 15, scale: 2 }).notNull(),
+  paymentMode: mysqlEnum('payment_mode', ['cash', 'check', 'online']).notNull(),
+  remarks: text('remarks'),
+  createdBy: int('created_by').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+// ============================================
+// 10. ASSET & PROPERTY MANAGEMENT
+// ============================================
+
+export const assetCategories = mysqlTable('asset_categories', {
+  id: int('id').primaryKey().autoincrement(),
+  code: varchar('code', { length: 50 }).unique().notNull(),
+  name: varchar('name', { length: 255 }).notNull(),
+  usefulLife: int('useful_life'),
+  depreciationMethod: mysqlEnum('depreciation_method', ['straight_line', 'declining_balance']),
+  capitalizationThreshold: decimal('capitalization_threshold', { precision: 15, scale: 2 }),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const fixedAssets = mysqlTable('fixed_assets', {
+  id: int('id').primaryKey().autoincrement(),
+  assetNo: varchar('asset_no', { length: 50 }).unique().notNull(),
+  assetCategoryId: int('asset_category_id').notNull(),
+  description: text('description').notNull(),
+  acquisitionDate: datetime('acquisition_date').notNull(),
+  acquisitionCost: decimal('acquisition_cost', { precision: 15, scale: 2 }).notNull(),
+  salvageValue: decimal('salvage_value', { length: 15 }).default('0'),
+  usefulLife: int('useful_life').notNull(),
+  location: varchar('location', { length: 255 }),
+  custodian: varchar('custodian', { length: 255 }),
+  serialNo: varchar('serial_no', { length: 100 }),
+  status: mysqlEnum('status', ['active', 'disposed', 'written_off']).default('active'),
+  createdBy: int('created_by').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
+});
+
+export const depreciationSchedule = mysqlTable('depreciation_schedule', {
+  id: int('id').primaryKey().autoincrement(),
+  assetId: int('asset_id').notNull(),
+  periodMonth: int('period_month').notNull(),
+  periodYear: int('period_year').notNull(),
+  depreciationAmount: decimal('depreciation_amount', { precision: 15, scale: 2 }).notNull(),
+  accumulatedDepreciation: decimal('accumulated_depreciation', { precision: 15, scale: 2 }).notNull(),
+  bookValue: decimal('book_value', { precision: 15, scale: 2 }).notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const inventoryItems = mysqlTable('inventory_items', {
+  id: int('id').primaryKey().autoincrement(),
+  itemCode: varchar('item_code', { length: 50 }).unique().notNull(),
+  itemName: varchar('item_name', { length: 255 }).notNull(),
+  description: text('description'),
+  unit: varchar('unit', { length: 50 }).notNull(),
+  unitCost: decimal('unit_cost', { precision: 15, scale: 2 }).notNull(),
+  quantityOnHand: int('quantity_on_hand').default(0),
+  minimumLevel: int('minimum_level').default(0),
+  maximumLevel: int('maximum_level'),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+// ============================================
+// 11. PAYROLL MANAGEMENT
+// ============================================
+
+export const employees = mysqlTable('employees', {
+  id: int('id').primaryKey().autoincrement(),
+  employeeNo: varchar('employee_no', { length: 50 }).unique().notNull(),
+  userId: int('user_id'),
+  firstName: varchar('first_name', { length: 100 }).notNull(),
+  lastName: varchar('last_name', { length: 100 }).notNull(),
+  middleName: varchar('middle_name', { length: 100 }),
+  position: varchar('position', { length: 100 }),
+  salaryGrade: varchar('salary_grade', { length: 20 }),
+  monthlySalary: decimal('monthly_salary', { precision: 15, scale: 2 }).notNull(),
+  gsisNo: varchar('gsis_no', { length: 50 }),
+  philHealthNo: varchar('philhealth_no', { length: 50 }),
+  pagibigNo: varchar('pagibig_no', { length: 50 }),
+  tin: varchar('tin', { length: 50 }),
+  bankAccountNo: varchar('bank_account_no', { length: 50 }),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
+});
+
+export const payrollPeriods = mysqlTable('payroll_periods', {
+  id: int('id').primaryKey().autoincrement(),
+  periodCode: varchar('period_code', { length: 20 }).unique().notNull(),
+  periodMonth: int('period_month').notNull(),
+  periodYear: int('period_year').notNull(),
+  startDate: datetime('start_date').notNull(),
+  endDate: datetime('end_date').notNull(),
+  payDate: datetime('pay_date').notNull(),
+  status: mysqlEnum('status', ['draft', 'processing', 'completed']).default('draft'),
+  createdBy: int('created_by').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const payrollTransactions = mysqlTable('payroll_transactions', {
+  id: int('id').primaryKey().autoincrement(),
+  payrollPeriodId: int('payroll_period_id').notNull(),
+  employeeId: int('employee_id').notNull(),
+  basicSalary: decimal('basic_salary', { precision: 15, scale: 2 }).notNull(),
+  gsisContribution: decimal('gsis_contribution', { precision: 15, scale: 2 }).default('0'),
+  philHealthContribution: decimal('philhealth_contribution', { precision: 15, scale: 2 }).default('0'),
+  pagibigContribution: decimal('pagibig_contribution', { precision: 15, scale: 2 }).default('0'),
+  withholdingTax: decimal('withholding_tax', { precision: 15, scale: 2 }).default('0'),
+  otherDeductions: decimal('other_deductions', { precision: 15, scale: 2 }).default('0'),
+  totalDeductions: decimal('total_deductions', { precision: 15, scale: 2 }).notNull(),
+  netPay: decimal('net_pay', { precision: 15, scale: 2 }).notNull(),
+  dvId: int('dv_id'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+// ============================================
+// 12. SUPPORTING TABLES
+// ============================================
+
+export const attachments = mysqlTable('attachments', {
+  id: int('id').primaryKey().autoincrement(),
+  attachableType: varchar('attachable_type', { length: 50 }).notNull(),
+  attachableId: int('attachable_id').notNull(),
+  fileName: varchar('file_name', { length: 255 }).notNull(),
+  fileOriginalName: varchar('file_original_name', { length: 255 }).notNull(),
+  filePath: varchar('file_path', { length: 500 }).notNull(),
+  fileSize: int('file_size').notNull(),
+  fileType: varchar('file_type', { length: 100 }).notNull(),
+  fileExtension: varchar('file_extension', { length: 10 }),
+  documentType: varchar('document_type', { length: 100 }),
+  description: text('description'),
+  uploadedBy: int('uploaded_by').notNull(),
+  uploadedAt: timestamp('uploaded_at').defaultNow(),
+});
+
+export const auditLogs = mysqlTable('audit_logs', {
+  id: int('id').primaryKey().autoincrement(),
+  userId: int('user_id'),
+  action: varchar('action', { length: 100 }).notNull(),
+  tableName: varchar('table_name', { length: 100 }).notNull(),
+  recordId: int('record_id').notNull(),
+  oldValues: json('old_values'),
+  newValues: json('new_values'),
+  ipAddress: varchar('ip_address', { length: 45 }),
+  userAgent: text('user_agent'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const systemSettings = mysqlTable('system_settings', {
+  id: int('id').primaryKey().autoincrement(),
+  settingKey: varchar('setting_key', { length: 100 }).unique().notNull(),
+  settingValue: text('setting_value'),
+  settingType: varchar('setting_type', { length: 50 }),
+  description: text('description'),
+  isEditable: boolean('is_editable').default(true),
+  updatedBy: int('updated_by'),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
+});

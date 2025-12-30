@@ -1,0 +1,11 @@
+---
+import { invalidateSession } from '../lib/auth/session';
+
+// Handle logout
+if (Astro.locals.session) {
+  await invalidateSession(Astro.locals.session.id, Astro.cookies);
+}
+
+// Redirect to login
+return Astro.redirect('/login');
+---

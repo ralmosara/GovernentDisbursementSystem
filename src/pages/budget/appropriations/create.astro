@@ -1,0 +1,167 @@
+---
+import MainLayout from '../../../components/layout/MainLayout.astro';
+import { db } from '../../../lib/db/connection';
+import { fundClusters } from '../../../lib/db/schema';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+// Get fund clusters for the dropdown
+const fundClustersList = await db.select().from(fundClusters);
+const currentYear = new Date().getFullYear();
+---
+
+<MainLayout title="Create Appropriation">
+  <div class="container-fluid py-6">
+    <!-- Page Header -->
+    <div class="page-header">
+      <div class="flex items-center gap-4 mb-2">
+        <a href="/budget/appropriations" class="text-gray-600 hover:text-gray-900">
+          <i class="pi pi-arrow-left"></i>
+        </a>
+        <h1 class="page-title">Create New Appropriation</h1>
+      </div>
+      <p class="page-description">Record a new budget appropriation authorization</p>
+    </div>
+
+    <!-- Form Card -->
+    <div class="card max-w-3xl">
+      <div class="card-body">
+        <form id="appropriation-form" method="POST" action="/api/budget/appropriations">
+          <div class="space-y-6">
+            <!-- Fund Cluster -->
+            <div class="form-group">
+              <label for="fundClusterId" class="form-label form-label-required">Fund Cluster</label>
+              <select name="fundClusterId" id="fundClusterId" class="form-select" required>
+                <option value="">Select Fund Cluster</option>
+                {fundClustersList.map(fc => (
+                  <option value={fc.id}>
+                    {fc.code} - {fc.name}
+                  </option>
+                ))}
+              </select>
+              <p class="form-help">Select the fund cluster for this appropriation</p>
+            </div>
+
+            <!-- Year -->
+            <div class="form-group">
+              <label for="year" class="form-label form-label-required">Fiscal Year</label>
+              <select name="year" id="year" class="form-select" required>
+                {[currentYear - 1, currentYear, currentYear + 1, currentYear + 2].map(y => (
+                  <option value={y} selected={y === currentYear}>{y}</option>
+                ))}
+              </select>
+            </div>
+
+            <!-- Reference -->
+            <div class="form-group">
+              <label for="reference" class="form-label form-label-required">Reference Number</label>
+              <input
+                type="text"
+                name="reference"
+                id="reference"
+                class="form-input"
+                placeholder="e.g., GAA 2024, RA 11111"
+                required
+              />
+              <p class="form-help">Enter the legal reference (e.g., GAA, Special Appropriation Act)</p>
+            </div>
+
+            <!-- Description -->
+            <div class="form-group">
+              <label for="description" class="form-label form-label-required">Description</label>
+              <textarea
+                name="description"
+                id="description"
+                rows="3"
+                class="form-textarea"
+                placeholder="Describe the appropriation..."
+                required
+              ></textarea>
+            </div>
+
+            <!-- Amount -->
+            <div class="form-group">
+              <label for="amount" class="form-label form-label-required">Amount</label>
+              <div class="relative">
+                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">₱</span>
+                <input
+                  type="number"
+                  name="amount"
+                  id="amount"
+                  class="form-input pl-8"
+                  step="0.01"
+                  min="0"
+                  placeholder="0.00"
+                  required
+                />
+              </div>
+              <p class="form-help">Enter the total appropriation amount</p>
+            </div>
+          </div>
+
+          <!-- Form Actions -->
+          <div class="divider"></div>
+          <div class="flex items-center justify-end gap-3">
+            <a href="/budget/appropriations" class="btn btn-secondary btn-md">
+              Cancel
+            </a>
+            <button type="submit" class="btn btn-primary btn-md" id="submit-btn">
+              <i class="pi pi-check mr-2"></i>
+              Create Appropriation
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('appropriation-form') as HTMLFormElement;
+    const submitBtn = document.getElementById('submit-btn') as HTMLButtonElement;
+
+    form?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      // Disable submit button
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<i class="pi pi-spin pi-spinner mr-2"></i> Creating...';
+
+      try {
+        const formData = new FormData(form);
+        const data = {
+          fundClusterId: parseInt(formData.get('fundClusterId') as string),
+          year: parseInt(formData.get('year') as string),
+          reference: formData.get('reference') as string,
+          description: formData.get('description') as string,
+          amount: parseFloat(formData.get('amount') as string)
+        };
+
+        const response = await fetch('/api/budget/appropriations', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(data)
+        });
+
+        if (response.ok) {
+          window.location.href = '/budget/appropriations';
+        } else {
+          const error = await response.json();
+          alert('Error: ' + (error.message || 'Failed to create appropriation'));
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = '<i class="pi pi-check mr-2"></i> Create Appropriation';
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        alert('An error occurred. Please try again.');
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<i class="pi pi-check mr-2"></i> Create Appropriation';
+      }
+    });
+  </script>
+</MainLayout>

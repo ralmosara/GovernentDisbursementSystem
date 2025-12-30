@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(powershell -Command:*)",
+      "Bash(npm create:*)",
+      "Bash(xcopy:*)",
+      "Bash(npm install)",
+      "Bash(npm run db:generate:*)",
+      "Bash(npm run dev:*)",
+      "Bash(mysql:*)",
+      "Bash(npm install:*)"
+    ]
+  }
+}

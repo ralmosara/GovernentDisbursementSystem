@@ -1,0 +1,103 @@
+---
+// Header component for the main layout
+// Will display user info and navigation actions
+
+const user = Astro.locals.user;
+const displayName = user ? `${user.firstName} ${user.lastName}` : 'Guest';
+const userInitials = user ? `${user.firstName[0]}${user.lastName[0]}` : 'G';
+---
+
+<header class="bg-white border-b border-gray-200 shadow-sm">
+  <div class="px-6 py-4">
+    <div class="flex items-center justify-between">
+      <!-- Page Title Area -->
+      <div class="flex items-center space-x-4">
+        <h1 class="text-xl font-semibold text-gray-900">
+          Philippine Government FMS
+        </h1>
+      </div>
+
+      <!-- User Menu Area -->
+      <div class="flex items-center space-x-4">
+        <!-- Notifications -->
+        <button
+          type="button"
+          class="relative p-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-md transition-colors"
+          aria-label="Notifications"
+        >
+          <i class="pi pi-bell text-xl"></i>
+          <span class="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full"></span>
+        </button>
+
+        <!-- User Menu -->
+        <div class="relative">
+          <button
+            type="button"
+            class="flex items-center space-x-3 p-2 text-gray-700 hover:bg-gray-100 rounded-md transition-colors"
+            id="user-menu-button"
+            aria-expanded="false"
+            aria-haspopup="true"
+          >
+            <div class="flex items-center justify-center w-8 h-8 bg-primary-600 text-white rounded-full text-xs font-semibold">
+              {userInitials}
+            </div>
+            <div class="text-left hidden md:block">
+              <p class="text-sm font-medium">{displayName}</p>
+              <p class="text-xs text-gray-500">@{user?.username}</p>
+            </div>
+            <i class="pi pi-chevron-down text-xs hidden md:block"></i>
+          </button>
+
+          <!-- Dropdown Menu (hidden by default, will be toggled with Vue) -->
+          <div
+            class="hidden absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg border border-gray-200 z-10"
+            id="user-menu-dropdown"
+          >
+            <div class="py-1">
+              <a
+                href="/profile"
+                class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+              >
+                <i class="pi pi-user mr-2"></i>
+                Profile
+              </a>
+              <a
+                href="/settings"
+                class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+              >
+                <i class="pi pi-cog mr-2"></i>
+                Settings
+              </a>
+              <hr class="my-1 border-gray-200" />
+              <a
+                href="/logout"
+                class="block px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors"
+              >
+                <i class="pi pi-sign-out mr-2"></i>
+                Logout
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<script>
+  // Simple dropdown toggle (will be enhanced with Vue later)
+  const userMenuButton = document.getElementById('user-menu-button');
+  const userMenuDropdown = document.getElementById('user-menu-dropdown');
+
+  userMenuButton?.addEventListener('click', () => {
+    userMenuDropdown?.classList.toggle('hidden');
+  });
+
+  // Close dropdown when clicking outside
+  document.addEventListener('click', (event) => {
+    const target = event.target as HTMLElement;
+    if (!userMenuButton?.contains(target) && !userMenuDropdown?.contains(target)) {
+      userMenuDropdown?.classList.add('hidden');
+    }
+  });
+</script>
