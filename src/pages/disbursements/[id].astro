@@ -1,0 +1,442 @@
+---
+import MainLayout from '../../layouts/MainLayout.astro';
+import { disbursementService } from '../../lib/services/disbursement.service';
+import { approvalService } from '../../lib/services/approval.service';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+const { id } = Astro.params;
+
+if (!id || isNaN(parseInt(id))) {
+  return Astro.redirect('/disbursements');
+}
+
+// Get DV details
+const dv = await disbursementService.getDVById(parseInt(id));
+
+if (!dv) {
+  return Astro.redirect('/disbursements');
+}
+
+// Get approval workflow history
+const approvalHistory = await approvalService.getApprovalHistory(parseInt(id));
+
+// Get current pending stage
+const currentStage = await approvalService.getCurrentStage(parseInt(id));
+
+// Format date
+const formatDate = (date: Date | string | null) => {
+  if (!date) return 'N/A';
+  const d = typeof date === 'string' ? new Date(date) : date;
+  return d.toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' });
+};
+
+const formatDateTime = (date: Date | string | null) => {
+  if (!date) return 'N/A';
+  const d = typeof date === 'string' ? new Date(date) : date;
+  return d.toLocaleString('en-PH', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+};
+
+// Status badge helper
+const getStatusBadge = (status: string) => {
+  switch (status) {
+    case 'draft':
+      return 'badge-secondary';
+    case 'pending_budget':
+    case 'pending_accounting':
+    case 'pending_director':
+      return 'badge-warning';
+    case 'approved':
+      return 'badge-success';
+    case 'paid':
+      return 'badge-primary';
+    case 'rejected':
+      return 'badge-danger';
+    case 'cancelled':
+      return 'badge-dark';
+    default:
+      return 'badge-secondary';
+  }
+};
+
+const getStatusLabel = (status: string) => {
+  const labels: Record<string, string> = {
+    draft: 'Draft',
+    pending_budget: 'Pending Budget',
+    pending_accounting: 'Pending Accounting',
+    pending_director: 'Pending Director',
+    approved: 'Approved',
+    paid: 'Paid',
+    rejected: 'Rejected',
+    cancelled: 'Cancelled',
+  };
+  return labels[status] || status;
+};
+
+const getWorkflowStatusBadge = (status: string) => {
+  switch (status) {
+    case 'pending':
+      return 'badge-warning';
+    case 'approved':
+      return 'badge-success';
+    case 'rejected':
+      return 'badge-danger';
+    case 'skipped':
+      return 'badge-secondary';
+    default:
+      return 'badge-secondary';
+  }
+};
+---
+
+<MainLayout title={`DV ${dv.dvNo}`}>
+  <div class="container-fluid py-6">
+    <!-- Page Header -->
+    <div class="page-header">
+      <div class="flex items-center gap-4 mb-2">
+        <a href="/disbursements" class="text-gray-600 hover:text-gray-900">
+          <i class="pi pi-arrow-left"></i>
+        </a>
+        <h1 class="page-title">Disbursement Voucher: {dv.dvNo}</h1>
+      </div>
+      <div class="flex items-center justify-between">
+        <p class="page-description">View and manage disbursement voucher details</p>
+        <div class="flex items-center gap-3">
+          <span class={`badge ${getStatusBadge(dv.status)}`}>
+            {getStatusLabel(dv.status)}
+          </span>
+          {dv.status === 'approved' && (
+            <a href={`/disbursements/${id}/print`} target="_blank" class="btn btn-secondary btn-sm">
+              <i class="pi pi-print mr-2"></i>
+              Print DV
+            </a>
+          )}
+        </div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- Main Content -->
+      <div class="lg:col-span-2 space-y-6">
+        <!-- Basic Information -->
+        <div class="card">
+          <div class="card-header">
+            <h3 class="text-lg font-semibold text-gray-900">Basic Information</h3>
+          </div>
+          <div class="card-body">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <label class="block text-sm font-medium text-gray-500 mb-1">DV Number</label>
+                <p class="text-lg font-bold text-primary-600">{dv.dvNo}</p>
+              </div>
+
+              <div>
+                <label class="block text-sm font-medium text-gray-500 mb-1">DV Date</label>
+                <p class="text-base text-gray-900">{formatDate(dv.dvDate)}</p>
+              </div>
+
+              <div>
+                <label class="block text-sm font-medium text-gray-500 mb-1">Fiscal Year</label>
+                <p class="text-base text-gray-900">{dv.fiscalYear}</p>
+              </div>
+
+              <div>
+                <label class="block text-sm font-medium text-gray-500 mb-1">ORS/BURS Number</label>
+                <p class="text-base text-gray-900">{dv.orsBursNo}</p>
+              </div>
+
+              <div>
+                <label class="block text-sm font-medium text-gray-500 mb-1">Fund Cluster</label>
+                <p class="text-base text-gray-900">
+                  {dv.fundCluster ? `${dv.fundCluster.code} - ${dv.fundCluster.name}` : 'N/A'}
+                </p>
+              </div>
+
+              <div>
+                <label class="block text-sm font-medium text-gray-500 mb-1">Payment Mode</label>
+                <p class="text-base text-gray-900 uppercase">{dv.paymentMode.replace('_', ' ')}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Payee Information -->
+        <div class="card">
+          <div class="card-header">
+            <h3 class="text-lg font-semibold text-gray-900">Payee Information</h3>
+          </div>
+          <div class="card-body">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div class="md:col-span-2">
+                <label class="block text-sm font-medium text-gray-500 mb-1">Payee Name</label>
+                <p class="text-lg font-semibold text-gray-900">{dv.payeeName}</p>
+              </div>
+
+              <div>
+                <label class="block text-sm font-medium text-gray-500 mb-1">TIN</label>
+                <p class="text-base text-gray-900">{dv.payeeTin || 'N/A'}</p>
+              </div>
+
+              <div>
+                <label class="block text-sm font-medium text-gray-500 mb-1">Address</label>
+                <p class="text-base text-gray-900">{dv.payeeAddress || 'N/A'}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Transaction Details -->
+        <div class="card">
+          <div class="card-header">
+            <h3 class="text-lg font-semibold text-gray-900">Transaction Details</h3>
+          </div>
+          <div class="card-body">
+            <div class="space-y-6">
+              <div>
+                <label class="block text-sm font-medium text-gray-500 mb-1">Particulars</label>
+                <p class="text-base text-gray-900 whitespace-pre-wrap">{dv.particulars}</p>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label class="block text-sm font-medium text-gray-500 mb-1">Object of Expenditure</label>
+                  <p class="text-base text-gray-900">
+                    {dv.objectOfExpenditure ? `${dv.objectOfExpenditure.code} - ${dv.objectOfExpenditure.name}` : 'N/A'}
+                  </p>
+                </div>
+
+                <div>
+                  <label class="block text-sm font-medium text-gray-500 mb-1">Amount</label>
+                  <p class="text-2xl font-bold text-primary-600">
+                    ₱{parseFloat(dv.amount.toString()).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                  </p>
+                </div>
+
+                {dv.responsibilityCenter && (
+                  <div>
+                    <label class="block text-sm font-medium text-gray-500 mb-1">Responsibility Center</label>
+                    <p class="text-base text-gray-900">{dv.responsibilityCenter}</p>
+                  </div>
+                )}
+
+                {dv.mfoPap && (
+                  <div>
+                    <label class="block text-sm font-medium text-gray-500 mb-1">MFO/PAP</label>
+                    <p class="text-base text-gray-900">
+                      {dv.mfoPap.code} - {dv.mfoPap.description}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Approval Workflow History -->
+        <div class="card">
+          <div class="card-header">
+            <h3 class="text-lg font-semibold text-gray-900">Approval Workflow</h3>
+          </div>
+          <div class="card-body">
+            <div class="space-y-4">
+              {approvalHistory.map((workflow, index) => (
+                <div class="flex items-start gap-4">
+                  <div class="flex-shrink-0">
+                    <div class={`w-10 h-10 rounded-full flex items-center justify-center ${
+                      workflow.status === 'approved' ? 'bg-green-100 text-green-600' :
+                      workflow.status === 'rejected' ? 'bg-red-100 text-red-600' :
+                      workflow.status === 'pending' ? 'bg-yellow-100 text-yellow-600' :
+                      'bg-gray-100 text-gray-400'
+                    }`}>
+                      {workflow.status === 'approved' && <i class="pi pi-check"></i>}
+                      {workflow.status === 'rejected' && <i class="pi pi-times"></i>}
+                      {workflow.status === 'pending' && <i class="pi pi-clock"></i>}
+                      {workflow.status === 'skipped' && <i class="pi pi-minus"></i>}
+                    </div>
+                  </div>
+
+                  <div class="flex-1 min-w-0">
+                    <div class="flex items-center justify-between mb-1">
+                      <p class="text-sm font-semibold text-gray-900 capitalize">
+                        {workflow.stage} Approval
+                      </p>
+                      <span class={`badge ${getWorkflowStatusBadge(workflow.status)}`}>
+                        {workflow.status.toUpperCase()}
+                      </span>
+                    </div>
+
+                    {workflow.approverUserId && (
+                      <p class="text-sm text-gray-500">
+                        {workflow.status === 'approved' ? 'Approved' : 'Rejected'} on {formatDateTime(workflow.actionDate)}
+                      </p>
+                    )}
+
+                    {workflow.comments && (
+                      <p class="text-sm text-gray-700 mt-2 p-3 bg-gray-50 rounded-md">
+                        <i class="pi pi-comment mr-2"></i>
+                        {workflow.comments}
+                      </p>
+                    )}
+                  </div>
+
+                  {index < approvalHistory.length - 1 && (
+                    <div class="absolute left-5 top-14 w-0.5 h-full bg-gray-200"></div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Sidebar -->
+      <div class="space-y-6">
+        <!-- Approval Actions -->
+        {currentStage && currentStage.status === 'pending' && (
+          <div class="card">
+            <div class="card-header">
+              <h3 class="text-lg font-semibold text-gray-900">Approval Actions</h3>
+            </div>
+            <div class="card-body">
+              <p class="text-sm text-gray-600 mb-4">
+                Current Stage: <span class="font-semibold capitalize">{currentStage.stage}</span>
+              </p>
+
+              <div class="space-y-3">
+                <button
+                  type="button"
+                  class="btn btn-success btn-md w-full"
+                  id="approve-btn"
+                >
+                  <i class="pi pi-check mr-2"></i>
+                  Approve
+                </button>
+
+                <button
+                  type="button"
+                  class="btn btn-danger btn-md w-full"
+                  id="reject-btn"
+                >
+                  <i class="pi pi-times mr-2"></i>
+                  Reject
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <!-- DV Metadata -->
+        <div class="card">
+          <div class="card-header">
+            <h3 class="text-lg font-semibold text-gray-900">Record Information</h3>
+          </div>
+          <div class="card-body">
+            <div class="space-y-3">
+              <div>
+                <label class="block text-sm font-medium text-gray-500 mb-1">Created At</label>
+                <p class="text-sm text-gray-900">{formatDateTime(dv.createdAt)}</p>
+              </div>
+
+              {dv.updatedAt && (
+                <div>
+                  <label class="block text-sm font-medium text-gray-500 mb-1">Updated At</label>
+                  <p class="text-sm text-gray-900">{formatDateTime(dv.updatedAt)}</p>
+                </div>
+              )}
+
+              {dv.jevNo && (
+                <div>
+                  <label class="block text-sm font-medium text-gray-500 mb-1">JEV Number</label>
+                  <p class="text-sm text-gray-900">{dv.jevNo}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script define:vars={{ dvId: parseInt(id) }}>
+    const approveBtn = document.getElementById('approve-btn');
+    const rejectBtn = document.getElementById('reject-btn');
+
+    // Approve DV
+    approveBtn?.addEventListener('click', async () => {
+      const comments = prompt('Optional comments for this approval:');
+
+      approveBtn.disabled = true;
+      approveBtn.innerHTML = '<i class="pi pi-spin pi-spinner mr-2"></i> Approving...';
+
+      try {
+        const response = await fetch(`/api/disbursements/${dvId}/approve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ comments })
+        });
+
+        if (response.ok) {
+          const result = await response.json();
+          alert(result.message);
+          window.location.reload();
+        } else {
+          const error = await response.json();
+          alert('Error: ' + (error.message || 'Failed to approve DV'));
+          approveBtn.disabled = false;
+          approveBtn.innerHTML = '<i class="pi pi-check mr-2"></i> Approve';
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        alert('An error occurred. Please try again.');
+        approveBtn.disabled = false;
+        approveBtn.innerHTML = '<i class="pi pi-check mr-2"></i> Approve';
+      }
+    });
+
+    // Reject DV
+    rejectBtn?.addEventListener('click', async () => {
+      const comments = prompt('Please enter reason for rejection (required):');
+      if (!comments) {
+        alert('Rejection reason is required');
+        return;
+      }
+
+      rejectBtn.disabled = true;
+      rejectBtn.innerHTML = '<i class="pi pi-spin pi-spinner mr-2"></i> Rejecting...';
+
+      try {
+        const response = await fetch(`/api/disbursements/${dvId}/reject`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ comments })
+        });
+
+        if (response.ok) {
+          const result = await response.json();
+          alert(result.message);
+          window.location.reload();
+        } else {
+          const error = await response.json();
+          alert('Error: ' + (error.message || 'Failed to reject DV'));
+          rejectBtn.disabled = false;
+          rejectBtn.innerHTML = '<i class="pi pi-times mr-2"></i> Reject';
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        alert('An error occurred. Please try again.');
+        rejectBtn.disabled = false;
+        rejectBtn.innerHTML = '<i class="pi pi-times mr-2"></i> Reject';
+      }
+    });
+  </script>
+</MainLayout>

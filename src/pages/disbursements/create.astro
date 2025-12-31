@@ -1,0 +1,374 @@
+---
+import MainLayout from '../../layouts/MainLayout.astro';
+import { db } from '../../lib/db/connection';
+import { fundClusters, objectOfExpenditure, mfoPap } from '../../lib/db/schema';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+// Get current fiscal year
+const currentYear = new Date().getFullYear();
+
+// Get fund clusters
+const fundClustersList = await db.select().from(fundClusters);
+
+// Get object of expenditure
+const objectOfExpenditureList = await db.select().from(objectOfExpenditure);
+
+// Get MFO/PAP
+const mfoPapList = await db.select().from(mfoPap);
+---
+
+<MainLayout title="Create Disbursement Voucher">
+  <div class="container-fluid py-6">
+    <!-- Page Header -->
+    <div class="page-header">
+      <div class="flex items-center gap-4 mb-2">
+        <a href="/disbursements" class="text-gray-600 hover:text-gray-900">
+          <i class="pi pi-arrow-left"></i>
+        </a>
+        <h1 class="page-title">Create Disbursement Voucher</h1>
+      </div>
+      <p class="page-description">Create a new disbursement voucher for payment processing</p>
+    </div>
+
+    <!-- DV Form -->
+    <div class="card max-w-5xl">
+      <div class="card-body">
+        <form id="dv-form" method="POST" action="/api/disbursements">
+          <div class="space-y-8">
+            <!-- Basic Information -->
+            <div>
+              <h3 class="text-lg font-semibold text-gray-900 mb-4 pb-2 border-b border-gray-200">
+                Basic Information
+              </h3>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Fund Cluster -->
+                <div class="form-group">
+                  <label for="fundClusterId" class="form-label form-label-required">Fund Cluster</label>
+                  <select name="fundClusterId" id="fundClusterId" class="form-select" required>
+                    <option value="">Select Fund Cluster</option>
+                    {fundClustersList.map(fc => (
+                      <option value={fc.id}>{fc.code} - {fc.name}</option>
+                    ))}
+                  </select>
+                  <p class="form-help">Select the fund cluster for this disbursement</p>
+                </div>
+
+                <!-- ORS/BURS Number -->
+                <div class="form-group">
+                  <label for="orsBursNo" class="form-label form-label-required">ORS/BURS Number</label>
+                  <input
+                    type="text"
+                    name="orsBursNo"
+                    id="orsBursNo"
+                    class="form-input"
+                    placeholder="e.g., 2024-001-0123"
+                    required
+                  />
+                  <p class="form-help">Obligation Request and Status / Budget Utilization Request and Status</p>
+                </div>
+
+                <!-- Fiscal Year -->
+                <div class="form-group">
+                  <label for="fiscalYear" class="form-label form-label-required">Fiscal Year</label>
+                  <input
+                    type="number"
+                    name="fiscalYear"
+                    id="fiscalYear"
+                    class="form-input"
+                    value={currentYear}
+                    min="2020"
+                    max="2099"
+                    required
+                  />
+                </div>
+
+                <!-- Payment Mode -->
+                <div class="form-group">
+                  <label for="paymentMode" class="form-label form-label-required">Payment Mode</label>
+                  <select name="paymentMode" id="paymentMode" class="form-select" required>
+                    <option value="">Select Payment Mode</option>
+                    <option value="mds_check">MDS Check</option>
+                    <option value="commercial_check">Commercial Check</option>
+                    <option value="ada">ADA (Advice to Debit Account)</option>
+                    <option value="other">Other</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <!-- Payee Information -->
+            <div>
+              <h3 class="text-lg font-semibold text-gray-900 mb-4 pb-2 border-b border-gray-200">
+                Payee Information
+              </h3>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Payee Name -->
+                <div class="form-group md:col-span-2">
+                  <label for="payeeName" class="form-label form-label-required">Payee Name</label>
+                  <input
+                    type="text"
+                    name="payeeName"
+                    id="payeeName"
+                    class="form-input"
+                    placeholder="Enter full name or entity name"
+                    required
+                  />
+                </div>
+
+                <!-- TIN -->
+                <div class="form-group">
+                  <label for="payeeTin" class="form-label">TIN (Tax Identification Number)</label>
+                  <input
+                    type="text"
+                    name="payeeTin"
+                    id="payeeTin"
+                    class="form-input"
+                    placeholder="000-000-000-000"
+                  />
+                </div>
+
+                <!-- Address -->
+                <div class="form-group">
+                  <label for="payeeAddress" class="form-label">Address</label>
+                  <input
+                    type="text"
+                    name="payeeAddress"
+                    id="payeeAddress"
+                    class="form-input"
+                    placeholder="Enter payee address"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <!-- Transaction Details -->
+            <div>
+              <h3 class="text-lg font-semibold text-gray-900 mb-4 pb-2 border-b border-gray-200">
+                Transaction Details
+              </h3>
+              <div class="grid grid-cols-1 gap-6">
+                <!-- Particulars -->
+                <div class="form-group">
+                  <label for="particulars" class="form-label form-label-required">Particulars</label>
+                  <textarea
+                    name="particulars"
+                    id="particulars"
+                    rows="4"
+                    class="form-textarea"
+                    placeholder="Describe the purpose and details of this disbursement..."
+                    required
+                  ></textarea>
+                  <p class="form-help">Provide detailed description of the transaction</p>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <!-- Responsibility Center -->
+                  <div class="form-group">
+                    <label for="responsibilityCenter" class="form-label">Responsibility Center</label>
+                    <input
+                      type="text"
+                      name="responsibilityCenter"
+                      id="responsibilityCenter"
+                      class="form-input"
+                      placeholder="e.g., Office of the Regional Director"
+                    />
+                  </div>
+
+                  <!-- MFO/PAP -->
+                  <div class="form-group">
+                    <label for="mfoPapId" class="form-label">MFO/PAP</label>
+                    <select name="mfoPapId" id="mfoPapId" class="form-select">
+                      <option value="">Select MFO/PAP (Optional)</option>
+                      {mfoPapList.map(mfo => (
+                        <option value={mfo.id}>{mfo.code} - {mfo.description}</option>
+                      ))}
+                    </select>
+                    <p class="form-help">Major Final Output / Program, Activity, Project</p>
+                  </div>
+
+                  <!-- Object of Expenditure -->
+                  <div class="form-group">
+                    <label for="objectExpenditureId" class="form-label form-label-required">Object of Expenditure (UACS)</label>
+                    <select name="objectExpenditureId" id="objectExpenditureId" class="form-select" required>
+                      <option value="">Select Object of Expenditure</option>
+                      {['Personnel Services', 'MOOE', 'Capital Outlay', 'Financial Assistance'].map(category => {
+                        const items = objectOfExpenditureList.filter(obj => obj.category === category);
+                        return items.length > 0 ? (
+                          <optgroup label={category}>
+                            {items.map(obj => (
+                              <option value={obj.id}>
+                                {obj.code} - {obj.name}
+                              </option>
+                            ))}
+                          </optgroup>
+                        ) : null;
+                      })}
+                    </select>
+                  </div>
+
+                  <!-- Amount -->
+                  <div class="form-group">
+                    <label for="amount" class="form-label form-label-required">Amount</label>
+                    <div class="relative">
+                      <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 font-semibold">₱</span>
+                      <input
+                        type="number"
+                        name="amount"
+                        id="amount"
+                        class="form-input pl-8"
+                        step="0.01"
+                        min="0"
+                        placeholder="0.00"
+                        required
+                      />
+                    </div>
+                    <p class="form-help" id="amount-words"></p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Form Actions -->
+          <div class="divider"></div>
+          <div class="flex items-center justify-between">
+            <div class="text-sm text-gray-600">
+              <i class="pi pi-info-circle mr-1"></i>
+              DV number will be auto-generated upon creation
+            </div>
+            <div class="flex gap-3">
+              <a href="/disbursements" class="btn btn-secondary btn-md">
+                Cancel
+              </a>
+              <button type="submit" class="btn btn-primary btn-md" id="submit-btn">
+                <i class="pi pi-check mr-2"></i>
+                Create Disbursement Voucher
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('dv-form') as HTMLFormElement;
+    const submitBtn = document.getElementById('submit-btn') as HTMLButtonElement;
+    const amountInput = document.getElementById('amount') as HTMLInputElement;
+    const amountWords = document.getElementById('amount-words') as HTMLParagraphElement;
+
+    // Convert number to words (Philippine Peso)
+    function numberToWords(num: number): string {
+      if (num === 0) return 'Zero Pesos';
+
+      const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine'];
+      const teens = ['Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+      const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+
+      function convertLessThanThousand(n: number): string {
+        if (n === 0) return '';
+
+        if (n < 10) return ones[n];
+        if (n < 20) return teens[n - 10];
+        if (n < 100) return tens[Math.floor(n / 10)] + (n % 10 !== 0 ? ' ' + ones[n % 10] : '');
+
+        return ones[Math.floor(n / 100)] + ' Hundred' + (n % 100 !== 0 ? ' ' + convertLessThanThousand(n % 100) : '');
+      }
+
+      const pesos = Math.floor(num);
+      const centavos = Math.round((num - pesos) * 100);
+
+      let result = '';
+
+      if (pesos >= 1000000) {
+        result += convertLessThanThousand(Math.floor(pesos / 1000000)) + ' Million ';
+        pesos %= 1000000;
+      }
+
+      if (pesos >= 1000) {
+        result += convertLessThanThousand(Math.floor(pesos / 1000)) + ' Thousand ';
+        pesos %= 1000;
+      }
+
+      if (pesos > 0) {
+        result += convertLessThanThousand(pesos);
+      }
+
+      result += ' Pesos';
+
+      if (centavos > 0) {
+        result += ' and ' + centavos + '/100';
+      } else {
+        result += ' Only';
+      }
+
+      return result.trim();
+    }
+
+    // Update amount in words
+    amountInput?.addEventListener('input', () => {
+      const amount = parseFloat(amountInput.value);
+      if (!isNaN(amount) && amount > 0) {
+        amountWords.textContent = numberToWords(amount);
+        amountWords.classList.remove('form-help');
+        amountWords.classList.add('text-sm', 'text-primary-600', 'font-medium', 'mt-1');
+      } else {
+        amountWords.textContent = '';
+      }
+    });
+
+    // Form submission
+    form?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<i class="pi pi-spin pi-spinner mr-2"></i> Creating...';
+
+      try {
+        const formData = new FormData(form);
+        const data = {
+          fundClusterId: parseInt(formData.get('fundClusterId') as string),
+          orsBursNo: formData.get('orsBursNo') as string,
+          fiscalYear: parseInt(formData.get('fiscalYear') as string),
+          payeeName: formData.get('payeeName') as string,
+          payeeTin: formData.get('payeeTin') as string || undefined,
+          payeeAddress: formData.get('payeeAddress') as string || undefined,
+          particulars: formData.get('particulars') as string,
+          responsibilityCenter: formData.get('responsibilityCenter') as string || undefined,
+          mfoPapId: formData.get('mfoPapId') ? parseInt(formData.get('mfoPapId') as string) : undefined,
+          objectExpenditureId: parseInt(formData.get('objectExpenditureId') as string),
+          amount: parseFloat(formData.get('amount') as string),
+          paymentMode: formData.get('paymentMode') as string,
+        };
+
+        const response = await fetch('/api/disbursements', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify(data)
+        });
+
+        if (response.ok) {
+          const result = await response.json();
+          window.location.href = `/disbursements/${result.id}`;
+        } else {
+          const error = await response.json();
+          alert('Error: ' + (error.message || 'Failed to create DV'));
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = '<i class="pi pi-check mr-2"></i> Create Disbursement Voucher';
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        alert('An error occurred. Please try again.');
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<i class="pi pi-check mr-2"></i> Create Disbursement Voucher';
+      }
+    });
+  </script>
+</MainLayout>

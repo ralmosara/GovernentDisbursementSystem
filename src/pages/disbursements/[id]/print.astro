@@ -1,0 +1,464 @@
+---
+import { disbursementService } from '../../../lib/services/disbursement.service';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+const { id } = Astro.params;
+
+if (!id || isNaN(parseInt(id))) {
+  return Astro.redirect('/disbursements');
+}
+
+// Get DV details
+const dv = await disbursementService.getDVById(parseInt(id));
+
+if (!dv) {
+  return Astro.redirect('/disbursements');
+}
+
+// Format date
+const formatDate = (date: Date | string | null) => {
+  if (!date) return 'N/A';
+  const d = typeof date === 'string' ? new Date(date) : date;
+  return d.toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' });
+};
+
+// Convert number to words
+function numberToWords(num: number): string {
+  if (num === 0) return 'Zero Pesos';
+
+  const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine'];
+  const teens = ['Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+  const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+
+  function convertLessThanThousand(n: number): string {
+    if (n === 0) return '';
+
+    if (n < 10) return ones[n];
+    if (n < 20) return teens[n - 10];
+    if (n < 100) return tens[Math.floor(n / 10)] + (n % 10 !== 0 ? ' ' + ones[n % 10] : '');
+
+    return ones[Math.floor(n / 100)] + ' Hundred' + (n % 100 !== 0 ? ' ' + convertLessThanThousand(n % 100) : '');
+  }
+
+  let pesos = Math.floor(num);
+  const centavos = Math.round((num - pesos) * 100);
+
+  let result = '';
+
+  if (pesos >= 1000000000) {
+    result += convertLessThanThousand(Math.floor(pesos / 1000000000)) + ' Billion ';
+    pesos %= 1000000000;
+  }
+
+  if (pesos >= 1000000) {
+    result += convertLessThanThousand(Math.floor(pesos / 1000000)) + ' Million ';
+    pesos %= 1000000;
+  }
+
+  if (pesos >= 1000) {
+    result += convertLessThanThousand(Math.floor(pesos / 1000)) + ' Thousand ';
+    pesos %= 1000;
+  }
+
+  if (pesos > 0) {
+    result += convertLessThanThousand(pesos);
+  }
+
+  result += ' Pesos';
+
+  if (centavos > 0) {
+    result += ' and ' + centavos.toString().padStart(2, '0') + '/100';
+  } else {
+    result += ' Only';
+  }
+
+  return result.trim();
+}
+
+const amountInWords = numberToWords(parseFloat(dv.amount.toString()));
+---
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DV {dv.dvNo} - Print</title>
+  <style>
+    @media print {
+      @page {
+        size: letter;
+        margin: 0.5in;
+      }
+
+      body {
+        print-color-adjust: exact;
+        -webkit-print-color-adjust: exact;
+      }
+
+      .no-print {
+        display: none !important;
+      }
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: Arial, sans-serif;
+      font-size: 11pt;
+      line-height: 1.4;
+      color: #000;
+      background: #fff;
+      padding: 20px;
+    }
+
+    .dv-container {
+      max-width: 8.5in;
+      margin: 0 auto;
+      background: white;
+      border: 1px solid #000;
+      padding: 0.5in;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 20px;
+      border-bottom: 2px solid #000;
+      padding-bottom: 10px;
+    }
+
+    .header h1 {
+      font-size: 14pt;
+      font-weight: bold;
+      margin-bottom: 5px;
+    }
+
+    .header h2 {
+      font-size: 16pt;
+      font-weight: bold;
+    }
+
+    .dv-info {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 15px;
+      font-size: 10pt;
+    }
+
+    .dv-number {
+      font-size: 12pt;
+      font-weight: bold;
+      margin-bottom: 15px;
+    }
+
+    .section {
+      margin-bottom: 15px;
+    }
+
+    .section-title {
+      font-weight: bold;
+      margin-bottom: 5px;
+      text-decoration: underline;
+    }
+
+    .field {
+      margin-bottom: 8px;
+    }
+
+    .field-label {
+      font-weight: bold;
+      display: inline-block;
+      width: 150px;
+    }
+
+    .particulars-box {
+      border: 1px solid #000;
+      padding: 10px;
+      min-height: 100px;
+      margin: 10px 0;
+    }
+
+    .amount-box {
+      border: 2px solid #000;
+      padding: 10px;
+      margin: 15px 0;
+      background: #f9f9f9;
+    }
+
+    .amount-value {
+      font-size: 14pt;
+      font-weight: bold;
+      text-align: right;
+    }
+
+    .amount-words {
+      font-style: italic;
+      margin-top: 5px;
+      font-size: 9pt;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 15px 0;
+    }
+
+    th, td {
+      border: 1px solid #000;
+      padding: 8px;
+      text-align: left;
+    }
+
+    th {
+      background: #e0e0e0;
+      font-weight: bold;
+    }
+
+    .cert-boxes {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    .cert-box {
+      border: 1px solid #000;
+      padding: 10px;
+      min-height: 100px;
+    }
+
+    .cert-box.full-width {
+      grid-column: 1 / -1;
+    }
+
+    .cert-title {
+      font-weight: bold;
+      margin-bottom: 8px;
+    }
+
+    .signature-line {
+      border-top: 1px solid #000;
+      margin-top: 40px;
+      padding-top: 5px;
+      font-size: 9pt;
+      text-align: center;
+    }
+
+    .footer {
+      margin-top: 30px;
+      padding-top: 10px;
+      border-top: 1px solid #ccc;
+      text-align: center;
+      font-size: 8pt;
+      color: #666;
+    }
+
+    .print-button {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      padding: 10px 20px;
+      background: #007bff;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+
+    .print-button:hover {
+      background: #0056b3;
+    }
+  </style>
+</head>
+<body>
+  <button class="print-button no-print" onclick="window.print()">
+    🖨️ Print
+  </button>
+
+  <div class="dv-container">
+    <!-- Header -->
+    <div class="header">
+      <h1>PHILIPPINE GOVERNMENT AGENCY</h1>
+      <h2>DISBURSEMENT VOUCHER</h2>
+    </div>
+
+    <!-- DV Info -->
+    <div class="dv-info">
+      <div>
+        <strong>Fund Cluster:</strong> {dv.fundCluster?.code} - {dv.fundCluster?.name}
+      </div>
+      <div>
+        <strong>Date:</strong> {formatDate(dv.dvDate)}
+      </div>
+    </div>
+
+    <div class="dv-number">
+      DV No.: {dv.dvNo}
+    </div>
+
+    <!-- Payee Information -->
+    <div class="section">
+      <div class="field">
+        <span class="field-label">Payee:</span>
+        <span>{dv.payeeName}</span>
+      </div>
+      {dv.payeeTin && (
+        <div class="field">
+          <span class="field-label">TIN:</span>
+          <span>{dv.payeeTin}</span>
+        </div>
+      )}
+      {dv.payeeAddress && (
+        <div class="field">
+          <span class="field-label">Address:</span>
+          <span>{dv.payeeAddress}</span>
+        </div>
+      )}
+      <div class="field">
+        <span class="field-label">ORS/BURS No.:</span>
+        <span>{dv.orsBursNo}</span>
+      </div>
+      {dv.responsibilityCenter && (
+        <div class="field">
+          <span class="field-label">Responsibility Center:</span>
+          <span>{dv.responsibilityCenter}</span>
+        </div>
+      )}
+    </div>
+
+    <!-- Particulars -->
+    <div class="section">
+      <div class="section-title">PARTICULARS</div>
+      <div class="particulars-box">
+        {dv.particulars}
+      </div>
+    </div>
+
+    <!-- Amount -->
+    <div class="amount-box">
+      <div class="field">
+        <span class="field-label">Amount:</span>
+        <span class="amount-value">
+          ₱{parseFloat(dv.amount.toString()).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        </span>
+      </div>
+      <div class="amount-words">
+        ({amountInWords})
+      </div>
+    </div>
+
+    <!-- Accounting Entry -->
+    <div class="section">
+      <div class="section-title">ACCOUNTING ENTRY</div>
+      <table>
+        <thead>
+          <tr>
+            <th>Account Code</th>
+            <th>Account Title</th>
+            <th style="text-align: right;">Debit</th>
+            <th style="text-align: right;">Credit</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>{dv.objectOfExpenditure?.code}</td>
+            <td>{dv.objectOfExpenditure?.name}</td>
+            <td style="text-align: right;">
+              ₱{parseFloat(dv.amount.toString()).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+            </td>
+            <td></td>
+          </tr>
+          <tr>
+            <td></td>
+            <td></td>
+            <td></td>
+            <td style="text-align: right;">
+              ₱{parseFloat(dv.amount.toString()).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Certification Boxes -->
+    <div class="cert-boxes">
+      <!-- Box A -->
+      <div class="cert-box">
+        <div class="cert-title">A. CERTIFIED:</div>
+        <p style="font-size: 9pt;">Expenses/Cash Advance necessary, lawful and incurred under my direct supervision.</p>
+        <div class="signature-line">
+          Signature over Printed Name<br>
+          Position/Office
+        </div>
+      </div>
+
+      <!-- Box B -->
+      <div class="cert-box">
+        <div class="cert-title">B. ACCOUNTING ENTRY:</div>
+        <p style="font-size: 9pt;">Approved for payment.</p>
+        <div class="signature-line">
+          Accountant
+        </div>
+      </div>
+
+      <!-- Box C -->
+      <div class="cert-box">
+        <div class="cert-title">C. CERTIFIED:</div>
+        <p style="font-size: 9pt;">Funds Available</p>
+        <div class="signature-line">
+          Chief Accountant/Budget Officer
+        </div>
+      </div>
+
+      <!-- Box D -->
+      <div class="cert-box">
+        <div class="cert-title">D. APPROVED FOR PAYMENT:</div>
+        <div class="signature-line">
+          Agency Head/Authorized Representative<br>
+          Date: ______________
+        </div>
+      </div>
+
+      <!-- Box E -->
+      <div class="cert-box full-width">
+        <div class="cert-title">E. RECEIPT OF PAYMENT:</div>
+        <div style="font-size: 9pt; margin-bottom: 10px;">
+          Check/ADA No.: ______________ &nbsp; Date: ______________ &nbsp; Amount: ______________
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+          <div>
+            Signature: _______________________<br>
+            Printed Name: ____________________
+          </div>
+          <div>
+            Date Received: ___________________<br>
+            Official Receipt No.: _____________
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      Generated on {new Date().toLocaleString('en-PH')}<br>
+      Payment Mode: {dv.paymentMode.toUpperCase().replace('_', ' ')}
+    </div>
+  </div>
+
+  <script>
+    // Auto-print dialog on load (optional)
+    // window.onload = () => window.print();
+  </script>
+</body>
+</html>

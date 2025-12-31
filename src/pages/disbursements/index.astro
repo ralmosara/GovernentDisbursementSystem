@@ -1,0 +1,293 @@
+---
+import MainLayout from '../../layouts/MainLayout.astro';
+import { disbursementService } from '../../lib/services/disbursement.service';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+// Get query parameters for filters
+const status = Astro.url.searchParams.get('status') || undefined;
+const fiscalYear = Astro.url.searchParams.get('fiscalYear')
+  ? parseInt(Astro.url.searchParams.get('fiscalYear')!)
+  : new Date().getFullYear();
+const search = Astro.url.searchParams.get('search') || undefined;
+
+// Get DVs with filters
+const dvs = await disbursementService.getDVs({
+  status,
+  fiscalYear,
+  search,
+});
+
+// Get statistics
+const stats = await disbursementService.getDVStatistics(fiscalYear);
+
+// Status badge helper
+const getStatusBadge = (status: string) => {
+  switch (status) {
+    case 'draft':
+      return 'badge-secondary';
+    case 'pending_budget':
+      return 'badge-warning';
+    case 'pending_accounting':
+      return 'badge-warning';
+    case 'pending_director':
+      return 'badge-info';
+    case 'approved':
+      return 'badge-success';
+    case 'paid':
+      return 'badge-primary';
+    case 'rejected':
+      return 'badge-danger';
+    case 'cancelled':
+      return 'badge-dark';
+    default:
+      return 'badge-secondary';
+  }
+};
+
+const getStatusLabel = (status: string) => {
+  switch (status) {
+    case 'draft':
+      return 'Draft';
+    case 'pending_budget':
+      return 'Pending Budget';
+    case 'pending_accounting':
+      return 'Pending Accounting';
+    case 'pending_director':
+      return 'Pending Director';
+    case 'approved':
+      return 'Approved';
+    case 'paid':
+      return 'Paid';
+    case 'rejected':
+      return 'Rejected';
+    case 'cancelled':
+      return 'Cancelled';
+    default:
+      return status;
+  }
+};
+
+// Format date
+const formatDate = (date: Date | string | null) => {
+  if (!date) return 'N/A';
+  const d = typeof date === 'string' ? new Date(date) : date;
+  return d.toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
+};
+---
+
+<MainLayout title="Disbursement Vouchers">
+  <div class="container-fluid py-6">
+    <!-- Page Header -->
+    <div class="page-header">
+      <div class="flex items-center justify-between">
+        <div>
+          <h1 class="page-title">Disbursement Vouchers</h1>
+          <p class="page-description">Manage disbursement vouchers and payment processing</p>
+        </div>
+        <a href="/disbursements/create" class="btn btn-primary btn-md">
+          <i class="pi pi-plus mr-2"></i>
+          New Disbursement Voucher
+        </a>
+      </div>
+    </div>
+
+    <!-- Statistics Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
+      {stats.map(stat => (
+        <div class="card">
+          <div class="card-body">
+            <div class="flex items-center justify-between">
+              <div>
+                <p class="text-sm font-medium text-gray-600">{getStatusLabel(stat.status)}</p>
+                <p class="text-2xl font-bold text-gray-900 mt-1">{stat.count}</p>
+                <p class="text-sm text-gray-500 mt-1">
+                  ₱{(stat.totalAmount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                </p>
+              </div>
+              <div class={`w-12 h-12 rounded-full flex items-center justify-center ${getStatusBadge(stat.status)} bg-opacity-10`}>
+                <i class="pi pi-file text-xl"></i>
+              </div>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+
+    <!-- Filters & Search -->
+    <div class="card mb-6">
+      <div class="card-body">
+        <form method="GET" action="/disbursements" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <!-- Search -->
+          <div class="md:col-span-2">
+            <label for="search" class="form-label">Search</label>
+            <input
+              type="text"
+              name="search"
+              id="search"
+              class="form-input"
+              placeholder="Search by DV No, Payee, Particulars, or ORS/BURS No..."
+              value={search || ''}
+            />
+          </div>
+
+          <!-- Fiscal Year -->
+          <div>
+            <label for="fiscalYear" class="form-label">Fiscal Year</label>
+            <select name="fiscalYear" id="fiscalYear" class="form-select">
+              <option value="">All Years</option>
+              {[2024, 2023, 2022, 2021, 2020].map(year => (
+                <option value={year} selected={fiscalYear === year}>{year}</option>
+              ))}
+            </select>
+          </div>
+
+          <!-- Status -->
+          <div>
+            <label for="status" class="form-label">Status</label>
+            <select name="status" id="status" class="form-select">
+              <option value="">All Status</option>
+              <option value="draft" selected={status === 'draft'}>Draft</option>
+              <option value="pending_budget" selected={status === 'pending_budget'}>Pending Budget</option>
+              <option value="pending_accounting" selected={status === 'pending_accounting'}>Pending Accounting</option>
+              <option value="pending_director" selected={status === 'pending_director'}>Pending Director</option>
+              <option value="approved" selected={status === 'approved'}>Approved</option>
+              <option value="paid" selected={status === 'paid'}>Paid</option>
+              <option value="rejected" selected={status === 'rejected'}>Rejected</option>
+              <option value="cancelled" selected={status === 'cancelled'}>Cancelled</option>
+            </select>
+          </div>
+
+          <!-- Actions -->
+          <div class="md:col-span-4 flex gap-3">
+            <button type="submit" class="btn btn-primary btn-sm">
+              <i class="pi pi-search mr-2"></i>
+              Apply Filters
+            </button>
+            <a href="/disbursements" class="btn btn-secondary btn-sm">
+              <i class="pi pi-times mr-2"></i>
+              Clear Filters
+            </a>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- DV Table -->
+    <div class="card">
+      <div class="card-body p-0">
+        {dvs.length === 0 ? (
+          <div class="text-center py-12">
+            <i class="pi pi-inbox text-6xl text-gray-300 mb-4"></i>
+            <p class="text-gray-500 text-lg">No disbursement vouchers found</p>
+            <a href="/disbursements/create" class="btn btn-primary btn-md mt-4">
+              <i class="pi pi-plus mr-2"></i>
+              Create Your First DV
+            </a>
+          </div>
+        ) : (
+          <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200">
+              <thead class="bg-gray-50">
+                <tr>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    DV No.
+                  </th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Date
+                  </th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Payee
+                  </th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Particulars
+                  </th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Fund Cluster
+                  </th>
+                  <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Amount
+                  </th>
+                  <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Status
+                  </th>
+                  <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-200">
+                {dvs.map(dv => (
+                  <tr class="hover:bg-gray-50 transition-colors">
+                    <td class="px-6 py-4 whitespace-nowrap">
+                      <a href={`/disbursements/${dv.id}`} class="text-primary-600 hover:text-primary-800 font-semibold">
+                        {dv.dvNo}
+                      </a>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {formatDate(dv.dvDate)}
+                    </td>
+                    <td class="px-6 py-4 text-sm text-gray-900">
+                      <div class="max-w-xs truncate" title={dv.payeeName}>
+                        {dv.payeeName}
+                      </div>
+                    </td>
+                    <td class="px-6 py-4 text-sm text-gray-500">
+                      <div class="max-w-md truncate" title={dv.particulars}>
+                        {dv.particulars}
+                      </div>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {dv.fundCluster ? `${dv.fundCluster.code}` : 'N/A'}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 text-right">
+                      ₱{parseFloat(dv.amount.toString()).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-center">
+                      <span class={`badge ${getStatusBadge(dv.status)}`}>
+                        {getStatusLabel(dv.status)}
+                      </span>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-center text-sm">
+                      <div class="flex items-center justify-center gap-2">
+                        <a
+                          href={`/disbursements/${dv.id}`}
+                          class="text-primary-600 hover:text-primary-800"
+                          title="View Details"
+                        >
+                          <i class="pi pi-eye"></i>
+                        </a>
+                        {dv.status === 'approved' && (
+                          <button
+                            type="button"
+                            class="text-green-600 hover:text-green-800"
+                            title="Print DV"
+                            onclick={`window.open('/disbursements/${dv.id}/print', '_blank')`}
+                          >
+                            <i class="pi pi-print"></i>
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+
+    <!-- Showing results count -->
+    {dvs.length > 0 && (
+      <div class="mt-4 text-sm text-gray-600 text-center">
+        Showing {dvs.length} disbursement voucher{dvs.length !== 1 ? 's' : ''}
+        {fiscalYear && ` for fiscal year ${fiscalYear}`}
+      </div>
+    )}
+  </div>
+</MainLayout>
