@@ -261,8 +261,8 @@ const getPaymentTypeLabel = (type: string) => {
     )}
   </div>
 
-  <script>
-    async function issuePayment(paymentId: number) {
+  <script is:inline>
+    window.issuePayment = async function(paymentId) {
       const receivedBy = prompt('Received by (name):');
       if (!receivedBy) return;
 
@@ -294,9 +294,9 @@ const getPaymentTypeLabel = (type: string) => {
         console.error('Error issuing payment:', error);
         alert('Failed to issue payment');
       }
-    }
+    };
 
-    async function clearPayment(paymentId: number) {
+    window.clearPayment = async function(paymentId) {
       const confirmed = confirm('Mark this check as cleared?');
       if (!confirmed) return;
 
@@ -321,9 +321,9 @@ const getPaymentTypeLabel = (type: string) => {
         console.error('Error clearing payment:', error);
         alert('Failed to clear payment');
       }
-    }
+    };
 
-    async function cancelPayment(paymentId: number) {
+    window.cancelPayment = async function(paymentId) {
       const reason = prompt('Reason for cancellation:');
       if (!reason) return;
 
@@ -349,6 +349,6 @@ const getPaymentTypeLabel = (type: string) => {
         console.error('Error cancelling payment:', error);
         alert('Failed to cancel payment');
       }
-    }
+    };
   </script>
 </MainLayout>
