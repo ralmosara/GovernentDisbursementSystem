@@ -1,0 +1,375 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import { db } from '../../../lib/db/connection';
+import { fundClusters } from '../../../lib/db/schema';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+// Get all fund clusters for dropdown
+const allFundClusters = await db.select().from(fundClusters).where({ isActive: true });
+
+// Default to current quarter
+const now = new Date();
+const year = now.getFullYear();
+const month = now.getMonth();
+let fromDate, toDate;
+
+if (month < 3) {
+  fromDate = `${year}-01-01`;
+  toDate = `${year}-03-31`;
+} else if (month < 6) {
+  fromDate = `${year}-04-01`;
+  toDate = `${year}-06-30`;
+} else if (month < 9) {
+  fromDate = `${year}-07-01`;
+  toDate = `${year}-09-30`;
+} else {
+  fromDate = `${year}-10-01`;
+  toDate = `${year}-12-31`;
+}
+---
+
+<MainLayout title="FAR No. 3 - Cash Flow Statement">
+  <div class="container-fluid py-6">
+    <!-- Page Header -->
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">FAR No. 3</h1>
+        <p class="page-description">Statement of Sources and Application of Funds</p>
+      </div>
+      <div>
+        <a href="/reports" class="btn btn-ghost">
+          <i class="pi pi-arrow-left mr-2"></i>
+          Back to Reports
+        </a>
+      </div>
+    </div>
+
+    <!-- Report Parameters -->
+    <div class="card mb-6">
+      <div class="card-header">
+        <h3 class="text-lg font-semibold">Report Parameters</h3>
+      </div>
+      <div class="card-body">
+        <form id="report-form" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <!-- From Date -->
+          <div class="form-control">
+            <label class="label">
+              <span class="label-text">From Date *</span>
+            </label>
+            <input
+              type="date"
+              name="fromDate"
+              id="from-date"
+              class="input input-bordered w-full"
+              value={fromDate}
+              required
+            />
+          </div>
+
+          <!-- To Date -->
+          <div class="form-control">
+            <label class="label">
+              <span class="label-text">To Date *</span>
+            </label>
+            <input
+              type="date"
+              name="toDate"
+              id="to-date"
+              class="input input-bordered w-full"
+              value={toDate}
+              required
+            />
+          </div>
+
+          <!-- Fund Cluster -->
+          <div class="form-control">
+            <label class="label">
+              <span class="label-text">Fund Cluster</span>
+            </label>
+            <select
+              name="fundClusterId"
+              id="fund-cluster"
+              class="select select-bordered w-full"
+            >
+              <option value="">All Fund Clusters</option>
+              {allFundClusters.map(fc => (
+                <option value={fc.id}>{fc.code} - {fc.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <!-- Format -->
+          <div class="form-control">
+            <label class="label">
+              <span class="label-text">Export Format *</span>
+            </label>
+            <select
+              name="format"
+              id="format"
+              class="select select-bordered w-full"
+              required
+            >
+              <option value="excel">Excel (.xlsx)</option>
+              <option value="json">JSON (Preview)</option>
+            </select>
+          </div>
+
+          <!-- Quick Periods -->
+          <div class="md:col-span-4">
+            <label class="label">
+              <span class="label-text">Quick Select Period</span>
+            </label>
+            <div class="flex gap-2 flex-wrap">
+              <button type="button" class="btn btn-sm btn-ghost" onclick="setQuarter(1)">Q1 {year}</button>
+              <button type="button" class="btn btn-sm btn-ghost" onclick="setQuarter(2)">Q2 {year}</button>
+              <button type="button" class="btn btn-sm btn-ghost" onclick="setQuarter(3)">Q3 {year}</button>
+              <button type="button" class="btn btn-sm btn-ghost" onclick="setQuarter(4)">Q4 {year}</button>
+              <button type="button" class="btn btn-sm btn-ghost" onclick="setYTD()">Year to Date</button>
+              <button type="button" class="btn btn-sm btn-ghost" onclick="setFullYear()">Full Year {year}</button>
+            </div>
+          </div>
+
+          <!-- Action Buttons -->
+          <div class="md:col-span-4 flex gap-2">
+            <button type="button" id="preview-btn" class="btn btn-ghost">
+              <i class="pi pi-eye mr-2"></i>
+              Preview Report
+            </button>
+            <button type="button" id="download-btn" class="btn btn-primary">
+              <i class="pi pi-download mr-2"></i>
+              Download Excel
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Report Preview -->
+    <div id="report-preview" class="hidden">
+      <div class="card">
+        <div class="card-header">
+          <h3 class="text-lg font-semibold" id="preview-title">Cash Flow Statement</h3>
+        </div>
+        <div class="card-body">
+          <div class="space-y-6" id="cashflow-preview">
+            <!-- Will be populated dynamically -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Loading Indicator -->
+    <div id="loading" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div class="bg-white rounded-lg p-6 flex items-center gap-4">
+        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+        <span class="text-lg font-semibold">Generating report...</span>
+      </div>
+    </div>
+  </div>
+
+  <script define:vars={{ year }}>
+    const form = document.getElementById('report-form') as HTMLFormElement;
+    const previewBtn = document.getElementById('preview-btn') as HTMLButtonElement;
+    const downloadBtn = document.getElementById('download-btn') as HTMLButtonElement;
+    const loading = document.getElementById('loading')!;
+    const reportPreview = document.getElementById('report-preview')!;
+    const previewTitle = document.getElementById('preview-title')!;
+    const cashflowPreview = document.getElementById('cashflow-preview')!;
+    const fromDateInput = document.getElementById('from-date') as HTMLInputElement;
+    const toDateInput = document.getElementById('to-date') as HTMLInputElement;
+
+    function getReportParams() {
+      const formData = new FormData(form);
+      const params = new URLSearchParams();
+      params.set('fromDate', formData.get('fromDate') as string);
+      params.set('toDate', formData.get('toDate') as string);
+      if (formData.get('fundClusterId')) {
+        params.set('fundClusterId', formData.get('fundClusterId') as string);
+      }
+      return params;
+    }
+
+    function formatAmount(amount: number) {
+      return '₱' + amount.toLocaleString('en-PH', { minimumFractionDigits: 2 });
+    }
+
+    // Quick period selectors
+    window.setQuarter = (quarter: number) => {
+      const quarters = [
+        { from: `${year}-01-01`, to: `${year}-03-31` },
+        { from: `${year}-04-01`, to: `${year}-06-30` },
+        { from: `${year}-07-01`, to: `${year}-09-30` },
+        { from: `${year}-10-01`, to: `${year}-12-31` },
+      ];
+      const q = quarters[quarter - 1];
+      fromDateInput.value = q.from;
+      toDateInput.value = q.to;
+    };
+
+    window.setYTD = () => {
+      fromDateInput.value = `${year}-01-01`;
+      toDateInput.value = new Date().toISOString().split('T')[0];
+    };
+
+    window.setFullYear = () => {
+      fromDateInput.value = `${year}-01-01`;
+      toDateInput.value = `${year}-12-31`;
+    };
+
+    // Preview Report
+    previewBtn.addEventListener('click', async () => {
+      try {
+        loading.classList.remove('hidden');
+        reportPreview.classList.add('hidden');
+
+        const params = getReportParams();
+        params.set('format', 'json');
+
+        const response = await fetch(`/api/reports/far/cash-flow?${params}`);
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.message || 'Failed to generate report');
+        }
+
+        const data = await response.json();
+
+        // Update preview title
+        previewTitle.textContent = `FAR No. 3 - ${new Date(data.fromDate).toLocaleDateString('en-PH')} to ${new Date(data.toDate).toLocaleDateString('en-PH')}${
+          data.fundCluster ? ` - Fund Cluster ${data.fundCluster.code}` : ''
+        }`;
+
+        // Populate cash flow
+        let cashflowHTML = `
+          <!-- Opening Balance -->
+          <div class="bg-gray-100 p-4 rounded-lg">
+            <div class="flex justify-between text-lg font-bold">
+              <span>BALANCE, Beginning</span>
+              <span>${formatAmount(data.openingBalance)}</span>
+            </div>
+          </div>
+
+          <!-- Sources of Funds -->
+          <div>
+            <p class="text-lg font-semibold text-gray-900 mb-3 bg-blue-50 p-3 rounded-lg">SOURCES OF FUNDS</p>
+            <div class="ml-4 space-y-2">
+              <div class="flex justify-between text-sm">
+                <span class="text-gray-600">Revenue Collections</span>
+                <span class="font-semibold">${formatAmount(data.sources.revenueCollections)}</span>
+              </div>
+              <div class="flex justify-between text-sm">
+                <span class="text-gray-600">Allotment Received</span>
+                <span class="font-semibold">${formatAmount(data.sources.allotmentsReceived)}</span>
+              </div>
+              <div class="flex justify-between text-sm">
+                <span class="text-gray-600">Other Receipts</span>
+                <span class="font-semibold">${formatAmount(data.sources.otherReceipts)}</span>
+              </div>
+              <div class="flex justify-between text-base font-bold border-t-2 border-gray-300 pt-2 mt-2">
+                <span>Total Sources</span>
+                <span class="text-blue-600">${formatAmount(data.sources.total)}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Applications of Funds -->
+          <div>
+            <p class="text-lg font-semibold text-gray-900 mb-3 bg-red-50 p-3 rounded-lg">APPLICATION OF FUNDS</p>
+            <div class="ml-4 space-y-2">
+              <div class="flex justify-between text-sm">
+                <span class="text-gray-600">Personnel Services</span>
+                <span class="font-semibold">${formatAmount(data.applications.personnelServices)}</span>
+              </div>
+              <div class="flex justify-between text-sm">
+                <span class="text-gray-600">MOOE (Maintenance & Other Operating Expenses)</span>
+                <span class="font-semibold">${formatAmount(data.applications.mooe)}</span>
+              </div>
+              <div class="flex justify-between text-sm">
+                <span class="text-gray-600">Capital Outlay</span>
+                <span class="font-semibold">${formatAmount(data.applications.capitalOutlay)}</span>
+              </div>
+              <div class="flex justify-between text-base font-bold border-t-2 border-gray-300 pt-2 mt-2">
+                <span>Total Applications</span>
+                <span class="text-red-600">${formatAmount(data.applications.total)}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Closing Balance -->
+          <div class="bg-green-100 p-4 rounded-lg">
+            <div class="flex justify-between text-xl font-bold text-green-900">
+              <span>BALANCE, Ending</span>
+              <span>${formatAmount(data.closingBalance)}</span>
+            </div>
+          </div>
+
+          <!-- Reconciliation -->
+          <div class="bg-gray-50 p-4 rounded-lg text-sm">
+            <p class="font-semibold text-gray-700 mb-2">Reconciliation:</p>
+            <p class="text-gray-600">Opening Balance: ${formatAmount(data.openingBalance)}</p>
+            <p class="text-gray-600">Add: Total Sources: ${formatAmount(data.sources.total)}</p>
+            <p class="text-gray-600">Less: Total Applications: ${formatAmount(data.applications.total)}</p>
+            <p class="font-bold text-gray-900 mt-2 pt-2 border-t">Closing Balance: ${formatAmount(data.closingBalance)}</p>
+          </div>
+        `;
+
+        cashflowPreview.innerHTML = cashflowHTML;
+
+        reportPreview.classList.remove('hidden');
+      } catch (error) {
+        console.error('Error generating preview:', error);
+        alert('Failed to generate report preview: ' + (error as Error).message);
+      } finally {
+        loading.classList.add('hidden');
+      }
+    });
+
+    // Download Excel
+    downloadBtn.addEventListener('click', async () => {
+      try {
+        loading.classList.remove('hidden');
+
+        const params = getReportParams();
+        params.set('format', 'excel');
+
+        const response = await fetch(`/api/reports/far/cash-flow?${params}`);
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.message || 'Failed to generate report');
+        }
+
+        // Download file
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `FAR_No3_CashFlow_${params.get('fromDate')}_to_${params.get('toDate')}_${new Date().toISOString().split('T')[0]}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+
+        alert('Report downloaded successfully!');
+      } catch (error) {
+        console.error('Error downloading report:', error);
+        alert('Failed to download report: ' + (error as Error).message);
+      } finally {
+        loading.classList.add('hidden');
+      }
+    });
+
+    // Auto-preview on load if dates are in URL
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('fromDate') && urlParams.get('toDate')) {
+      fromDateInput.value = urlParams.get('fromDate')!;
+      toDateInput.value = urlParams.get('toDate')!;
+      previewBtn.click();
+    }
+  </script>
+</MainLayout>

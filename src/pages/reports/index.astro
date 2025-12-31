@@ -1,0 +1,230 @@
+---
+import MainLayout from '../../layouts/MainLayout.astro';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+const currentYear = new Date().getFullYear();
+---
+
+<MainLayout title="COA Reports">
+  <div class="container-fluid py-6">
+    <!-- Page Header -->
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">COA Reports</h1>
+        <p class="page-description">Generate Commission on Audit (COA) compliant financial reports</p>
+      </div>
+    </div>
+
+    <!-- Report Categories -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <!-- BAR No. 1 Card -->
+      <div class="card hover:shadow-lg transition-shadow">
+        <div class="card-header bg-blue-50">
+          <div class="flex items-center gap-3">
+            <div class="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center">
+              <i class="pi pi-chart-bar text-2xl text-white"></i>
+            </div>
+            <div>
+              <h3 class="text-lg font-semibold text-gray-900">BAR No. 1</h3>
+              <p class="text-sm text-gray-600">Budget Accountability Report</p>
+            </div>
+          </div>
+        </div>
+        <div class="card-body">
+          <p class="text-gray-700 mb-4">
+            Budget Utilization Report showing appropriations, allotments, obligations, and disbursements by object of expenditure.
+          </p>
+          <div class="bg-gray-50 p-3 rounded-lg mb-4">
+            <p class="text-sm font-semibold text-gray-700 mb-2">Report includes:</p>
+            <ul class="text-sm text-gray-600 space-y-1">
+              <li>• Appropriations by fund cluster</li>
+              <li>• Allotments released</li>
+              <li>• Obligations incurred</li>
+              <li>• Actual disbursements</li>
+              <li>• Unobligated balances</li>
+              <li>• Budget utilization rates</li>
+            </ul>
+          </div>
+          <a href="/reports/bar" class="btn btn-primary w-full">
+            <i class="pi pi-file-excel mr-2"></i>
+            Generate BAR No. 1
+          </a>
+        </div>
+      </div>
+
+      <!-- FAR No. 1 Card -->
+      <div class="card hover:shadow-lg transition-shadow">
+        <div class="card-header bg-green-50">
+          <div class="flex items-center gap-3">
+            <div class="w-12 h-12 bg-green-600 rounded-lg flex items-center justify-center">
+              <i class="pi pi-briefcase text-2xl text-white"></i>
+            </div>
+            <div>
+              <h3 class="text-lg font-semibold text-gray-900">FAR No. 1</h3>
+              <p class="text-sm text-gray-600">Statement of Assets, Liabilities & Net Worth</p>
+            </div>
+          </div>
+        </div>
+        <div class="card-body">
+          <p class="text-gray-700 mb-4">
+            Balance sheet showing the financial position of the government agency as of a specific date.
+          </p>
+          <div class="bg-gray-50 p-3 rounded-lg mb-4">
+            <p class="text-sm font-semibold text-gray-700 mb-2">Report includes:</p>
+            <ul class="text-sm text-gray-600 space-y-1">
+              <li>• Current assets (cash, receivables)</li>
+              <li>• Non-current assets (property, equipment)</li>
+              <li>• Current liabilities (payables)</li>
+              <li>• Net worth calculation</li>
+            </ul>
+          </div>
+          <a href="/reports/far/balance-sheet" class="btn btn-primary w-full">
+            <i class="pi pi-file-excel mr-2"></i>
+            Generate FAR No. 1
+          </a>
+        </div>
+      </div>
+
+      <!-- FAR No. 3 Card -->
+      <div class="card hover:shadow-lg transition-shadow">
+        <div class="card-header bg-purple-50">
+          <div class="flex items-center gap-3">
+            <div class="w-12 h-12 bg-purple-600 rounded-lg flex items-center justify-center">
+              <i class="pi pi-dollar text-2xl text-white"></i>
+            </div>
+            <div>
+              <h3 class="text-lg font-semibold text-gray-900">FAR No. 3</h3>
+              <p class="text-sm text-gray-600">Statement of Sources and Application of Funds</p>
+            </div>
+          </div>
+        </div>
+        <div class="card-body">
+          <p class="text-gray-700 mb-4">
+            Cash flow statement showing sources and uses of government funds for a reporting period.
+          </p>
+          <div class="bg-gray-50 p-3 rounded-lg mb-4">
+            <p class="text-sm font-semibold text-gray-700 mb-2">Report includes:</p>
+            <ul class="text-sm text-gray-600 space-y-1">
+              <li>• Opening balance</li>
+              <li>• Revenue collections & allotments</li>
+              <li>• Disbursements by category</li>
+              <li>• Closing balance</li>
+            </ul>
+          </div>
+          <a href="/reports/far/cash-flow" class="btn btn-primary w-full">
+            <i class="pi pi-file-excel mr-2"></i>
+            Generate FAR No. 3
+          </a>
+        </div>
+      </div>
+
+      <!-- Information Card -->
+      <div class="card bg-blue-50 border-blue-200">
+        <div class="card-header bg-blue-100">
+          <div class="flex items-center gap-3">
+            <i class="pi pi-info-circle text-2xl text-blue-600"></i>
+            <h3 class="text-lg font-semibold text-blue-900">Report Information</h3>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="space-y-3">
+            <div>
+              <p class="text-sm font-semibold text-blue-900 mb-1">Report Formats</p>
+              <p class="text-sm text-blue-700">All reports can be generated in Excel format for COA submission.</p>
+            </div>
+            <div>
+              <p class="text-sm font-semibold text-blue-900 mb-1">Fund Clusters</p>
+              <p class="text-sm text-blue-700">Reports can be generated for all funds or filtered by specific fund cluster.</p>
+            </div>
+            <div>
+              <p class="text-sm font-semibold text-blue-900 mb-1">Fiscal Year</p>
+              <p class="text-sm text-blue-700">Default fiscal year is {currentYear}. Historical reports are available for previous years.</p>
+            </div>
+            <div>
+              <p class="text-sm font-semibold text-blue-900 mb-1">COA Compliance</p>
+              <p class="text-sm text-blue-700">All reports follow COA-prescribed formats and include required certification sections.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="card mt-6">
+      <div class="card-header">
+        <h3 class="text-lg font-semibold text-gray-900">Quick Actions</h3>
+      </div>
+      <div class="card-body">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <button
+            onclick="window.location.href='/reports/bar?fiscalYear={currentYear}'"
+            class="btn btn-ghost justify-start text-left"
+          >
+            <i class="pi pi-chart-bar mr-3 text-blue-600"></i>
+            <div>
+              <p class="font-semibold">Current Year BAR</p>
+              <p class="text-xs text-gray-500">Budget report for FY {currentYear}</p>
+            </div>
+          </button>
+
+          <button
+            onclick="window.location.href='/reports/far/balance-sheet?asOfDate={new Date().toISOString().split('T')[0]}'"
+            class="btn btn-ghost justify-start text-left"
+          >
+            <i class="pi pi-briefcase mr-3 text-green-600"></i>
+            <div>
+              <p class="font-semibold">Current Balance Sheet</p>
+              <p class="text-xs text-gray-500">As of today</p>
+            </div>
+          </button>
+
+          <button
+            onclick="generateQuarterlyFAR()"
+            class="btn btn-ghost justify-start text-left"
+          >
+            <i class="pi pi-dollar mr-3 text-purple-600"></i>
+            <div>
+              <p class="font-semibold">Quarterly Cash Flow</p>
+              <p class="text-xs text-gray-500">Current quarter FAR No. 3</p>
+            </div>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function generateQuarterlyFAR() {
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = now.getMonth();
+
+      // Determine current quarter
+      let fromDate, toDate;
+      if (month < 3) {
+        // Q1: Jan - Mar
+        fromDate = `${year}-01-01`;
+        toDate = `${year}-03-31`;
+      } else if (month < 6) {
+        // Q2: Apr - Jun
+        fromDate = `${year}-04-01`;
+        toDate = `${year}-06-30`;
+      } else if (month < 9) {
+        // Q3: Jul - Sep
+        fromDate = `${year}-07-01`;
+        toDate = `${year}-09-30`;
+      } else {
+        // Q4: Oct - Dec
+        fromDate = `${year}-10-01`;
+        toDate = `${year}-12-31`;
+      }
+
+      window.location.href = `/reports/far/cash-flow?fromDate=${fromDate}&toDate=${toDate}`;
+    }
+  </script>
+</MainLayout>

@@ -1,0 +1,338 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import { db } from '../../../lib/db/connection';
+import { fundClusters } from '../../../lib/db/schema';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+// Get all fund clusters for dropdown
+const allFundClusters = await db.select().from(fundClusters).where({ isActive: true });
+
+const today = new Date().toISOString().split('T')[0];
+---
+
+<MainLayout title="FAR No. 1 - Balance Sheet">
+  <div class="container-fluid py-6">
+    <!-- Page Header -->
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">FAR No. 1</h1>
+        <p class="page-description">Statement of Assets, Liabilities & Net Worth</p>
+      </div>
+      <div>
+        <a href="/reports" class="btn btn-ghost">
+          <i class="pi pi-arrow-left mr-2"></i>
+          Back to Reports
+        </a>
+      </div>
+    </div>
+
+    <!-- Report Parameters -->
+    <div class="card mb-6">
+      <div class="card-header">
+        <h3 class="text-lg font-semibold">Report Parameters</h3>
+      </div>
+      <div class="card-body">
+        <form id="report-form" class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <!-- As Of Date -->
+          <div class="form-control">
+            <label class="label">
+              <span class="label-text">As Of Date *</span>
+            </label>
+            <input
+              type="date"
+              name="asOfDate"
+              id="as-of-date"
+              class="input input-bordered w-full"
+              value={today}
+              required
+            />
+          </div>
+
+          <!-- Fund Cluster -->
+          <div class="form-control">
+            <label class="label">
+              <span class="label-text">Fund Cluster</span>
+            </label>
+            <select
+              name="fundClusterId"
+              id="fund-cluster"
+              class="select select-bordered w-full"
+            >
+              <option value="">All Fund Clusters</option>
+              {allFundClusters.map(fc => (
+                <option value={fc.id}>{fc.code} - {fc.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <!-- Format -->
+          <div class="form-control">
+            <label class="label">
+              <span class="label-text">Export Format *</span>
+            </label>
+            <select
+              name="format"
+              id="format"
+              class="select select-bordered w-full"
+              required
+            >
+              <option value="excel">Excel (.xlsx)</option>
+              <option value="json">JSON (Preview)</option>
+            </select>
+          </div>
+
+          <!-- Action Buttons -->
+          <div class="md:col-span-3 flex gap-2">
+            <button type="button" id="preview-btn" class="btn btn-ghost">
+              <i class="pi pi-eye mr-2"></i>
+              Preview Report
+            </button>
+            <button type="button" id="download-btn" class="btn btn-primary">
+              <i class="pi pi-download mr-2"></i>
+              Download Excel
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Report Preview -->
+    <div id="report-preview" class="hidden">
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Assets -->
+        <div class="card">
+          <div class="card-header bg-green-50">
+            <h3 class="text-lg font-semibold text-green-900">Assets</h3>
+          </div>
+          <div class="card-body" id="assets-preview">
+            <!-- Will be populated dynamically -->
+          </div>
+        </div>
+
+        <!-- Liabilities & Net Worth -->
+        <div class="card">
+          <div class="card-header bg-red-50">
+            <h3 class="text-lg font-semibold text-red-900">Liabilities & Net Worth</h3>
+          </div>
+          <div class="card-body" id="liabilities-preview">
+            <!-- Will be populated dynamically -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Loading Indicator -->
+    <div id="loading" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+      <div class="bg-white rounded-lg p-6 flex items-center gap-4">
+        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600"></div>
+        <span class="text-lg font-semibold">Generating report...</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('report-form') as HTMLFormElement;
+    const previewBtn = document.getElementById('preview-btn') as HTMLButtonElement;
+    const downloadBtn = document.getElementById('download-btn') as HTMLButtonElement;
+    const loading = document.getElementById('loading')!;
+    const reportPreview = document.getElementById('report-preview')!;
+    const assetsPreview = document.getElementById('assets-preview')!;
+    const liabilitiesPreview = document.getElementById('liabilities-preview')!;
+
+    function getReportParams() {
+      const formData = new FormData(form);
+      const params = new URLSearchParams();
+      params.set('asOfDate', formData.get('asOfDate') as string);
+      if (formData.get('fundClusterId')) {
+        params.set('fundClusterId', formData.get('fundClusterId') as string);
+      }
+      return params;
+    }
+
+    function formatAmount(amount: number) {
+      return '₱' + amount.toLocaleString('en-PH', { minimumFractionDigits: 2 });
+    }
+
+    // Preview Report
+    previewBtn.addEventListener('click', async () => {
+      try {
+        loading.classList.remove('hidden');
+        reportPreview.classList.add('hidden');
+
+        const params = getReportParams();
+        params.set('format', 'json');
+
+        const response = await fetch(`/api/reports/far/balance-sheet?${params}`);
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.message || 'Failed to generate report');
+        }
+
+        const data = await response.json();
+
+        // Populate Assets
+        let assetsHTML = `
+          <div class="space-y-4">
+            <div>
+              <p class="text-sm font-semibold text-gray-700 mb-2 bg-gray-100 p-2 rounded">CURRENT ASSETS</p>
+              <div class="ml-4 space-y-1">
+        `;
+
+        // Cash by fund
+        Object.entries(data.assets.currentAssets.cash).forEach(([fundCode, amount]) => {
+          assetsHTML += `
+            <div class="flex justify-between text-sm">
+              <span class="text-gray-600">Cash - Fund ${fundCode}</span>
+              <span class="font-semibold">${formatAmount(amount as number)}</span>
+            </div>
+          `;
+        });
+
+        assetsHTML += `
+                <div class="flex justify-between text-sm">
+                  <span class="text-gray-600">Accounts Receivable</span>
+                  <span class="font-semibold">${formatAmount(data.assets.currentAssets.accountsReceivable)}</span>
+                </div>
+                <div class="flex justify-between text-sm font-bold border-t pt-1 mt-1">
+                  <span>Total Current Assets</span>
+                  <span>${formatAmount(data.assets.currentAssets.total)}</span>
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <p class="text-sm font-semibold text-gray-700 mb-2 bg-gray-100 p-2 rounded">NON-CURRENT ASSETS</p>
+              <div class="ml-4 space-y-1">
+                <div class="flex justify-between text-sm">
+                  <span class="text-gray-600">Land</span>
+                  <span class="font-semibold">${formatAmount(data.assets.nonCurrentAssets.land)}</span>
+                </div>
+                <div class="flex justify-between text-sm">
+                  <span class="text-gray-600">Buildings</span>
+                  <span class="font-semibold">${formatAmount(data.assets.nonCurrentAssets.buildings)}</span>
+                </div>
+                <div class="flex justify-between text-sm">
+                  <span class="text-gray-600">Equipment</span>
+                  <span class="font-semibold">${formatAmount(data.assets.nonCurrentAssets.equipment)}</span>
+                </div>
+                <div class="flex justify-between text-sm font-bold border-t pt-1 mt-1">
+                  <span>Total Non-Current Assets</span>
+                  <span>${formatAmount(data.assets.nonCurrentAssets.total)}</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="bg-green-100 p-3 rounded-lg">
+              <div class="flex justify-between text-lg font-bold text-green-900">
+                <span>TOTAL ASSETS</span>
+                <span>${formatAmount(data.assets.total)}</span>
+              </div>
+            </div>
+          </div>
+        `;
+
+        assetsPreview.innerHTML = assetsHTML;
+
+        // Populate Liabilities & Net Worth
+        let liabilitiesHTML = `
+          <div class="space-y-4">
+            <div>
+              <p class="text-sm font-semibold text-gray-700 mb-2 bg-gray-100 p-2 rounded">CURRENT LIABILITIES</p>
+              <div class="ml-4 space-y-1">
+                <div class="flex justify-between text-sm">
+                  <span class="text-gray-600">Accounts Payable</span>
+                  <span class="font-semibold">${formatAmount(data.liabilities.currentLiabilities.accountsPayable)}</span>
+                </div>
+                <div class="flex justify-between text-sm">
+                  <span class="text-gray-600">Due to Other Funds</span>
+                  <span class="font-semibold">${formatAmount(data.liabilities.currentLiabilities.dueToOtherFunds)}</span>
+                </div>
+                <div class="flex justify-between text-sm font-bold border-t pt-1 mt-1">
+                  <span>Total Current Liabilities</span>
+                  <span>${formatAmount(data.liabilities.currentLiabilities.total)}</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="bg-red-100 p-3 rounded-lg">
+              <div class="flex justify-between text-lg font-bold text-red-900">
+                <span>TOTAL LIABILITIES</span>
+                <span>${formatAmount(data.liabilities.total)}</span>
+              </div>
+            </div>
+
+            <div class="bg-blue-100 p-3 rounded-lg mt-6">
+              <div class="flex justify-between text-xl font-bold text-blue-900">
+                <span>NET WORTH</span>
+                <span>${formatAmount(data.netWorth)}</span>
+              </div>
+            </div>
+
+            <div class="text-xs text-gray-500 mt-4">
+              <p class="font-semibold">Accounting Equation:</p>
+              <p>Assets = Liabilities + Net Worth</p>
+              <p class="mt-1">${formatAmount(data.assets.total)} = ${formatAmount(data.liabilities.total)} + ${formatAmount(data.netWorth)}</p>
+            </div>
+          </div>
+        `;
+
+        liabilitiesPreview.innerHTML = liabilitiesHTML;
+
+        reportPreview.classList.remove('hidden');
+      } catch (error) {
+        console.error('Error generating preview:', error);
+        alert('Failed to generate report preview: ' + (error as Error).message);
+      } finally {
+        loading.classList.add('hidden');
+      }
+    });
+
+    // Download Excel
+    downloadBtn.addEventListener('click', async () => {
+      try {
+        loading.classList.remove('hidden');
+
+        const params = getReportParams();
+        params.set('format', 'excel');
+
+        const response = await fetch(`/api/reports/far/balance-sheet?${params}`);
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.message || 'Failed to generate report');
+        }
+
+        // Download file
+        const blob = await response.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `FAR_No1_BalanceSheet_${params.get('asOfDate')}_${new Date().toISOString().split('T')[0]}.xlsx`;
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+
+        alert('Report downloaded successfully!');
+      } catch (error) {
+        console.error('Error downloading report:', error);
+        alert('Failed to download report: ' + (error as Error).message);
+      } finally {
+        loading.classList.add('hidden');
+      }
+    });
+
+    // Auto-preview on load if asOfDate is in URL
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('asOfDate')) {
+      (document.getElementById('as-of-date') as HTMLInputElement).value = urlParams.get('asOfDate')!;
+      previewBtn.click();
+    }
+  </script>
+</MainLayout>
