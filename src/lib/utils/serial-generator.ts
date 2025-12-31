@@ -1,6 +1,6 @@
 import { db } from '../db/connection';
-import { disbursementVouchers } from '../db/schema';
-import { and, eq, like, desc, sql } from 'drizzle-orm';
+import { disbursementVouchers, payments, fundClusters } from '../db/schema';
+import { and, eq, like, desc, sql, isNotNull } from 'drizzle-orm';
 
 /**
  * Generate DV serial number in format: 0000-00-0000 (Serial-Month-Year)
@@ -91,18 +91,55 @@ export async function dvNumberExists(dvNo: string): Promise<boolean> {
 }
 
 /**
- * Generate check number in format: YYYY-NNNN
+ * Generate check number in format: YYYY-FC-NNNNNN
+ * Separate sequences for MDS checks vs commercial checks per fund cluster
  *
  * @param fiscalYear - The fiscal year
+ * @param fundClusterId - The fund cluster ID
+ * @param paymentType - The payment type (check_mds or check_commercial)
  * @returns Promise<string> - The generated check number
  */
-export async function generateCheckNumber(fiscalYear: number): Promise<string> {
-  // This will be implemented when we have the payments table populated
-  // For now, return a placeholder format
-  const year = fiscalYear.toString();
-  const serial = '0001'; // TODO: Implement auto-increment from payments table
+export async function generateCheckNumber(
+  fiscalYear: number,
+  fundClusterId: number,
+  paymentType: 'check_mds' | 'check_commercial'
+): Promise<string> {
+  // Get fund cluster code
+  const fundCluster = await db
+    .select({ code: fundClusters.code })
+    .from(fundClusters)
+    .where(eq(fundClusters.id, fundClusterId))
+    .limit(1);
 
-  return `${year}-${serial}`;
+  const fcCode = fundCluster[0]?.code || '01';
+
+  // Get latest check number for this fiscal year, fund cluster, and payment type
+  const latestPayment = await db
+    .select({ checkNo: payments.checkNo })
+    .from(payments)
+    .innerJoin(disbursementVouchers, eq(payments.dvId, disbursementVouchers.id))
+    .where(
+      and(
+        eq(disbursementVouchers.fiscalYear, fiscalYear),
+        eq(disbursementVouchers.fundClusterId, fundClusterId),
+        eq(payments.paymentType, paymentType),
+        isNotNull(payments.checkNo)
+      )
+    )
+    .orderBy(desc(payments.id))
+    .limit(1);
+
+  let nextSerial = 1;
+
+  if (latestPayment.length > 0 && latestPayment[0].checkNo) {
+    // Extract serial from format "2024-01-000001"
+    const parts = latestPayment[0].checkNo.split('-');
+    const currentSerial = parseInt(parts[parts.length - 1], 10);
+    nextSerial = currentSerial + 1;
+  }
+
+  // Format: YYYY-FC-NNNNNN
+  return `${fiscalYear}-${fcCode}-${nextSerial.toString().padStart(6, '0')}`;
 }
 
 /**

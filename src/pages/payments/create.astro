@@ -1,0 +1,339 @@
+---
+import MainLayout from '../../layouts/MainLayout.astro';
+import { paymentService } from '../../lib/services/payment.service';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+// Get approved DVs ready for payment
+const pendingPayments = await paymentService.getPendingPayments();
+
+// Pre-select DV if passed in query
+const preselectedDvId = Astro.url.searchParams.get('dvId');
+
+// Format date
+const formatDate = (date: Date | string | null) => {
+  if (!date) return '';
+  const d = typeof date === 'string' ? new Date(date) : date;
+  return d.toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
+};
+---
+
+<MainLayout title="Create Payment">
+  <div class="container-fluid py-6">
+    <!-- Page Header -->
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Create Payment</h1>
+        <p class="page-description">Create a new payment from an approved disbursement voucher</p>
+      </div>
+      <div>
+        <a href="/payments" class="btn btn-ghost">
+          <i class="pi pi-arrow-left mr-2"></i>
+          Back to Payments
+        </a>
+      </div>
+    </div>
+
+    {pendingPayments.length === 0 ? (
+      <div class="card">
+        <div class="card-body">
+          <div class="text-center py-12">
+            <i class="pi pi-check-circle text-6xl text-green-300 mb-4"></i>
+            <p class="text-gray-500 text-lg">No approved DVs available for payment</p>
+            <p class="text-gray-400 text-sm mt-2">All approved DVs have already been paid</p>
+            <a href="/disbursements" class="btn btn-primary mt-4">
+              View Disbursements
+            </a>
+          </div>
+        </div>
+      </div>
+    ) : (
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- Payment Form -->
+        <div class="lg:col-span-2">
+          <div class="card">
+            <div class="card-header">
+              <h3 class="text-lg font-semibold">Payment Details</h3>
+            </div>
+            <div class="card-body">
+              <form id="payment-form">
+                <!-- Select DV -->
+                <div class="form-control mb-4">
+                  <label class="label">
+                    <span class="label-text">Disbursement Voucher *</span>
+                  </label>
+                  <select
+                    name="dvId"
+                    id="dv-select"
+                    class="select select-bordered w-full"
+                    required
+                  >
+                    <option value="">Select DV to pay...</option>
+                    {pendingPayments.map(dv => (
+                      <option
+                        value={dv.id}
+                        selected={preselectedDvId === dv.id.toString()}
+                        data-payee={dv.payeeName}
+                        data-amount={dv.amount}
+                        data-dv-no={dv.dvNo}
+                        data-particulars={dv.particulars}
+                      >
+                        {dv.dvNo} - {dv.payeeName} - ₱{parseFloat(dv.amount.toString()).toLocaleString('en-PH')}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <!-- Payment Type -->
+                <div class="form-control mb-4">
+                  <label class="label">
+                    <span class="label-text">Payment Type *</span>
+                  </label>
+                  <select
+                    name="paymentType"
+                    id="payment-type"
+                    class="select select-bordered w-full"
+                    required
+                  >
+                    <option value="">Select payment type...</option>
+                    <option value="check_mds">MDS Check</option>
+                    <option value="check_commercial">Commercial Check</option>
+                    <option value="ada">ADA (Advice to Debit Account)</option>
+                    <option value="cash">Cash</option>
+                  </select>
+                </div>
+
+                <!-- Payment Date -->
+                <div class="form-control mb-4">
+                  <label class="label">
+                    <span class="label-text">Payment Date *</span>
+                  </label>
+                  <input
+                    type="date"
+                    name="paymentDate"
+                    class="input input-bordered w-full"
+                    value={new Date().toISOString().split('T')[0]}
+                    required
+                  />
+                </div>
+
+                <!-- Amount (read-only) -->
+                <div class="form-control mb-4">
+                  <label class="label">
+                    <span class="label-text">Amount</span>
+                  </label>
+                  <input
+                    type="text"
+                    id="amount-display"
+                    class="input input-bordered w-full bg-gray-50"
+                    readonly
+                    placeholder="Select DV first"
+                  />
+                  <input type="hidden" name="amount" id="amount-value" />
+                </div>
+
+                <!-- Check Fields (conditional) -->
+                <div id="check-fields" class="hidden">
+                  <div class="divider">Check Details</div>
+
+                  <div class="form-control mb-4">
+                    <label class="label">
+                      <span class="label-text">Bank Name</span>
+                    </label>
+                    <input
+                      type="text"
+                      name="bankName"
+                      class="input input-bordered w-full"
+                      placeholder="Enter bank name"
+                    />
+                  </div>
+
+                  <div class="form-control mb-4">
+                    <label class="label">
+                      <span class="label-text">Bank Account Number</span>
+                    </label>
+                    <input
+                      type="text"
+                      name="bankAccountNo"
+                      class="input input-bordered w-full"
+                      placeholder="Enter bank account number"
+                    />
+                  </div>
+                </div>
+
+                <!-- ADA Fields (conditional) -->
+                <div id="ada-fields" class="hidden">
+                  <div class="divider">ADA Details</div>
+
+                  <div class="form-control mb-4">
+                    <label class="label">
+                      <span class="label-text">ADA Reference Number</span>
+                    </label>
+                    <input
+                      type="text"
+                      name="adaReference"
+                      class="input input-bordered w-full"
+                      placeholder="Enter ADA reference number"
+                    />
+                  </div>
+
+                  <div class="form-control mb-4">
+                    <label class="label">
+                      <span class="label-text">ADA Issue Date</span>
+                    </label>
+                    <input
+                      type="date"
+                      name="adaIssuedDate"
+                      class="input input-bordered w-full"
+                    />
+                  </div>
+                </div>
+
+                <!-- Submit Button -->
+                <div class="flex gap-2 mt-6">
+                  <button type="submit" class="btn btn-primary">
+                    <i class="pi pi-check mr-2"></i>
+                    Create Payment
+                  </button>
+                  <a href="/payments" class="btn btn-ghost">
+                    Cancel
+                  </a>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <!-- DV Preview Sidebar -->
+        <div class="lg:col-span-1">
+          <div class="card sticky top-4">
+            <div class="card-header">
+              <h3 class="text-lg font-semibold">DV Preview</h3>
+            </div>
+            <div class="card-body" id="dv-preview">
+              <p class="text-gray-500 text-sm">Select a DV to view details</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
+  </div>
+
+  <script>
+    const dvSelect = document.getElementById('dv-select') as HTMLSelectElement;
+    const paymentType = document.getElementById('payment-type') as HTMLSelectElement;
+    const checkFields = document.getElementById('check-fields')!;
+    const adaFields = document.getElementById('ada-fields')!;
+    const amountDisplay = document.getElementById('amount-display') as HTMLInputElement;
+    const amountValue = document.getElementById('amount-value') as HTMLInputElement;
+    const dvPreview = document.getElementById('dv-preview')!;
+    const form = document.getElementById('payment-form') as HTMLFormElement;
+
+    // Update DV preview when selection changes
+    dvSelect?.addEventListener('change', () => {
+      const selected = dvSelect.selectedOptions[0];
+      if (!selected || !selected.value) {
+        dvPreview.innerHTML = '<p class="text-gray-500 text-sm">Select a DV to view details</p>';
+        amountDisplay.value = '';
+        amountValue.value = '';
+        return;
+      }
+
+      const payee = selected.dataset.payee;
+      const amount = selected.dataset.amount;
+      const dvNo = selected.dataset.dvNo;
+      const particulars = selected.dataset.particulars;
+
+      amountDisplay.value = `₱${parseFloat(amount!).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
+      amountValue.value = amount!;
+
+      dvPreview.innerHTML = `
+        <div class="space-y-3">
+          <div>
+            <p class="text-xs text-gray-500">DV Number</p>
+            <p class="font-semibold">${dvNo}</p>
+          </div>
+          <div>
+            <p class="text-xs text-gray-500">Payee</p>
+            <p class="font-semibold">${payee}</p>
+          </div>
+          <div>
+            <p class="text-xs text-gray-500">Amount</p>
+            <p class="text-xl font-bold text-primary-600">₱${parseFloat(amount!).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</p>
+          </div>
+          <div>
+            <p class="text-xs text-gray-500">Particulars</p>
+            <p class="text-sm">${particulars}</p>
+          </div>
+        </div>
+      `;
+    });
+
+    // Show/hide conditional fields based on payment type
+    paymentType?.addEventListener('change', () => {
+      const type = paymentType.value;
+
+      if (type === 'check_mds' || type === 'check_commercial') {
+        checkFields.classList.remove('hidden');
+        adaFields.classList.add('hidden');
+      } else if (type === 'ada') {
+        checkFields.classList.add('hidden');
+        adaFields.classList.remove('hidden');
+      } else {
+        checkFields.classList.add('hidden');
+        adaFields.classList.add('hidden');
+      }
+    });
+
+    // Form submission
+    form?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const formData = new FormData(form);
+      const data: any = {
+        dvId: formData.get('dvId'),
+        paymentType: formData.get('paymentType'),
+        paymentDate: formData.get('paymentDate'),
+        amount: formData.get('amount'),
+      };
+
+      // Add conditional fields
+      if (data.paymentType === 'check_mds' || data.paymentType === 'check_commercial') {
+        data.bankName = formData.get('bankName');
+        data.bankAccountNo = formData.get('bankAccountNo');
+      } else if (data.paymentType === 'ada') {
+        data.adaReference = formData.get('adaReference');
+        data.adaIssuedDate = formData.get('adaIssuedDate');
+      }
+
+      try {
+        const response = await fetch('/api/payments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        });
+
+        const result = await response.json();
+
+        if (response.ok) {
+          alert(`Payment created successfully! ${result.checkNo ? `Check Number: ${result.checkNo}` : ''}`);
+          window.location.href = '/payments';
+        } else {
+          alert('Error: ' + result.message);
+        }
+      } catch (error) {
+        console.error('Error creating payment:', error);
+        alert('Failed to create payment');
+      }
+    });
+
+    // Trigger DV preview if preselected
+    if (dvSelect.value) {
+      dvSelect.dispatchEvent(new Event('change'));
+    }
+  </script>
+</MainLayout>

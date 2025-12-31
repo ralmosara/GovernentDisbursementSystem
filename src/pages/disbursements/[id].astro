@@ -2,6 +2,7 @@
 import MainLayout from '../../layouts/MainLayout.astro';
 import { disbursementService } from '../../lib/services/disbursement.service';
 import { approvalService } from '../../lib/services/approval.service';
+import { paymentService } from '../../lib/services/payment.service';
 
 const user = Astro.locals.user;
 
@@ -24,6 +25,13 @@ if (!dv) {
 
 // Get approval workflow history
 const approvalHistory = await approvalService.getApprovalHistory(parseInt(id));
+
+// Get payment information if DV is approved or paid
+let payment = null;
+if (dv.status === 'approved' || dv.status === 'paid') {
+  const payments = await paymentService.getPaymentsByDVId(parseInt(id));
+  payment = payments[0] || null;
+}
 
 // Get current pending stage
 const currentStage = await approvalService.getCurrentStage(parseInt(id));
@@ -297,6 +305,85 @@ const getWorkflowStatusBadge = (status: string) => {
             </div>
           </div>
         </div>
+
+        <!-- Payment Information -->
+        {(dv.status === 'approved' || dv.status === 'paid') && (
+          <div class="card">
+            <div class="card-header">
+              <h3 class="text-lg font-semibold text-gray-900">Payment Processing</h3>
+            </div>
+            <div class="card-body">
+              {!payment ? (
+                <div class="text-center py-8">
+                  <i class="pi pi-wallet text-4xl text-gray-300 mb-3"></i>
+                  <p class="text-gray-600 mb-4">This DV is approved and ready for payment</p>
+                  <a href={`/payments/create?dvId=${dv.id}`} class="btn btn-primary">
+                    <i class="pi pi-plus mr-2"></i>
+                    Create Payment
+                  </a>
+                </div>
+              ) : (
+                <div class="space-y-4">
+                  <div class="grid grid-cols-2 gap-4">
+                    <div>
+                      <p class="text-xs text-gray-500">Payment Type</p>
+                      <p class="font-semibold capitalize">{payment.paymentType.replace('_', ' ')}</p>
+                    </div>
+                    <div>
+                      <p class="text-xs text-gray-500">Status</p>
+                      <span class={`badge ${
+                        payment.status === 'pending' ? 'badge-warning' :
+                        payment.status === 'issued' ? 'badge-info' :
+                        payment.status === 'cleared' ? 'badge-success' :
+                        'badge-secondary'
+                      }`}>
+                        {payment.status.toUpperCase()}
+                      </span>
+                    </div>
+                  </div>
+
+                  {payment.checkNo && (
+                    <div>
+                      <p class="text-xs text-gray-500">Check Number</p>
+                      <p class="text-lg font-bold text-primary-600">{payment.checkNo}</p>
+                    </div>
+                  )}
+
+                  {payment.receivedBy && (
+                    <div>
+                      <p class="text-xs text-gray-500">Received By</p>
+                      <p class="font-semibold">{payment.receivedBy}</p>
+                      <p class="text-xs text-gray-500 mt-1">
+                        on {formatDate(payment.receivedDate)}
+                      </p>
+                    </div>
+                  )}
+
+                  {payment.orNo && (
+                    <div>
+                      <p class="text-xs text-gray-500">Official Receipt</p>
+                      <p class="font-semibold">{payment.orNo}</p>
+                    </div>
+                  )}
+
+                  {payment.clearedDate && (
+                    <div>
+                      <p class="text-xs text-gray-500">Cleared Date</p>
+                      <p class="font-semibold">{formatDate(payment.clearedDate)}</p>
+                    </div>
+                  )}
+
+                  <div class="pt-4">
+                    <a href={`/payments`} class="btn btn-ghost btn-sm w-full">
+                      <i class="pi pi-external-link mr-2"></i>
+                      View in Payment Queue
+                    </a>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       <!-- Sidebar -->

@@ -1,0 +1,323 @@
+---
+import MainLayout from '../../layouts/MainLayout.astro';
+import { paymentService } from '../../lib/services/payment.service';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+// Get query parameters
+const status = Astro.url.searchParams.get('status') || 'pending';
+const fiscalYear = Astro.url.searchParams.get('fiscalYear')
+  ? parseInt(Astro.url.searchParams.get('fiscalYear')!)
+  : new Date().getFullYear();
+
+// Get payments
+const payments = await paymentService.getPayments({
+  status: status as any,
+  fiscalYear,
+});
+
+// Get statistics
+const stats = await paymentService.getPaymentStatistics(fiscalYear);
+
+// Format date
+const formatDate = (date: Date | string | null) => {
+  if (!date) return 'N/A';
+  const d = typeof date === 'string' ? new Date(date) : date;
+  return d.toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
+};
+
+// Payment status badge
+const getStatusBadge = (status: string) => {
+  switch (status) {
+    case 'pending': return 'badge-warning';
+    case 'issued': return 'badge-info';
+    case 'cleared': return 'badge-success';
+    case 'cancelled': return 'badge-secondary';
+    case 'stale': return 'badge-error';
+    default: return 'badge-secondary';
+  }
+};
+
+// Payment type label
+const getPaymentTypeLabel = (type: string) => {
+  switch (type) {
+    case 'check_mds': return 'MDS Check';
+    case 'check_commercial': return 'Commercial Check';
+    case 'ada': return 'ADA';
+    case 'cash': return 'Cash';
+    default: return type;
+  }
+};
+---
+
+<MainLayout title="Payment Processing">
+  <div class="container-fluid py-6">
+    <!-- Page Header -->
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Payment Processing</h1>
+        <p class="page-description">Manage payment creation, issuance, and clearing</p>
+      </div>
+      <div>
+        <a href="/payments/create" class="btn btn-primary">
+          <i class="pi pi-plus mr-2"></i>
+          Create Payment
+        </a>
+      </div>
+    </div>
+
+    <!-- Statistics Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-5 gap-6 mb-6">
+      <div class="card">
+        <div class="card-body">
+          <p class="text-sm text-gray-600">Pending</p>
+          <p class="text-3xl font-bold text-warning-600 mt-1">{stats.pending}</p>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-body">
+          <p class="text-sm text-gray-600">Issued</p>
+          <p class="text-3xl font-bold text-info-600 mt-1">{stats.issued}</p>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-body">
+          <p class="text-sm text-gray-600">Cleared</p>
+          <p class="text-3xl font-bold text-success-600 mt-1">{stats.cleared}</p>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-body">
+          <p class="text-sm text-gray-600">Stale</p>
+          <p class="text-3xl font-bold text-error-600 mt-1">{stats.stale}</p>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-body">
+          <p class="text-sm text-gray-600">Total Amount</p>
+          <p class="text-2xl font-bold text-gray-900 mt-1">₱{stats.totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Status Tabs -->
+    <div class="card mb-6">
+      <div class="card-body">
+        <div class="flex gap-2 flex-wrap">
+          <a href="?status=pending" class={`btn ${status === 'pending' ? 'btn-primary' : 'btn-ghost'}`}>
+            Pending ({stats.pending})
+          </a>
+          <a href="?status=issued" class={`btn ${status === 'issued' ? 'btn-primary' : 'btn-ghost'}`}>
+            Issued ({stats.issued})
+          </a>
+          <a href="?status=cleared" class={`btn ${status === 'cleared' ? 'btn-primary' : 'btn-ghost'}`}>
+            Cleared ({stats.cleared})
+          </a>
+          <a href="?status=cancelled" class={`btn ${status === 'cancelled' ? 'btn-primary' : 'btn-ghost'}`}>
+            Cancelled ({stats.cancelled})
+          </a>
+          <a href="?status=stale" class={`btn ${status === 'stale' ? 'btn-primary' : 'btn-ghost'}`}>
+            Stale ({stats.stale})
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Payments Table -->
+    {payments.length === 0 ? (
+      <div class="card">
+        <div class="card-body">
+          <div class="text-center py-12">
+            <i class="pi pi-inbox text-6xl text-gray-300 mb-4"></i>
+            <p class="text-gray-500 text-lg">No {status} payments found</p>
+          </div>
+        </div>
+      </div>
+    ) : (
+      <div class="card">
+        <div class="card-header">
+          <h3 class="text-lg font-semibold text-gray-900">
+            {status.charAt(0).toUpperCase() + status.slice(1)} Payments ({payments.length})
+          </h3>
+        </div>
+        <div class="card-body p-0">
+          <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200">
+              <thead class="bg-gray-50">
+                <tr>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Check No</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">DV No</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Payee</th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                  <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
+                  <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Status</th>
+                  <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Actions</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-200">
+                {payments.map(payment => (
+                  <tr class="hover:bg-gray-50 transition-colors">
+                    <td class="px-6 py-4 whitespace-nowrap">
+                      <span class="font-semibold text-gray-900">{payment.checkNo || 'N/A'}</span>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap">
+                      <a href={`/disbursements/${payment.dvId}`} class="text-primary-600 hover:text-primary-800">
+                        {payment.dvNo}
+                      </a>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {formatDate(payment.paymentDate)}
+                    </td>
+                    <td class="px-6 py-4 text-sm text-gray-900">
+                      <div class="max-w-xs truncate" title={payment.payeeName}>
+                        {payment.payeeName}
+                      </div>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                      {getPaymentTypeLabel(payment.paymentType)}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 text-right">
+                      ₱{parseFloat(payment.amount.toString()).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-center">
+                      <span class={`badge ${getStatusBadge(payment.status)}`}>
+                        {payment.status.charAt(0).toUpperCase() + payment.status.slice(1)}
+                      </span>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-center">
+                      <div class="flex items-center justify-center gap-2">
+                        {payment.status === 'pending' && (
+                          <button
+                            class="btn btn-success btn-sm"
+                            onclick={`issuePayment(${payment.id})`}
+                          >
+                            <i class="pi pi-check mr-1"></i>
+                            Issue
+                          </button>
+                        )}
+                        {payment.status === 'issued' && (
+                          <button
+                            class="btn btn-primary btn-sm"
+                            onclick={`clearPayment(${payment.id})`}
+                          >
+                            <i class="pi pi-check-circle mr-1"></i>
+                            Clear
+                          </button>
+                        )}
+                        {(payment.status === 'pending' || payment.status === 'issued') && (
+                          <button
+                            class="btn btn-error btn-sm"
+                            onclick={`cancelPayment(${payment.id})`}
+                          >
+                            <i class="pi pi-times mr-1"></i>
+                            Cancel
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    )}
+  </div>
+
+  <script>
+    async function issuePayment(paymentId: number) {
+      const receivedBy = prompt('Received by (name):');
+      if (!receivedBy) return;
+
+      const orNo = prompt('Official Receipt Number (optional):');
+
+      const confirmed = confirm(`Issue payment to ${receivedBy}?`);
+      if (!confirmed) return;
+
+      try {
+        const response = await fetch(`/api/payments/${paymentId}/issue`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            receivedBy,
+            receivedDate: new Date().toISOString(),
+            orNo: orNo || undefined,
+          }),
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+          alert(data.message);
+          window.location.reload();
+        } else {
+          alert('Error: ' + data.message);
+        }
+      } catch (error) {
+        console.error('Error issuing payment:', error);
+        alert('Failed to issue payment');
+      }
+    }
+
+    async function clearPayment(paymentId: number) {
+      const confirmed = confirm('Mark this payment as cleared?');
+      if (!confirmed) return;
+
+      try {
+        const response = await fetch(`/api/payments/${paymentId}/clear`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            clearDate: new Date().toISOString(),
+          }),
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+          alert(data.message);
+          window.location.reload();
+        } else {
+          alert('Error: ' + data.message);
+        }
+      } catch (error) {
+        console.error('Error clearing payment:', error);
+        alert('Failed to clear payment');
+      }
+    }
+
+    async function cancelPayment(paymentId: number) {
+      const reason = prompt('Reason for cancellation:');
+      if (!reason) return;
+
+      const confirmed = confirm('Cancel this payment?');
+      if (!confirmed) return;
+
+      try {
+        const response = await fetch(`/api/payments/${paymentId}/cancel`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason }),
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+          alert(data.message);
+          window.location.reload();
+        } else {
+          alert('Error: ' + data.message);
+        }
+      } catch (error) {
+        console.error('Error cancelling payment:', error);
+        alert('Failed to cancel payment');
+      }
+    }
+  </script>
+</MainLayout>
