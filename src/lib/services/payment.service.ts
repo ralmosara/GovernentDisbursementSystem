@@ -31,7 +31,7 @@ export interface IssuePaymentData {
 
 export interface PaymentFilters {
   status?: PaymentStatus;
-  paymentType?: PaymentType;
+  paymentType?: PaymentType | PaymentType[];
   fiscalYear?: number;
   dateFrom?: Date;
   dateTo?: Date;
@@ -392,6 +392,10 @@ export class PaymentService {
         paymentDate: payments.paymentDate,
         amount: payments.amount,
         checkNo: payments.checkNo,
+        bankName: payments.bankName,
+        bankAccountNo: payments.bankAccountNo,
+        adaReference: payments.adaReference,
+        adaIssuedDate: payments.adaIssuedDate,
         status: payments.status,
         clearedDate: payments.clearedDate,
         receivedBy: payments.receivedBy,
@@ -416,7 +420,13 @@ export class PaymentService {
     }
 
     if (filters.paymentType) {
-      conditions.push(eq(payments.paymentType, filters.paymentType));
+      if (Array.isArray(filters.paymentType)) {
+        // Handle array of payment types using OR condition
+        const typeConditions = filters.paymentType.map(type => eq(payments.paymentType, type));
+        conditions.push(sql`${payments.paymentType} IN (${sql.join(filters.paymentType.map(t => sql`${t}`), sql`, `)})`);
+      } else {
+        conditions.push(eq(payments.paymentType, filters.paymentType));
+      }
     }
 
     if (filters.fiscalYear) {
