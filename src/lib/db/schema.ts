@@ -1,4 +1,4 @@
-import { mysqlTable, varchar, text, int, decimal, datetime, boolean, json, mysqlEnum, timestamp, primaryKey } from 'drizzle-orm/mysql-core';
+import { mysqlTable, varchar, text, int, decimal, datetime, boolean, json, mysqlEnum, timestamp, primaryKey, date } from 'drizzle-orm/mysql-core';
 import { relations } from 'drizzle-orm';
 
 // ============================================
@@ -401,6 +401,7 @@ export const cashReceipts = mysqlTable('cash_receipts', {
   particulars: text('particulars').notNull(),
   fundClusterId: int('fund_cluster_id').notNull(),
   revenueSourceId: int('revenue_source_id'),
+  bankDepositId: int('bank_deposit_id'),
   createdBy: int('created_by').notNull(),
   createdAt: timestamp('created_at').defaultNow(),
 });
@@ -446,6 +447,66 @@ export const bankReconciliations = mysqlTable('bank_reconciliations', {
   status: mysqlEnum('status', ['draft', 'completed']).default('draft'),
   preparedBy: int('prepared_by').notNull(),
   preparedDate: datetime('prepared_date').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const pettyCashFunds = mysqlTable('petty_cash_funds', {
+  id: int('id').primaryKey().autoincrement(),
+  fundCode: varchar('fund_code', { length: 50 }).unique().notNull(),
+  fundName: varchar('fund_name', { length: 255 }).notNull(),
+  custodian: varchar('custodian', { length: 255 }).notNull(),
+  custodianEmployeeId: int('custodian_employee_id'),
+  fundAmount: decimal('fund_amount', { precision: 15, scale: 2 }).notNull(),
+  currentBalance: decimal('current_balance', { precision: 15, scale: 2 }).notNull(),
+  replenishmentThreshold: decimal('replenishment_threshold', { precision: 15, scale: 2 }),
+  fundClusterId: int('fund_cluster_id').notNull(),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
+});
+
+export const pettyCashTransactions = mysqlTable('petty_cash_transactions', {
+  id: int('id').primaryKey().autoincrement(),
+  pettyCashFundId: int('petty_cash_fund_id').notNull(),
+  transactionType: mysqlEnum('transaction_type', ['disbursement', 'replenishment']).notNull(),
+  transactionDate: datetime('transaction_date').notNull(),
+  amount: decimal('amount', { precision: 15, scale: 2 }).notNull(),
+  purpose: text('purpose'),
+  orNo: varchar('or_no', { length: 50 }),
+  payee: varchar('payee', { length: 255 }),
+  dvId: int('dv_id'),
+  createdBy: int('created_by').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const cashAdvances = mysqlTable('cash_advances', {
+  id: int('id').primaryKey().autoincrement(),
+  caNo: varchar('ca_no', { length: 50 }).unique().notNull(),
+  employeeId: int('employee_id').notNull(),
+  fundClusterId: int('fund_cluster_id').notNull(),
+  amount: decimal('amount', { precision: 15, scale: 2 }).notNull(),
+  purpose: text('purpose').notNull(),
+  dateIssued: datetime('date_issued').notNull(),
+  dueDateReturn: datetime('due_date_return'),
+  dateLiquidated: datetime('date_liquidated'),
+  status: mysqlEnum('status', ['draft', 'approved', 'released', 'liquidated', 'returned']).default('draft'),
+  dvId: int('dv_id'),
+  liquidationDvId: int('liquidation_dv_id'),
+  remarks: text('remarks'),
+  createdBy: int('created_by').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
+});
+
+export const dailyCashPosition = mysqlTable('daily_cash_position', {
+  id: int('id').primaryKey().autoincrement(),
+  reportDate: date('report_date').notNull(),
+  fundClusterId: int('fund_cluster_id').notNull(),
+  openingBalance: decimal('opening_balance', { precision: 15, scale: 2 }).notNull(),
+  receipts: decimal('receipts', { precision: 15, scale: 2 }).notNull().default('0'),
+  disbursements: decimal('disbursements', { precision: 15, scale: 2 }).notNull().default('0'),
+  closingBalance: decimal('closing_balance', { precision: 15, scale: 2 }).notNull(),
+  preparedBy: int('prepared_by').notNull(),
   createdAt: timestamp('created_at').defaultNow(),
 });
 
@@ -529,7 +590,7 @@ export const fixedAssets = mysqlTable('fixed_assets', {
   description: text('description').notNull(),
   acquisitionDate: datetime('acquisition_date').notNull(),
   acquisitionCost: decimal('acquisition_cost', { precision: 15, scale: 2 }).notNull(),
-  salvageValue: decimal('salvage_value', { length: 15 }).default('0'),
+  salvageValue: decimal('salvage_value', { precision: 15, scale: 2 }).default('0'),
   usefulLife: int('useful_life').notNull(),
   location: varchar('location', { length: 255 }),
   custodian: varchar('custodian', { length: 255 }),
@@ -562,6 +623,51 @@ export const inventoryItems = mysqlTable('inventory_items', {
   minimumLevel: int('minimum_level').default(0),
   maximumLevel: int('maximum_level'),
   isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const assetDisposals = mysqlTable('asset_disposals', {
+  id: int('id').primaryKey().autoincrement(),
+  disposalNo: varchar('disposal_no', { length: 50 }).notNull().unique(),
+  assetId: int('asset_id').notNull(),
+  disposalDate: date('disposal_date').notNull(),
+  disposalMethod: varchar('disposal_method', { length: 50 }).notNull(), // 'sale', 'donation', 'scrap', 'transfer'
+  disposalValue: decimal('disposal_value', { precision: 15, scale: 2 }),
+  buyerRecipient: varchar('buyer_recipient', { length: 255 }),
+  approvedBy: int('approved_by'),
+  remarks: text('remarks'),
+  createdBy: int('created_by').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const inventoryTransactions = mysqlTable('inventory_transactions', {
+  id: int('id').primaryKey().autoincrement(),
+  transactionNo: varchar('transaction_no', { length: 50 }).notNull().unique(),
+  itemId: int('item_id').notNull(),
+  transactionDate: date('transaction_date').notNull(),
+  transactionType: varchar('transaction_type', { length: 50 }).notNull(), // 'receipt', 'issue', 'adjustment', 'transfer'
+  quantity: int('quantity').notNull(),
+  unitCost: decimal('unit_cost', { precision: 15, scale: 2 }),
+  reference: varchar('reference', { length: 100 }), // PO, RIS, etc.
+  requestedBy: varchar('requested_by', { length: 255 }),
+  remarks: text('remarks'),
+  createdBy: int('created_by').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const physicalInventoryCount = mysqlTable('physical_inventory_count', {
+  id: int('id').primaryKey().autoincrement(),
+  countNo: varchar('count_no', { length: 50 }).notNull().unique(),
+  countDate: date('count_date').notNull(),
+  itemId: int('item_id').notNull(),
+  systemQuantity: int('system_quantity').notNull(),
+  physicalQuantity: int('physical_quantity').notNull(),
+  variance: int('variance').notNull(),
+  varianceValue: decimal('variance_value', { precision: 15, scale: 2 }),
+  remarks: text('remarks'),
+  countedBy: varchar('counted_by', { length: 255 }),
+  verifiedBy: int('verified_by'),
+  createdBy: int('created_by').notNull(),
   createdAt: timestamp('created_at').defaultNow(),
 });
 
@@ -694,5 +800,130 @@ export const registryObligationsRelations = relations(registryObligations, ({ on
   allotment: one(registryAllotments, {
     fields: [registryObligations.allotmentId],
     references: [registryAllotments.id],
+  }),
+}));
+
+// ============================================================================
+// REVENUE MANAGEMENT RELATIONS
+// ============================================================================
+
+export const revenueSourcesRelations = relations(revenueSources, ({ many }) => ({
+  revenueEntries: many(revenueEntries),
+  accountsReceivable: many(accountsReceivable),
+  cashReceipts: many(cashReceipts),
+}));
+
+export const revenueEntriesRelations = relations(revenueEntries, ({ one }) => ({
+  revenueSource: one(revenueSources, {
+    fields: [revenueEntries.revenueSourceId],
+    references: [revenueSources.id],
+  }),
+  fundCluster: one(fundClusters, {
+    fields: [revenueEntries.fundClusterId],
+    references: [fundClusters.id],
+  }),
+  createdByUser: one(users, {
+    fields: [revenueEntries.createdBy],
+    references: [users.id],
+  }),
+}));
+
+export const accountsReceivableRelations = relations(accountsReceivable, ({ one, many }) => ({
+  revenueSource: one(revenueSources, {
+    fields: [accountsReceivable.revenueSourceId],
+    references: [revenueSources.id],
+  }),
+  collections: many(collections),
+  createdByUser: one(users, {
+    fields: [accountsReceivable.createdBy],
+    references: [users.id],
+  }),
+}));
+
+export const collectionsRelations = relations(collections, ({ one }) => ({
+  accountsReceivable: one(accountsReceivable, {
+    fields: [collections.arId],
+    references: [accountsReceivable.id],
+  }),
+  createdByUser: one(users, {
+    fields: [collections.createdBy],
+    references: [users.id],
+  }),
+}));
+
+// Asset Categories Relations
+export const assetCategoriesRelations = relations(assetCategories, ({ many }) => ({
+  fixedAssets: many(fixedAssets),
+}));
+
+// Fixed Assets Relations
+export const fixedAssetsRelations = relations(fixedAssets, ({ one, many }) => ({
+  category: one(assetCategories, {
+    fields: [fixedAssets.assetCategoryId],
+    references: [assetCategories.id],
+  }),
+  depreciationSchedules: many(depreciationSchedule),
+  disposals: many(assetDisposals),
+  createdByUser: one(users, {
+    fields: [fixedAssets.createdBy],
+    references: [users.id],
+  }),
+}));
+
+// Depreciation Schedule Relations
+export const depreciationScheduleRelations = relations(depreciationSchedule, ({ one }) => ({
+  asset: one(fixedAssets, {
+    fields: [depreciationSchedule.assetId],
+    references: [fixedAssets.id],
+  }),
+}));
+
+// Asset Disposals Relations
+export const assetDisposalsRelations = relations(assetDisposals, ({ one }) => ({
+  asset: one(fixedAssets, {
+    fields: [assetDisposals.assetId],
+    references: [fixedAssets.id],
+  }),
+  approvedByUser: one(users, {
+    fields: [assetDisposals.approvedBy],
+    references: [users.id],
+  }),
+  createdByUser: one(users, {
+    fields: [assetDisposals.createdBy],
+    references: [users.id],
+  }),
+}));
+
+// Inventory Items Relations
+export const inventoryItemsRelations = relations(inventoryItems, ({ many }) => ({
+  transactions: many(inventoryTransactions),
+  counts: many(physicalInventoryCount),
+}));
+
+// Inventory Transactions Relations
+export const inventoryTransactionsRelations = relations(inventoryTransactions, ({ one }) => ({
+  item: one(inventoryItems, {
+    fields: [inventoryTransactions.itemId],
+    references: [inventoryItems.id],
+  }),
+  createdByUser: one(users, {
+    fields: [inventoryTransactions.createdBy],
+    references: [users.id],
+  }),
+}));
+
+// Physical Inventory Count Relations
+export const physicalInventoryCountRelations = relations(physicalInventoryCount, ({ one }) => ({
+  item: one(inventoryItems, {
+    fields: [physicalInventoryCount.itemId],
+    references: [inventoryItems.id],
+  }),
+  verifiedByUser: one(users, {
+    fields: [physicalInventoryCount.verifiedBy],
+    references: [users.id],
+  }),
+  createdByUser: one(users, {
+    fields: [physicalInventoryCount.createdBy],
+    references: [users.id],
   }),
 }));

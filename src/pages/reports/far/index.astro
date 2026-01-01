@@ -1,0 +1,211 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+const currentYear = new Date().getFullYear();
+---
+
+<MainLayout title="FAR Reports">
+  <div class="container-fluid py-6">
+    <!-- Page Header -->
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Financial Accountability Reports (FAR)</h1>
+        <p class="page-description">Commission on Audit (COA) compliant financial reports</p>
+      </div>
+      <div>
+        <a href="/reports" class="btn btn-ghost">
+          <i class="pi pi-arrow-left mr-2"></i>
+          Back to All Reports
+        </a>
+      </div>
+    </div>
+
+    <!-- FAR Report Categories -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <!-- FAR No. 1 Card -->
+      <div class="card hover:shadow-lg transition-shadow">
+        <div class="card-header bg-green-50">
+          <div class="flex items-center gap-3">
+            <div class="w-12 h-12 bg-green-600 rounded-lg flex items-center justify-center">
+              <i class="pi pi-briefcase text-2xl text-white"></i>
+            </div>
+            <div>
+              <h3 class="text-lg font-semibold text-gray-900">FAR No. 1</h3>
+              <p class="text-sm text-gray-600">Statement of Appropriations, Allotments, Obligations, Disbursements and Balances</p>
+            </div>
+          </div>
+        </div>
+        <div class="card-body">
+          <p class="text-gray-700 mb-4">
+            Annual budget cycle report showing the complete financial position by fund cluster for a fiscal year.
+          </p>
+          <div class="bg-gray-50 p-3 rounded-lg mb-4">
+            <p class="text-sm font-semibold text-gray-700 mb-2">Report includes:</p>
+            <ul class="text-sm text-gray-600 space-y-1">
+              <li>• Total appropriations by fund cluster</li>
+              <li>• Allotments released</li>
+              <li>• Obligations incurred</li>
+              <li>• Actual disbursements</li>
+              <li>• Unallotted appropriations</li>
+              <li>• Unobligated allotments</li>
+              <li>• Unpaid obligations</li>
+            </ul>
+          </div>
+          <a href="/reports/far/1" class="btn btn-primary w-full">
+            <i class="pi pi-file-excel mr-2"></i>
+            Generate FAR No. 1
+          </a>
+        </div>
+      </div>
+
+      <!-- FAR No. 3 Card -->
+      <div class="card hover:shadow-lg transition-shadow">
+        <div class="card-header bg-purple-50">
+          <div class="flex items-center gap-3">
+            <div class="w-12 h-12 bg-purple-600 rounded-lg flex items-center justify-center">
+              <i class="pi pi-clock text-2xl text-white"></i>
+            </div>
+            <div>
+              <h3 class="text-lg font-semibold text-gray-900">FAR No. 3</h3>
+              <p class="text-sm text-gray-600">Statement of Aging of Due and Demandable Obligations</p>
+            </div>
+          </div>
+        </div>
+        <div class="card-body">
+          <p class="text-gray-700 mb-4">
+            Aging report showing obligations categorized by age to monitor overdue payables and obligations.
+          </p>
+          <div class="bg-gray-50 p-3 rounded-lg mb-4">
+            <p class="text-sm font-semibold text-gray-700 mb-2">Report includes:</p>
+            <ul class="text-sm text-gray-600 space-y-1">
+              <li>• Current obligations (0-30 days)</li>
+              <li>• 31-60 days aging</li>
+              <li>• 61-90 days aging</li>
+              <li>• Over 90 days aging</li>
+              <li>• Payee information</li>
+              <li>• Due dates and reference numbers</li>
+            </ul>
+          </div>
+          <a href="/reports/far/3" class="btn btn-primary w-full">
+            <i class="pi pi-file-excel mr-2"></i>
+            Generate FAR No. 3
+          </a>
+        </div>
+      </div>
+
+      <!-- FAR No. 4 Card -->
+      <div class="card hover:shadow-lg transition-shadow">
+        <div class="card-header bg-orange-50">
+          <div class="flex items-center gap-3">
+            <div class="w-12 h-12 bg-orange-600 rounded-lg flex items-center justify-center">
+              <i class="pi pi-dollar text-2xl text-white"></i>
+            </div>
+            <div>
+              <h3 class="text-lg font-semibold text-gray-900">FAR No. 4</h3>
+              <p class="text-sm text-gray-600">Monthly Report of Disbursements</p>
+            </div>
+          </div>
+        </div>
+        <div class="card-body">
+          <p class="text-gray-700 mb-4">
+            Monthly disbursement listing showing all payments made during a specific month.
+          </p>
+          <div class="bg-gray-50 p-3 rounded-lg mb-4">
+            <p class="text-sm font-semibold text-gray-700 mb-2">Report includes:</p>
+            <ul class="text-sm text-gray-600 space-y-1">
+              <li>• DV numbers and dates</li>
+              <li>• Payee information</li>
+              <li>• Check numbers</li>
+              <li>• Particulars/purpose</li>
+              <li>• Disbursement amounts</li>
+              <li>• Monthly totals and counts</li>
+            </ul>
+          </div>
+          <a href="/reports/far/4" class="btn btn-primary w-full">
+            <i class="pi pi-file-excel mr-2"></i>
+            Generate FAR No. 4
+          </a>
+        </div>
+      </div>
+
+      <!-- Information Card -->
+      <div class="card bg-blue-50 border-blue-200">
+        <div class="card-header bg-blue-100">
+          <div class="flex items-center gap-3">
+            <i class="pi pi-info-circle text-2xl text-blue-600"></i>
+            <h3 class="text-lg font-semibold text-blue-900">FAR Report Information</h3>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="space-y-3">
+            <div>
+              <p class="text-sm font-semibold text-blue-900 mb-1">COA Compliance</p>
+              <p class="text-sm text-blue-700">All FAR reports follow COA-prescribed formats and standards for government financial reporting.</p>
+            </div>
+            <div>
+              <p class="text-sm font-semibold text-blue-900 mb-1">Report Formats</p>
+              <p class="text-sm text-blue-700">Reports can be generated in Excel format for easy submission to COA.</p>
+            </div>
+            <div>
+              <p class="text-sm font-semibold text-blue-900 mb-1">Fund Clusters</p>
+              <p class="text-sm text-blue-700">All reports support filtering by specific fund cluster or viewing all funds combined.</p>
+            </div>
+            <div>
+              <p class="text-sm font-semibold text-blue-900 mb-1">Fiscal Year</p>
+              <p class="text-sm text-blue-700">Default fiscal year is {currentYear}. Historical reports are available for previous years.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="card mt-6">
+      <div class="card-header">
+        <h3 class="text-lg font-semibold text-gray-900">Quick Actions</h3>
+      </div>
+      <div class="card-body">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <button
+            onclick="window.location.href='/reports/far/1'"
+            class="btn btn-ghost justify-start text-left"
+          >
+            <i class="pi pi-briefcase mr-3 text-green-600"></i>
+            <div>
+              <p class="font-semibold">Current Year FAR No. 1</p>
+              <p class="text-xs text-gray-500">Budget cycle for FY {currentYear}</p>
+            </div>
+          </button>
+
+          <button
+            onclick="window.location.href='/reports/far/3'"
+            class="btn btn-ghost justify-start text-left"
+          >
+            <i class="pi pi-clock mr-3 text-purple-600"></i>
+            <div>
+              <p class="font-semibold">Aging Obligations</p>
+              <p class="text-xs text-gray-500">Current aging report</p>
+            </div>
+          </button>
+
+          <button
+            onclick="window.location.href='/reports/far/4'"
+            class="btn btn-ghost justify-start text-left"
+          >
+            <i class="pi pi-dollar mr-3 text-orange-600"></i>
+            <div>
+              <p class="font-semibold">This Month's Disbursements</p>
+              <p class="text-xs text-gray-500">FAR No. 4 monthly report</p>
+            </div>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</MainLayout>

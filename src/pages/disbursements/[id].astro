@@ -124,10 +124,16 @@ const getWorkflowStatusBadge = (status: string) => {
             {getStatusLabel(dv.status)}
           </span>
           {dv.status === 'approved' && (
-            <a href={`/disbursements/${id}/print`} target="_blank" class="btn btn-secondary btn-sm">
-              <i class="pi pi-print mr-2"></i>
-              Print DV
-            </a>
+            <>
+              <a href={`/disbursements/${id}/print`} target="_blank" class="btn btn-secondary btn-sm">
+                <i class="pi pi-print mr-2"></i>
+                Print DV
+              </a>
+              <a href={`/api/disbursements/${id}/excel`} class="btn btn-success btn-sm">
+                <i class="pi pi-file-excel mr-2"></i>
+                Download Excel
+              </a>
+            </>
           )}
         </div>
       </div>

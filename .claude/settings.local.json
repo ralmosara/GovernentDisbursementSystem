@@ -8,7 +8,17 @@
       "Bash(npm run db:generate:*)",
       "Bash(npm run dev:*)",
       "Bash(mysql:*)",
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(\"c:\\\\Users\\\\pc\\\\Documents\\\\GitHub\\\\GovernentDisbursementSystem\\\\src\\\\pages\\\\api\\\\disbursements\\\\[id]\\\\approve.ts\")",
+      "Bash(\"c:\\\\Users\\\\pc\\\\Documents\\\\GitHub\\\\GovernentDisbursementSystem\\\\src\\\\pages\\\\api\\\\disbursements\\\\[id]\\\\reject.ts\")",
+      "Bash(npx tsc:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(npx tsx:*)",
+      "Bash(npx:*)",
+      "Bash(dir /B /S \"c:\\\\Users\\\\pc\\\\Documents\\\\GitHub\\\\GovernentDisbursementSystem\\\\src\\\\components\")",
+      "Bash(findstr:*)",
+      "Bash(dir /s /b \"c:\\\\Users\\\\pc\\\\Documents\\\\GitHub\\\\GovernentDisbursementSystem\\\\src\\\\pages\\\\cash\")"
     ]
   }
 }

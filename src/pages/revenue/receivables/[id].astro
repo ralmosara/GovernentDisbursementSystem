@@ -1,0 +1,322 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import { revenueService } from '../../../lib/services/revenue.service';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+const { id } = Astro.params;
+
+if (!id) {
+  return Astro.redirect('/revenue/receivables');
+}
+
+// Fetch AR details with collection history
+let ar;
+try {
+  ar = await revenueService.getARById(parseInt(id));
+} catch (error) {
+  console.error('Error loading AR:', error);
+  return Astro.redirect('/revenue/receivables');
+}
+
+// Check if overdue
+const isOverdue = new Date(ar.dueDate) < new Date() && ar.status !== 'paid' && ar.status !== 'written_off';
+const daysOverdue = isOverdue
+  ? Math.ceil((new Date().getTime() - new Date(ar.dueDate).getTime()) / (1000 * 60 * 60 * 24))
+  : 0;
+---
+
+<MainLayout title={`AR - ${ar.arNo}`}>
+  <div class="container mx-auto px-4 py-6">
+    <!-- Breadcrumb -->
+    <nav class="flex mb-6" aria-label="Breadcrumb">
+      <ol class="inline-flex items-center space-x-1 md:space-x-3">
+        <li class="inline-flex items-center">
+          <a href="/revenue" class="text-gray-700 hover:text-primary-600">
+            Revenue
+          </a>
+        </li>
+        <li>
+          <div class="flex items-center">
+            <i class="pi pi-angle-right text-gray-400"></i>
+            <a href="/revenue/receivables" class="ml-1 text-gray-700 hover:text-primary-600 md:ml-2">
+              Accounts Receivable
+            </a>
+          </div>
+        </li>
+        <li aria-current="page">
+          <div class="flex items-center">
+            <i class="pi pi-angle-right text-gray-400"></i>
+            <span class="ml-1 text-gray-500 md:ml-2">{ar.arNo}</span>
+          </div>
+        </li>
+      </ol>
+    </nav>
+
+    <!-- Page Header -->
+    <div class="mb-6 flex items-center justify-between">
+      <div>
+        <h1 class="text-3xl font-bold text-gray-900">AR: {ar.arNo}</h1>
+        <p class="mt-1 text-sm text-gray-600">
+          Debtor: {ar.debtorName}
+        </p>
+      </div>
+      <div class="flex items-center space-x-3">
+        {ar.status === 'outstanding' && (
+          <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-yellow-100 text-yellow-800">
+            Outstanding
+          </span>
+        )}
+        {ar.status === 'partial' && (
+          <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-blue-100 text-blue-800">
+            Partial
+          </span>
+        )}
+        {ar.status === 'paid' && (
+          <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
+            Paid
+          </span>
+        )}
+        {ar.status === 'written_off' && (
+          <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
+            Written Off
+          </span>
+        )}
+        {ar.status !== 'paid' && ar.status !== 'written_off' && (
+          <a
+            href="/revenue/collections/create"
+            class="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700"
+          >
+            <i class="pi pi-money-bill mr-2"></i>
+            Record Payment
+          </a>
+        )}
+      </div>
+    </div>
+
+    <!-- Overdue Alert -->
+    {isOverdue && (
+      <div class="mb-6 bg-red-50 border border-red-200 rounded-lg p-4">
+        <div class="flex items-center">
+          <i class="pi pi-exclamation-triangle text-red-600 text-xl mr-3"></i>
+          <div>
+            <h3 class="text-sm font-semibold text-red-800">Payment Overdue</h3>
+            <p class="text-sm text-red-700 mt-1">
+              This account is {daysOverdue} day(s) past due. Please follow up with the debtor.
+            </p>
+          </div>
+        </div>
+      </div>
+    )}
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- Main Details -->
+      <div class="lg:col-span-2 space-y-6">
+        <!-- AR Information -->
+        <div class="bg-white rounded-lg shadow border border-gray-200 p-6">
+          <h2 class="text-lg font-semibold text-gray-900 mb-4">AR Information</h2>
+          <dl class="grid grid-cols-2 gap-4">
+            <div>
+              <dt class="text-sm font-medium text-gray-500">AR Number</dt>
+              <dd class="mt-1 text-sm text-gray-900 font-semibold">{ar.arNo}</dd>
+            </div>
+            <div>
+              <dt class="text-sm font-medium text-gray-500">Status</dt>
+              <dd class="mt-1 text-sm">{ar.status.toUpperCase()}</dd>
+            </div>
+            <div>
+              <dt class="text-sm font-medium text-gray-500">Debtor Name</dt>
+              <dd class="mt-1 text-sm text-gray-900">{ar.debtorName}</dd>
+            </div>
+            <div>
+              <dt class="text-sm font-medium text-gray-500">Revenue Source</dt>
+              <dd class="mt-1 text-sm text-gray-900">
+                <a href={`/revenue/sources/${ar.revenueSource.id}`} class="text-primary-600 hover:text-primary-800">
+                  {ar.revenueSource.name}
+                </a>
+              </dd>
+            </div>
+            {ar.invoiceNo && (
+              <div>
+                <dt class="text-sm font-medium text-gray-500">Invoice Number</dt>
+                <dd class="mt-1 text-sm text-gray-900">{ar.invoiceNo}</dd>
+              </div>
+            )}
+            <div>
+              <dt class="text-sm font-medium text-gray-500">Invoice Date</dt>
+              <dd class="mt-1 text-sm text-gray-900">
+                {new Date(ar.invoiceDate).toLocaleDateString('en-PH', {
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric',
+                })}
+              </dd>
+            </div>
+            <div>
+              <dt class="text-sm font-medium text-gray-500">Due Date</dt>
+              <dd class="mt-1 text-sm text-gray-900">
+                {new Date(ar.dueDate).toLocaleDateString('en-PH', {
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric',
+                })}
+                {isOverdue && (
+                  <span class="ml-2 text-red-600 font-semibold">({daysOverdue} days overdue)</span>
+                )}
+              </dd>
+            </div>
+          </dl>
+        </div>
+
+        <!-- Financial Summary -->
+        <div class="bg-white rounded-lg shadow border border-gray-200 p-6">
+          <h2 class="text-lg font-semibold text-gray-900 mb-4">Financial Summary</h2>
+          <dl class="grid grid-cols-3 gap-4">
+            <div>
+              <dt class="text-sm font-medium text-gray-500">Original Amount</dt>
+              <dd class="mt-1 text-2xl font-bold text-gray-900">
+                ₱{parseFloat(ar.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+              </dd>
+            </div>
+            <div>
+              <dt class="text-sm font-medium text-gray-500">Amount Collected</dt>
+              <dd class="mt-1 text-2xl font-bold text-green-600">
+                ₱{parseFloat(ar.amountCollected).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+              </dd>
+            </div>
+            <div>
+              <dt class="text-sm font-medium text-gray-500">Outstanding Balance</dt>
+              <dd class="mt-1 text-2xl font-bold text-yellow-600">
+                ₱{parseFloat(ar.balance).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+              </dd>
+            </div>
+          </dl>
+        </div>
+
+        <!-- Collection History -->
+        <div class="bg-white rounded-lg shadow border border-gray-200">
+          <div class="px-6 py-4 border-b border-gray-200">
+            <h2 class="text-lg font-semibold text-gray-900">Collection History</h2>
+          </div>
+          {ar.collections && ar.collections.length > 0 ? (
+            <div class="overflow-x-auto">
+              <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Collection No
+                    </th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Date
+                    </th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Payment Mode
+                    </th>
+                    <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      Amount
+                    </th>
+                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      OR No
+                    </th>
+                  </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                  {ar.collections.map((collection: any) => (
+                    <tr class="hover:bg-gray-50">
+                      <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-primary-600">
+                        <a href={`/revenue/collections/${collection.id}`}>{collection.collectionNo}</a>
+                      </td>
+                      <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {new Date(collection.collectionDate).toLocaleDateString('en-PH')}
+                      </td>
+                      <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 capitalize">
+                        {collection.paymentMode}
+                      </td>
+                      <td class="px-6 py-4 whitespace-nowrap text-sm text-right font-medium text-gray-900">
+                        ₱{parseFloat(collection.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                      </td>
+                      <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        {collection.orNo || '-'}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div class="px-6 py-12 text-center">
+              <i class="pi pi-inbox text-gray-400 text-4xl mb-4"></i>
+              <p class="text-gray-500">No collections recorded yet</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <!-- Sidebar -->
+      <div class="space-y-6">
+        <!-- Quick Actions -->
+        <div class="bg-white rounded-lg shadow border border-gray-200 p-6">
+          <h3 class="text-lg font-semibold text-gray-900 mb-4">Actions</h3>
+          <div class="space-y-3">
+            <a
+              href="/revenue/receivables"
+              class="block w-full px-4 py-2 text-center border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+            >
+              <i class="pi pi-arrow-left mr-2"></i>
+              Back to AR List
+            </a>
+            {ar.status !== 'paid' && ar.status !== 'written_off' && (
+              <a
+                href="/revenue/collections/create"
+                class="block w-full px-4 py-2 text-center border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700"
+              >
+                <i class="pi pi-money-bill mr-2"></i>
+                Record Payment
+              </a>
+            )}
+          </div>
+        </div>
+
+        <!-- Payment Progress -->
+        <div class="bg-blue-50 border border-blue-200 rounded-lg p-6">
+          <h3 class="text-sm font-semibold text-blue-900 mb-3">Payment Progress</h3>
+          <div class="space-y-2">
+            <div class="flex justify-between text-sm">
+              <span class="text-blue-700">Collection Rate:</span>
+              <span class="font-medium text-blue-900">
+                {((parseFloat(ar.amountCollected) / parseFloat(ar.amount)) * 100).toFixed(1)}%
+              </span>
+            </div>
+            <div class="w-full bg-blue-200 rounded-full h-2.5">
+              <div
+                class="bg-blue-600 h-2.5 rounded-full"
+                style={`width: ${Math.min(100, (parseFloat(ar.amountCollected) / parseFloat(ar.amount)) * 100)}%`}
+              ></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Metadata -->
+        <div class="bg-white rounded-lg shadow border border-gray-200 p-6">
+          <h3 class="text-sm font-semibold text-gray-900 mb-3">Record Information</h3>
+          <dl class="space-y-2 text-sm">
+            <div>
+              <dt class="text-gray-500">Created By:</dt>
+              <dd class="text-gray-900 font-medium">{ar.createdBy?.fullName || '-'}</dd>
+            </div>
+            <div>
+              <dt class="text-gray-500">Created At:</dt>
+              <dd class="text-gray-900">
+                {new Date(ar.createdAt).toLocaleDateString('en-PH')}
+              </dd>
+            </div>
+          </dl>
+        </div>
+      </div>
+    </div>
+  </div>
+</MainLayout>

@@ -1,0 +1,354 @@
+---
+import { TravelService } from '../../../../lib/services/travel.service';
+
+const user = Astro.locals.user;
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+const { id } = Astro.params;
+if (!id || isNaN(parseInt(id))) {
+  return Astro.redirect('/travel/itinerary');
+}
+
+const iot = await TravelService.getIoTById(parseInt(id));
+const ctc = await TravelService.getCTCByIoTId(parseInt(id));
+
+if (!iot || !ctc) {
+  return Astro.redirect('/travel/itinerary');
+}
+
+const formatDate = (date: Date | string | null) => {
+  if (!date) return 'N/A';
+  const d = typeof date === 'string' ? new Date(date) : date;
+  return d.toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' });
+};
+
+const calculateDays = (start: Date | string, end: Date | string) => {
+  const startDate = typeof start === 'string' ? new Date(start) : start;
+  const endDate = typeof end === 'string' ? new Date(end) : end;
+  const diff = endDate.getTime() - startDate.getTime();
+  return Math.ceil(diff / (1000 * 60 * 60 * 24)) + 1;
+};
+
+const plannedDays = calculateDays(iot.iot.departureDate, iot.iot.returnDate);
+const actualDays = calculateDays(ctc.ctc.actualDepartureDate, ctc.ctc.actualReturnDate);
+---
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CTC {ctc.ctc.ctcNo} - Print</title>
+  <style>
+    @media print {
+      @page {
+        size: letter;
+        margin: 0.5in;
+      }
+
+      body {
+        print-color-adjust: exact;
+        -webkit-print-color-adjust: exact;
+      }
+
+      .no-print {
+        display: none !important;
+      }
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: Arial, sans-serif;
+      font-size: 11pt;
+      line-height: 1.4;
+      color: #000;
+      background: #fff;
+      padding: 20px;
+    }
+
+    .ctc-container {
+      max-width: 8.5in;
+      margin: 0 auto;
+      background: white;
+      border: 2px solid #000;
+      padding: 0.5in;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 20px;
+      border-bottom: 2px solid #000;
+      padding-bottom: 10px;
+    }
+
+    .header h1 {
+      font-size: 12pt;
+      font-weight: bold;
+      margin-bottom: 3px;
+    }
+
+    .header h2 {
+      font-size: 16pt;
+      font-weight: bold;
+      margin: 10px 0;
+    }
+
+    .ctc-number {
+      font-size: 12pt;
+      font-weight: bold;
+      margin-bottom: 15px;
+      text-align: right;
+    }
+
+    .section {
+      margin-bottom: 15px;
+    }
+
+    .field {
+      margin-bottom: 8px;
+      display: flex;
+    }
+
+    .field-label {
+      font-weight: bold;
+      width: 200px;
+      flex-shrink: 0;
+    }
+
+    .field-value {
+      flex: 1;
+      border-bottom: 1px solid #000;
+      padding-bottom: 2px;
+    }
+
+    .section-title {
+      font-weight: bold;
+      font-size: 12pt;
+      margin: 20px 0 10px 0;
+      text-decoration: underline;
+    }
+
+    .comparison-box {
+      border: 2px solid #000;
+      padding: 15px;
+      margin: 20px 0;
+      background: #f9f9f9;
+    }
+
+    .comparison-row {
+      display: grid;
+      grid-template-columns: 200px 1fr 1fr;
+      gap: 10px;
+      margin-bottom: 8px;
+      font-size: 11pt;
+    }
+
+    .comparison-row.header {
+      font-weight: bold;
+      border-bottom: 2px solid #000;
+      padding-bottom: 5px;
+      margin-bottom: 10px;
+    }
+
+    .variance {
+      font-style: italic;
+      color: #555;
+    }
+
+    .certification-box {
+      border: 2px solid #000;
+      padding: 15px;
+      margin: 20px 0;
+      min-height: 100px;
+    }
+
+    .cert-text {
+      text-align: justify;
+      margin-bottom: 10px;
+      line-height: 1.6;
+    }
+
+    .checkbox-item {
+      margin: 10px 0;
+      display: flex;
+      align-items: center;
+    }
+
+    .checkbox {
+      width: 15px;
+      height: 15px;
+      border: 1px solid #000;
+      margin-right: 10px;
+      display: inline-block;
+    }
+
+    .checkbox.checked::after {
+      content: '✓';
+      display: block;
+      text-align: center;
+      font-weight: bold;
+    }
+
+    .signatures {
+      margin-top: 40px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 30px;
+    }
+
+    .signature-box {
+      text-align: center;
+    }
+
+    .signature-line {
+      border-top: 1px solid #000;
+      margin-top: 50px;
+      padding-top: 5px;
+      font-weight: bold;
+    }
+
+    .signature-title {
+      font-size: 9pt;
+      margin-top: 3px;
+    }
+
+    .print-button {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      padding: 12px 24px;
+      background: #2563eb;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      cursor: pointer;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+
+    .print-button:hover {
+      background: #1d4ed8;
+    }
+  </style>
+</head>
+<body>
+  <button class="print-button no-print" onclick="window.print()">Print</button>
+
+  <div class="ctc-container">
+    <!-- Header -->
+    <div class="header">
+      <h1>Republic of the Philippines</h1>
+      <h1>[OFFICE NAME]</h1>
+      <h2>CERTIFICATE OF TRAVEL COMPLETED</h2>
+    </div>
+
+    <!-- CTC Number -->
+    <div class="ctc-number">
+      CTC No: {ctc.ctc.ctcNo}
+    </div>
+
+    <!-- Reference Information -->
+    <div class="section">
+      <div class="field">
+        <span class="field-label">Reference IoT No:</span>
+        <span class="field-value">{iot.iot.iotNo}</span>
+      </div>
+      <div class="field">
+        <span class="field-label">Name of Employee:</span>
+        <span class="field-value">{iot.employee.firstName} {iot.employee.lastName}</span>
+      </div>
+      <div class="field">
+        <span class="field-label">Position:</span>
+        <span class="field-value">{iot.employee.position || 'N/A'}</span>
+      </div>
+      <div class="field">
+        <span class="field-label">Destination:</span>
+        <span class="field-value">{iot.iot.destination}</span>
+      </div>
+    </div>
+
+    <!-- Travel Comparison -->
+    <div class="section-title">TRAVEL PERIOD COMPARISON</div>
+    <div class="comparison-box">
+      <div class="comparison-row header">
+        <span></span>
+        <span>Planned</span>
+        <span>Actual</span>
+      </div>
+      <div class="comparison-row">
+        <span>Departure Date:</span>
+        <span>{formatDate(iot.iot.departureDate)}</span>
+        <span>{formatDate(ctc.ctc.actualDepartureDate)}</span>
+      </div>
+      <div class="comparison-row">
+        <span>Return Date:</span>
+        <span>{formatDate(iot.iot.returnDate)}</span>
+        <span>{formatDate(ctc.ctc.actualReturnDate)}</span>
+      </div>
+      <div class="comparison-row">
+        <span>Duration:</span>
+        <span>{plannedDays} day(s)</span>
+        <span>{actualDays} day(s)</span>
+      </div>
+      {actualDays !== plannedDays && (
+        <div class="variance">
+          Variance: {actualDays > plannedDays ? '+' : ''}{actualDays - plannedDays} day(s)
+        </div>
+      )}
+    </div>
+
+    <!-- Certification -->
+    <div class="section-title">CERTIFICATION</div>
+    <div class="certification-box">
+      <div class="cert-text">
+        This is to certify that the travel indicated above has been completed as authorized in the Itinerary of Travel.
+      </div>
+
+      <div class="checkbox-item">
+        <span class={`checkbox ${ctc.ctc.travelCompleted ? 'checked' : ''}`}></span>
+        <span>I certify that the travel was completed as authorized and necessary in the performance of official functions.</span>
+      </div>
+
+      {ctc.ctc.completionRemarks && (
+        <div style="margin-top: 15px;">
+          <strong>Remarks:</strong>
+          <div style="border: 1px solid #000; padding: 10px; margin-top: 5px; min-height: 60px; background: white;">
+            {ctc.ctc.completionRemarks}
+          </div>
+        </div>
+      )}
+    </div>
+
+    <!-- Signatures -->
+    <div class="signatures">
+      <div class="signature-box">
+        <div class="signature-line">
+          {iot.employee.firstName} {iot.employee.lastName}
+        </div>
+        <div class="signature-title">Traveler's Signature over Printed Name</div>
+        <div class="signature-title">Date: {formatDate(ctc.ctc.createdAt)}</div>
+      </div>
+
+      <div class="signature-box">
+        <div class="signature-line">
+          [VERIFYING OFFICIAL]
+        </div>
+        <div class="signature-title">Verified by</div>
+        <div class="signature-title">Date: _______________</div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div style="margin-top: 30px; font-size: 9pt; text-align: center; font-style: italic;">
+      This is a system-generated document. Printed on {new Date().toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })}.
+    </div>
+  </div>
+</body>
+</html>

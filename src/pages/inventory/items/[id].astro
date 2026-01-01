@@ -1,0 +1,320 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import { assetService } from '../../../lib/services/asset.service';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+const id = parseInt(Astro.params.id || '0');
+
+if (!id) {
+  return Astro.redirect('/inventory/items');
+}
+
+let item: any = null;
+let isEditing = false;
+
+try {
+  item = await assetService.getInventoryItemById(id);
+
+  if (!item) {
+    return Astro.redirect('/inventory/items');
+  }
+
+  const url = new URL(Astro.request.url);
+  isEditing = url.searchParams.get('edit') === 'true';
+} catch (error) {
+  console.error('Error loading inventory item:', error);
+  return Astro.redirect('/inventory/items');
+}
+
+const getStockStatusConfig = (status: string) => {
+  const configs: Record<string, { label: string; classes: string; icon: string }> = {
+    adequate: { label: 'Adequate', classes: 'bg-green-100 text-green-800', icon: 'pi-check-circle' },
+    low: { label: 'Low Stock', classes: 'bg-orange-100 text-orange-800', icon: 'pi-exclamation-triangle' },
+    out: { label: 'Out of Stock', classes: 'bg-red-100 text-red-800', icon: 'pi-times-circle' },
+    excess: { label: 'Excess', classes: 'bg-purple-100 text-purple-800', icon: 'pi-info-circle' },
+  };
+  return configs[status] || configs.adequate;
+};
+
+const stockConfig = getStockStatusConfig(item.stockStatus);
+---
+
+<MainLayout title={item.itemName}>
+  <div class="container mx-auto px-4 py-6">
+    <!-- Breadcrumb -->
+    <nav class="mb-4">
+      <ol class="flex items-center space-x-2 text-sm text-gray-500">
+        <li>
+          <a href="/inventory/items" class="hover:text-gray-700">Inventory Items</a>
+        </li>
+        <li><i class="pi pi-angle-right"></i></li>
+        <li class="text-gray-900">{item.itemCode}</li>
+      </ol>
+    </nav>
+
+    <!-- Page Header -->
+    <div class="flex justify-between items-start mb-6">
+      <div>
+        <div class="flex items-center space-x-3">
+          <h1 class="text-3xl font-bold text-gray-900">{item.itemName}</h1>
+          {!item.isActive && (
+            <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+              Inactive
+            </span>
+          )}
+        </div>
+        <p class="mt-1 text-sm text-gray-600">
+          Item Code: {item.itemCode}
+        </p>
+      </div>
+      <div class="flex space-x-2">
+        {!isEditing && (
+          <>
+            <a
+              href={`/inventory/items/${item.id}?edit=true`}
+              class="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+            >
+              <i class="pi pi-pencil mr-2"></i>
+              Edit
+            </a>
+            <button
+              id="delete-btn"
+              class="inline-flex items-center px-4 py-2 border border-red-300 rounded-md shadow-sm text-sm font-medium text-red-700 bg-white hover:bg-red-50"
+            >
+              <i class="pi pi-trash mr-2"></i>
+              Delete
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- Main Content -->
+      <div class="lg:col-span-2 space-y-6">
+        <!-- Stock Status Alert -->
+        {!isEditing && (item.stockStatus === 'low' || item.stockStatus === 'out') && (
+          <div class={`rounded-lg p-4 ${item.stockStatus === 'out' ? 'bg-red-50 border border-red-200' : 'bg-orange-50 border border-orange-200'}`}>
+            <div class="flex items-center">
+              <i class={`pi ${stockConfig.icon} ${item.stockStatus === 'out' ? 'text-red-600' : 'text-orange-600'} text-xl mr-3`}></i>
+              <div>
+                <h3 class={`text-sm font-medium ${item.stockStatus === 'out' ? 'text-red-800' : 'text-orange-800'}`}>
+                  {item.stockStatus === 'out' ? 'Out of Stock' : 'Low Stock Alert'}
+                </h3>
+                <p class={`text-sm ${item.stockStatus === 'out' ? 'text-red-700' : 'text-orange-700'} mt-1`}>
+                  {item.stockStatus === 'out'
+                    ? 'This item is currently out of stock. Replenishment is needed.'
+                    : `Stock level is below minimum threshold of ${item.minimumLevel} ${item.unit}.`}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <!-- Edit Form -->
+        {isEditing && (
+          <div class="bg-white rounded-lg shadow border border-gray-200 p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">Edit Item</h2>
+            <div id="edit-form"></div>
+          </div>
+        )}
+
+        <!-- Item Details -->
+        {!isEditing && (
+          <div class="bg-white rounded-lg shadow border border-gray-200 p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">Item Details</h2>
+            <dl class="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-4">
+              <div>
+                <dt class="text-sm font-medium text-gray-500">Unit of Measure</dt>
+                <dd class="mt-1 text-sm text-gray-900">{item.unit}</dd>
+              </div>
+
+              <div>
+                <dt class="text-sm font-medium text-gray-500">Unit Cost</dt>
+                <dd class="mt-1 text-sm text-gray-900 font-semibold">
+                  ₱{Number(item.unitCost).toLocaleString()}
+                </dd>
+              </div>
+
+              <div>
+                <dt class="text-sm font-medium text-gray-500">Quantity on Hand</dt>
+                <dd class="mt-1 text-2xl font-bold text-gray-900">{item.quantityOnHand}</dd>
+              </div>
+
+              <div>
+                <dt class="text-sm font-medium text-gray-500">Total Value</dt>
+                <dd class="mt-1 text-2xl font-bold text-primary-600">
+                  ₱{item.totalValue.toLocaleString()}
+                </dd>
+              </div>
+
+              <div>
+                <dt class="text-sm font-medium text-gray-500">Minimum Level</dt>
+                <dd class="mt-1 text-sm text-gray-900">{item.minimumLevel} {item.unit}</dd>
+              </div>
+
+              <div>
+                <dt class="text-sm font-medium text-gray-500">Maximum Level</dt>
+                <dd class="mt-1 text-sm text-gray-900">
+                  {item.maximumLevel > 0 ? `${item.maximumLevel} ${item.unit}` : 'Not set'}
+                </dd>
+              </div>
+
+              {item.description && (
+                <div class="md:col-span-2">
+                  <dt class="text-sm font-medium text-gray-500">Description</dt>
+                  <dd class="mt-1 text-sm text-gray-900">{item.description}</dd>
+                </div>
+              )}
+
+              <div>
+                <dt class="text-sm font-medium text-gray-500">Stock Status</dt>
+                <dd class="mt-1">
+                  <span class={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${stockConfig.classes}`}>
+                    <i class={`pi ${stockConfig.icon} mr-1.5`}></i>
+                    {stockConfig.label}
+                  </span>
+                </dd>
+              </div>
+
+              <div>
+                <dt class="text-sm font-medium text-gray-500">Created By</dt>
+                <dd class="mt-1 text-sm text-gray-900">
+                  {item.createdBy?.name || 'Unknown'}
+                </dd>
+              </div>
+
+              <div class="md:col-span-2">
+                <dt class="text-sm font-medium text-gray-500">Created At</dt>
+                <dd class="mt-1 text-sm text-gray-900">
+                  {new Date(item.createdAt).toLocaleString()}
+                </dd>
+              </div>
+            </dl>
+          </div>
+        )}
+      </div>
+
+      <!-- Sidebar -->
+      <div class="space-y-6">
+        <!-- Quick Stats -->
+        <div class="bg-white rounded-lg shadow border border-gray-200 p-6">
+          <h3 class="text-sm font-medium text-gray-900 mb-4">Stock Summary</h3>
+          <div class="space-y-4">
+            <div class="flex justify-between items-center pb-3 border-b border-gray-200">
+              <span class="text-sm text-gray-500">On Hand</span>
+              <span class="text-lg font-bold text-gray-900">{item.quantityOnHand}</span>
+            </div>
+            <div class="flex justify-between items-center pb-3 border-b border-gray-200">
+              <span class="text-sm text-gray-500">Min Level</span>
+              <span class="text-sm font-semibold text-orange-600">{item.minimumLevel}</span>
+            </div>
+            <div class="flex justify-between items-center pb-3 border-b border-gray-200">
+              <span class="text-sm text-gray-500">Max Level</span>
+              <span class="text-sm font-semibold text-purple-600">
+                {item.maximumLevel > 0 ? item.maximumLevel : 'N/A'}
+              </span>
+            </div>
+            <div class="flex justify-between items-center">
+              <span class="text-sm text-gray-500">Total Value</span>
+              <span class="text-lg font-bold text-primary-600">
+                ₱{item.totalValue.toLocaleString()}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Quick Actions -->
+        {!isEditing && (
+          <div class="bg-white rounded-lg shadow border border-gray-200 p-6">
+            <h3 class="text-sm font-medium text-gray-900 mb-4">Quick Actions</h3>
+            <div class="space-y-2">
+              <a
+                href="/inventory/items"
+                class="block w-full px-4 py-2 text-sm text-center border border-gray-300 rounded-md hover:bg-gray-50"
+              >
+                <i class="pi pi-arrow-left mr-2"></i>
+                Back to Items
+              </a>
+              <a
+                href={`/inventory/transactions/create?itemId=${item.id}`}
+                class="block w-full px-4 py-2 text-sm text-center bg-primary-600 text-white rounded-md hover:bg-primary-700"
+              >
+                <i class="pi pi-plus mr-2"></i>
+                New Transaction
+              </a>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  </div>
+
+  {isEditing && (
+    <script define:vars={{ item }}>
+      import InventoryItemForm from '../../../components/forms/inventory/InventoryItemForm.vue';
+      import { createApp } from 'vue';
+
+      const app = createApp(InventoryItemForm, {
+        initialData: item,
+        onSubmit: async (formData) => {
+          try {
+            const response = await fetch(`/api/inventory/items/${item.id}`, {
+              method: 'PUT',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(formData),
+            });
+
+            if (response.ok) {
+              window.location.href = `/inventory/items/${item.id}`;
+            } else {
+              const error = await response.json();
+              alert(error.error || 'Failed to update inventory item');
+            }
+          } catch (error) {
+            console.error('Error updating inventory item:', error);
+            alert('Failed to update inventory item. Please try again.');
+          }
+        },
+        onCancel: () => {
+          window.location.href = `/inventory/items/${item.id}`;
+        },
+      });
+
+      app.mount('#edit-form');
+    </script>
+  )}
+
+  {!isEditing && (
+    <script define:vars={{ item }}>
+      document.getElementById('delete-btn')?.addEventListener('click', async () => {
+        if (!confirm(`Are you sure you want to delete "${item.itemName}"? This action cannot be undone.`)) {
+          return;
+        }
+
+        try {
+          const response = await fetch(`/api/inventory/items/${item.id}`, {
+            method: 'DELETE',
+          });
+
+          if (response.ok) {
+            window.location.href = '/inventory/items';
+          } else {
+            const error = await response.json();
+            alert(error.error || 'Failed to delete inventory item');
+          }
+        } catch (error) {
+          console.error('Error deleting inventory item:', error);
+          alert('Failed to delete inventory item. Please try again.');
+        }
+      });
+    </script>
+  )}
+</MainLayout>

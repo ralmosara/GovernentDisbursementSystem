@@ -1,0 +1,81 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+// Check if assetId is provided in query params
+const url = new URL(Astro.request.url);
+const assetId = url.searchParams.get('assetId');
+---
+
+<MainLayout title="Record Asset Disposal">
+  <div class="container mx-auto px-4 py-6">
+    <!-- Breadcrumb -->
+    <nav class="mb-4">
+      <ol class="flex items-center space-x-2 text-sm text-gray-500">
+        <li>
+          <a href="/assets" class="hover:text-gray-700">Assets</a>
+        </li>
+        <li><i class="pi pi-angle-right"></i></li>
+        <li>
+          <a href="/assets/disposals" class="hover:text-gray-700">Disposals</a>
+        </li>
+        <li><i class="pi pi-angle-right"></i></li>
+        <li class="text-gray-900">Record Disposal</li>
+      </ol>
+    </nav>
+
+    <!-- Page Header -->
+    <div class="mb-6">
+      <h1 class="text-3xl font-bold text-gray-900">Record Asset Disposal</h1>
+      <p class="mt-1 text-sm text-gray-600">
+        Document the disposal of property, plant, or equipment
+      </p>
+    </div>
+
+    <!-- Form Container -->
+    <div class="bg-white rounded-lg shadow border border-gray-200 p-6">
+      <div id="disposal-form"></div>
+    </div>
+  </div>
+
+  <script define:vars={{ assetId }}>
+    import AssetDisposalForm from '../../../components/forms/assets/AssetDisposalForm.vue';
+    import { createApp } from 'vue';
+
+    const app = createApp(AssetDisposalForm, {
+      assetId: assetId ? parseInt(assetId) : undefined,
+      onSubmit: async (formData) => {
+        try {
+          const response = await fetch('/api/assets/disposals', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(formData),
+          });
+
+          if (response.ok) {
+            const result = await response.json();
+            window.location.href = `/assets/disposals/${result.id}`;
+          } else {
+            const error = await response.json();
+            alert(error.error || 'Failed to record disposal');
+          }
+        } catch (error) {
+          console.error('Error recording disposal:', error);
+          alert('Failed to record disposal. Please try again.');
+        }
+      },
+      onCancel: () => {
+        window.history.back();
+      },
+    });
+
+    app.mount('#disposal-form');
+  </script>
+</MainLayout>

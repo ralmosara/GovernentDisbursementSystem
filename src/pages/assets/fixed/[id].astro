@@ -1,0 +1,266 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import FixedAssetForm from '../../../components/forms/assets/FixedAssetForm.vue';
+import { assetService } from '../../../lib/services/asset.service';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+const { id } = Astro.params;
+
+if (!id) {
+  return Astro.redirect('/assets/fixed');
+}
+
+// Fetch asset details and depreciation schedule
+let asset;
+let depreciationSchedule;
+let categories;
+
+try {
+  asset = await assetService.getFixedAssetById(parseInt(id));
+  depreciationSchedule = await assetService.getDepreciationSchedule(parseInt(id));
+  categories = await assetService.getAssetCategories(true);
+} catch (error) {
+  console.error('Error loading asset:', error);
+  return Astro.redirect('/assets/fixed');
+}
+
+const categoriesJson = JSON.stringify(categories);
+
+// Calculate current book value (latest from schedule or acquisition cost)
+const latestSchedule = depreciationSchedule[depreciationSchedule.length - 1];
+const currentBookValue = latestSchedule ? latestSchedule.bookValue : asset.acquisitionCost;
+const currentAccumulatedDepreciation = latestSchedule ? latestSchedule.accumulatedDepreciation : '0';
+---
+
+<MainLayout title={`Fixed Asset - ${asset.assetNo}`}>
+  <div class="container mx-auto px-4 py-6">
+    <!-- Breadcrumb -->
+    <nav class="flex mb-6" aria-label="Breadcrumb">
+      <ol class="inline-flex items-center space-x-1 md:space-x-3">
+        <li class="inline-flex items-center">
+          <a href="/assets" class="text-gray-700 hover:text-primary-600">
+            Assets
+          </a>
+        </li>
+        <li>
+          <div class="flex items-center">
+            <i class="pi pi-angle-right text-gray-400"></i>
+            <a href="/assets/fixed" class="ml-1 text-gray-700 hover:text-primary-600 md:ml-2">
+              Fixed Assets
+            </a>
+          </div>
+        </li>
+        <li aria-current="page">
+          <div class="flex items-center">
+            <i class="pi pi-angle-right text-gray-400"></i>
+            <span class="ml-1 text-gray-500 md:ml-2">{asset.assetNo}</span>
+          </div>
+        </li>
+      </ol>
+    </nav>
+
+    <!-- Page Header -->
+    <div class="mb-6 flex items-center justify-between">
+      <div>
+        <h1 class="text-3xl font-bold text-gray-900">{asset.assetNo}</h1>
+        <p class="mt-1 text-sm text-gray-600">
+          {asset.description}
+        </p>
+      </div>
+      <div class="flex items-center space-x-3">
+        {asset.status === 'active' ? (
+          <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
+            <i class="pi pi-check-circle mr-1"></i>
+            Active
+          </span>
+        ) : asset.status === 'disposed' ? (
+          <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-red-100 text-red-800">
+            <i class="pi pi-times-circle mr-1"></i>
+            Disposed
+          </span>
+        ) : (
+          <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-gray-100 text-gray-800">
+            <i class="pi pi-ban mr-1"></i>
+            Written Off
+          </span>
+        )}
+      </div>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+      <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+        <div class="text-sm font-medium text-gray-500">Acquisition Cost</div>
+        <div class="mt-1 text-2xl font-semibold text-gray-900">
+          ₱{Number(asset.acquisitionCost).toLocaleString()}
+        </div>
+      </div>
+      <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+        <div class="text-sm font-medium text-gray-500">Accumulated Depreciation</div>
+        <div class="mt-1 text-2xl font-semibold text-orange-600">
+          ₱{Number(currentAccumulatedDepreciation).toLocaleString()}
+        </div>
+      </div>
+      <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+        <div class="text-sm font-medium text-gray-500">Current Book Value</div>
+        <div class="mt-1 text-2xl font-semibold text-green-600">
+          ₱{Number(currentBookValue).toLocaleString()}
+        </div>
+      </div>
+      <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+        <div class="text-sm font-medium text-gray-500">Salvage Value</div>
+        <div class="mt-1 text-2xl font-semibold text-gray-900">
+          ₱{Number(asset.salvageValue).toLocaleString()}
+        </div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- Main Content -->
+      <div class="lg:col-span-2 space-y-6">
+        <!-- Edit Form -->
+        <div class="bg-white rounded-lg shadow border border-gray-200 p-6">
+          <h2 class="text-lg font-semibold text-gray-900 mb-4">Edit Asset Details</h2>
+          <FixedAssetForm client:only="vue" assetId={id} categoriesJson={categoriesJson} />
+        </div>
+
+        <!-- Depreciation Schedule -->
+        {depreciationSchedule.length > 0 && (
+          <div class="bg-white rounded-lg shadow border border-gray-200 p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">Depreciation Schedule</h2>
+            <div class="overflow-x-auto">
+              <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Period</th>
+                    <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Depreciation</th>
+                    <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Accumulated</th>
+                    <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Book Value</th>
+                  </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                  {depreciationSchedule.slice(0, 12).map((entry: any) => (
+                    <tr class="hover:bg-gray-50">
+                      <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-900">
+                        {entry.periodYear}-{String(entry.periodMonth).padStart(2, '0')}
+                      </td>
+                      <td class="px-4 py-3 whitespace-nowrap text-sm text-right text-gray-900">
+                        ₱{Number(entry.depreciationAmount).toLocaleString()}
+                      </td>
+                      <td class="px-4 py-3 whitespace-nowrap text-sm text-right text-orange-600">
+                        ₱{Number(entry.accumulatedDepreciation).toLocaleString()}
+                      </td>
+                      <td class="px-4 py-3 whitespace-nowrap text-sm text-right text-green-600 font-medium">
+                        ₱{Number(entry.bookValue).toLocaleString()}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {depreciationSchedule.length > 12 && (
+              <div class="mt-4 text-center">
+                <p class="text-sm text-gray-500">
+                  Showing first 12 of {depreciationSchedule.length} periods
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <!-- Sidebar -->
+      <div class="space-y-6">
+        <!-- Asset Details -->
+        <div class="bg-white rounded-lg shadow border border-gray-200 p-6">
+          <h3 class="text-lg font-semibold text-gray-900 mb-4">Asset Details</h3>
+          <dl class="space-y-3">
+            <div>
+              <dt class="text-sm font-medium text-gray-500">Asset Number</dt>
+              <dd class="mt-1 text-sm text-gray-900 font-mono">{asset.assetNo}</dd>
+            </div>
+            <div>
+              <dt class="text-sm font-medium text-gray-500">Category</dt>
+              <dd class="mt-1">
+                {asset.category ? (
+                  <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                    {asset.category.name}
+                  </span>
+                ) : '-'}
+              </dd>
+            </div>
+            <div>
+              <dt class="text-sm font-medium text-gray-500">Acquisition Date</dt>
+              <dd class="mt-1 text-sm text-gray-900">
+                {new Date(asset.acquisitionDate).toLocaleDateString()}
+              </dd>
+            </div>
+            <div>
+              <dt class="text-sm font-medium text-gray-500">Useful Life</dt>
+              <dd class="mt-1 text-sm text-gray-900">{asset.usefulLife} years</dd>
+            </div>
+            {asset.category?.depreciationMethod && (
+              <div>
+                <dt class="text-sm font-medium text-gray-500">Depreciation Method</dt>
+                <dd class="mt-1 text-sm text-gray-900">
+                  {asset.category.depreciationMethod === 'straight_line' ? 'Straight Line' : 'Declining Balance'}
+                </dd>
+              </div>
+            )}
+            <div>
+              <dt class="text-sm font-medium text-gray-500">Location</dt>
+              <dd class="mt-1 text-sm text-gray-900">{asset.location || '-'}</dd>
+            </div>
+            <div>
+              <dt class="text-sm font-medium text-gray-500">Custodian</dt>
+              <dd class="mt-1 text-sm text-gray-900">{asset.custodian || '-'}</dd>
+            </div>
+            {asset.serialNo && (
+              <div>
+                <dt class="text-sm font-medium text-gray-500">Serial Number</dt>
+                <dd class="mt-1 text-sm text-gray-900 font-mono">{asset.serialNo}</dd>
+              </div>
+            )}
+            <div>
+              <dt class="text-sm font-medium text-gray-500">Created</dt>
+              <dd class="mt-1 text-sm text-gray-900">
+                {new Date(asset.createdAt).toLocaleDateString()}
+                {asset.createdBy && (
+                  <span class="text-gray-500">
+                    {' '}by {asset.createdBy.firstName} {asset.createdBy.lastName}
+                  </span>
+                )}
+              </dd>
+            </div>
+          </dl>
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="bg-white rounded-lg shadow border border-gray-200 p-6">
+          <h3 class="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h3>
+          <div class="space-y-2">
+            <a
+              href={`/assets/disposals/create?assetId=${id}`}
+              class="block w-full px-4 py-2 text-sm font-medium text-center text-white bg-red-600 hover:bg-red-700 rounded-md"
+            >
+              <i class="pi pi-trash mr-2"></i>
+              Record Disposal
+            </a>
+            <a
+              href="/assets/fixed"
+              class="block w-full px-4 py-2 text-sm font-medium text-center text-gray-700 bg-white border border-gray-300 hover:bg-gray-50 rounded-md"
+            >
+              <i class="pi pi-list mr-2"></i>
+              Back to Assets
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</MainLayout>

@@ -1,0 +1,279 @@
+---
+import MainLayout from '../../layouts/MainLayout.astro';
+import { db } from '../../lib/db/connection';
+import { fundClusters } from '../../lib/db/schema';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+// Get filter parameters
+const url = new URL(Astro.request.url);
+const startDate = url.searchParams.get('startDate');
+const endDate = url.searchParams.get('endDate');
+const fundClusterId = url.searchParams.get('fundClusterId');
+
+// Get fund clusters for dropdown
+const allFundClusters = await db.select().from(fundClusters);
+
+// Set default dates if not provided
+const defaultEndDate = new Date().toISOString().split('T')[0];
+const defaultStartDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+---
+
+<MainLayout title="Cash Position Report">
+  <div class="container-fluid py-6">
+    <!-- Page Header -->
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Daily Cash Position Report</h1>
+        <p class="page-description">Monitor daily cash balances and transactions</p>
+      </div>
+      <div>
+        <a href="/cash" class="btn btn-ghost">
+          <i class="pi pi-arrow-left mr-2"></i>
+          Back to Cash Management
+        </a>
+      </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="card mb-6">
+      <div class="card-header">
+        <h3 class="text-lg font-semibold">Report Parameters</h3>
+      </div>
+      <div class="card-body">
+        <form id="report-form" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <!-- Start Date -->
+          <div>
+            <label class="label">
+              <span class="label-text">Start Date *</span>
+            </label>
+            <input
+              type="date"
+              name="startDate"
+              id="start-date"
+              value={startDate || defaultStartDate}
+              class="input input-bordered w-full"
+              required
+            />
+          </div>
+
+          <!-- End Date -->
+          <div>
+            <label class="label">
+              <span class="label-text">End Date *</span>
+            </label>
+            <input
+              type="date"
+              name="endDate"
+              id="end-date"
+              value={endDate || defaultEndDate}
+              class="input input-bordered w-full"
+              required
+            />
+          </div>
+
+          <!-- Fund Cluster -->
+          <div>
+            <label class="label">
+              <span class="label-text">Fund Cluster</span>
+            </label>
+            <select name="fundClusterId" id="fund-cluster" class="select select-bordered w-full">
+              <option value="">All Fund Clusters</option>
+              {allFundClusters.map((fc) => (
+                <option value={fc.id} selected={fundClusterId === fc.id.toString()}>
+                  {fc.code} - {fc.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <!-- Action Buttons -->
+          <div class="flex items-end gap-2">
+            <button type="button" id="generate-btn" class="btn btn-primary">
+              <i class="pi pi-chart-line mr-2"></i>
+              Generate Report
+            </button>
+            <button type="button" onclick="window.print()" class="btn btn-ghost">
+              <i class="pi pi-print"></i>
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Loading State -->
+    <div id="loading" class="hidden card">
+      <div class="card-body text-center py-12">
+        <div class="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+        <p class="mt-4 text-gray-600">Generating cash position report...</p>
+      </div>
+    </div>
+
+    <!-- Report Results -->
+    <div id="report-container" class="hidden">
+      <!-- Summary Cards -->
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+        <div class="card bg-blue-50">
+          <div class="card-body">
+            <p class="text-sm text-gray-600">Total Receipts</p>
+            <p id="total-receipts" class="text-2xl font-bold text-blue-600">₱0.00</p>
+          </div>
+        </div>
+
+        <div class="card bg-red-50">
+          <div class="card-body">
+            <p class="text-sm text-gray-600">Total Disbursements</p>
+            <p id="total-disbursements" class="text-2xl font-bold text-red-600">₱0.00</p>
+          </div>
+        </div>
+
+        <div class="card bg-purple-50">
+          <div class="card-body">
+            <p class="text-sm text-gray-600">Net Change</p>
+            <p id="net-change" class="text-2xl font-bold text-purple-600">₱0.00</p>
+          </div>
+        </div>
+
+        <div class="card bg-green-50">
+          <div class="card-body">
+            <p class="text-sm text-gray-600">Closing Balance</p>
+            <p id="closing-balance" class="text-2xl font-bold text-green-600">₱0.00</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Position Table -->
+      <div class="card">
+        <div class="card-header">
+          <h3 class="text-lg font-semibold">Daily Cash Position</h3>
+        </div>
+        <div class="card-body p-0">
+          <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200">
+              <thead class="bg-gray-50">
+                <tr>
+                  <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Fund Cluster</th>
+                  <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Opening Balance</th>
+                  <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Receipts</th>
+                  <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Disbursements</th>
+                  <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Closing Balance</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Prepared By</th>
+                </tr>
+              </thead>
+              <tbody id="report-tbody" class="bg-white divide-y divide-gray-200">
+                <!-- Will be populated by JavaScript -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Empty State -->
+    <div id="empty-state" class="card">
+      <div class="card-body text-center py-12">
+        <i class="pi pi-chart-line text-6xl text-gray-300 mb-4"></i>
+        <h3 class="text-lg font-semibold text-gray-700 mb-2">No Report Generated</h3>
+        <p class="text-gray-600">Select date range and click "Generate Report" to view cash position</p>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const formatCurrency = (amount: number) => {
+      return new Intl.NumberFormat('en-PH', {
+        style: 'currency',
+        currency: 'PHP',
+        minimumFractionDigits: 2,
+      }).format(amount);
+    };
+
+    const formatDate = (dateString: string) => {
+      return new Date(dateString).toLocaleDateString('en-PH', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+      });
+    };
+
+    const generateBtn = document.getElementById('generate-btn');
+    const loading = document.getElementById('loading');
+    const reportContainer = document.getElementById('report-container');
+    const emptyState = document.getElementById('empty-state');
+    const reportTbody = document.getElementById('report-tbody');
+
+    generateBtn?.addEventListener('click', async () => {
+      const startDate = (document.getElementById('start-date') as HTMLInputElement).value;
+      const endDate = (document.getElementById('end-date') as HTMLInputElement).value;
+      const fundClusterId = (document.getElementById('fund-cluster') as HTMLSelectElement).value;
+
+      // Show loading
+      loading?.classList.remove('hidden');
+      reportContainer?.classList.add('hidden');
+      emptyState?.classList.add('hidden');
+
+      try {
+        let url = `/api/cash/position?startDate=${startDate}&endDate=${endDate}`;
+        if (fundClusterId) {
+          url += `&fundClusterId=${fundClusterId}`;
+        }
+
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error('Failed to generate report');
+        }
+
+        if (data.length === 0) {
+          emptyState?.classList.remove('hidden');
+          return;
+        }
+
+        // Calculate totals
+        const totals = data.reduce((acc: any, row: any) => {
+          acc.receipts += Number(row.receipts);
+          acc.disbursements += Number(row.disbursements);
+          return acc;
+        }, { receipts: 0, disbursements: 0 });
+
+        const netChange = totals.receipts - totals.disbursements;
+        const closingBalance = data[data.length - 1].closingBalance;
+
+        // Update summary cards
+        document.getElementById('total-receipts')!.textContent = formatCurrency(totals.receipts);
+        document.getElementById('total-disbursements')!.textContent = formatCurrency(totals.disbursements);
+        document.getElementById('net-change')!.textContent = formatCurrency(netChange);
+        document.getElementById('closing-balance')!.textContent = formatCurrency(Number(closingBalance));
+
+        // Populate table
+        reportTbody!.innerHTML = data.map((row: any) => `
+          <tr class="hover:bg-gray-50">
+            <td class="px-4 py-3 text-sm">${formatDate(row.reportDate)}</td>
+            <td class="px-4 py-3 text-sm">${row.fundCluster?.code || 'N/A'}</td>
+            <td class="px-4 py-3 text-sm text-right">${formatCurrency(Number(row.openingBalance))}</td>
+            <td class="px-4 py-3 text-sm text-right text-green-600">${formatCurrency(Number(row.receipts))}</td>
+            <td class="px-4 py-3 text-sm text-right text-red-600">${formatCurrency(Number(row.disbursements))}</td>
+            <td class="px-4 py-3 text-sm text-right font-semibold">${formatCurrency(Number(row.closingBalance))}</td>
+            <td class="px-4 py-3 text-sm">${row.preparedBy || 'N/A'}</td>
+          </tr>
+        `).join('');
+
+        // Show report
+        reportContainer?.classList.remove('hidden');
+
+      } catch (error) {
+        console.error('Error generating report:', error);
+        alert('Failed to generate cash position report');
+        emptyState?.classList.remove('hidden');
+      } finally {
+        loading?.classList.add('hidden');
+      }
+    });
+  </script>
+</MainLayout>

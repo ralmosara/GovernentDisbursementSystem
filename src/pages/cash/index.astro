@@ -1,0 +1,248 @@
+---
+import MainLayout from '../../layouts/MainLayout.astro';
+import { cashService } from '../../lib/services/cash.service';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+// Fetch dashboard statistics
+const todayReceipts = await cashService.getTodayReceiptsTotal();
+const pendingDeposits = await cashService.getPendingDepositsCount();
+const cashPosition = await cashService.getCurrentCashPosition();
+const unreconciledMonths = await cashService.getUnreconciledMonthsCount();
+
+// Get recent receipts
+const recentReceipts = await cashService.getCashReceipts({ limit: 10 });
+
+const formatCurrency = (amount: number) => {
+  return new Intl.NumberFormat('en-PH', {
+    style: 'currency',
+    currency: 'PHP',
+    minimumFractionDigits: 2,
+  }).format(amount);
+};
+---
+
+<MainLayout title="Cash Management">
+  <div class="container-fluid py-6">
+    <!-- Page Header -->
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Cash Management</h1>
+        <p class="page-description">Manage official receipts, bank deposits, reconciliations, and petty cash</p>
+      </div>
+      <div>
+        <a href="/cash/receipts/create" class="btn btn-primary">
+          <i class="pi pi-plus mr-2"></i>
+          Issue Official Receipt
+        </a>
+      </div>
+    </div>
+
+    <!-- Statistics Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+      <!-- Today's Receipts -->
+      <div class="card bg-blue-50 border-blue-200">
+        <div class="card-body">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm text-gray-600 mb-1">Today's Receipts</p>
+              <p class="text-2xl font-bold text-blue-600">{formatCurrency(todayReceipts)}</p>
+            </div>
+            <div class="w-12 h-12 bg-blue-600 rounded-lg flex items-center justify-center">
+              <i class="pi pi-money-bill text-2xl text-white"></i>
+            </div>
+          </div>
+          <div class="mt-3">
+            <a href="/cash/receipts" class="text-sm text-blue-600 hover:underline">View all receipts →</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Pending Deposits -->
+      <div class="card bg-green-50 border-green-200">
+        <div class="card-body">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm text-gray-600 mb-1">Pending Deposits</p>
+              <p class="text-2xl font-bold text-green-600">{pendingDeposits}</p>
+              <p class="text-xs text-gray-500">deposits awaiting confirmation</p>
+            </div>
+            <div class="w-12 h-12 bg-green-600 rounded-lg flex items-center justify-center">
+              <i class="pi pi-building text-2xl text-white"></i>
+            </div>
+          </div>
+          <div class="mt-3">
+            <a href="/cash/deposits" class="text-sm text-green-600 hover:underline">View deposits →</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Current Cash Position -->
+      <div class="card bg-purple-50 border-purple-200">
+        <div class="card-body">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm text-gray-600 mb-1">Cash Position</p>
+              <p class="text-2xl font-bold text-purple-600">{formatCurrency(cashPosition)}</p>
+              <p class="text-xs text-gray-500">current closing balance</p>
+            </div>
+            <div class="w-12 h-12 bg-purple-600 rounded-lg flex items-center justify-center">
+              <i class="pi pi-chart-line text-2xl text-white"></i>
+            </div>
+          </div>
+          <div class="mt-3">
+            <a href="/cash/position" class="text-sm text-purple-600 hover:underline">View position →</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Unreconciled Months -->
+      <div class="card bg-orange-50 border-orange-200">
+        <div class="card-body">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm text-gray-600 mb-1">Unreconciled</p>
+              <p class="text-2xl font-bold text-orange-600">{unreconciledMonths}</p>
+              <p class="text-xs text-gray-500">months pending reconciliation</p>
+            </div>
+            <div class="w-12 h-12 bg-orange-600 rounded-lg flex items-center justify-center">
+              <i class="pi pi-sync text-2xl text-white"></i>
+            </div>
+          </div>
+          <div class="mt-3">
+            <a href="/cash/reconciliations" class="text-sm text-orange-600 hover:underline">View reconciliations →</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+      <a href="/cash/receipts/create" class="card hover:shadow-lg transition-shadow cursor-pointer">
+        <div class="card-body">
+          <div class="flex items-center gap-4">
+            <div class="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
+              <i class="pi pi-file text-2xl text-blue-600"></i>
+            </div>
+            <div>
+              <h3 class="font-semibold text-gray-900">Issue Official Receipt</h3>
+              <p class="text-sm text-gray-600">Create new cash receipt with OR number</p>
+            </div>
+          </div>
+        </div>
+      </a>
+
+      <a href="/cash/deposits/create" class="card hover:shadow-lg transition-shadow cursor-pointer">
+        <div class="card-body">
+          <div class="flex items-center gap-4">
+            <div class="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
+              <i class="pi pi-building text-2xl text-green-600"></i>
+            </div>
+            <div>
+              <h3 class="font-semibold text-gray-900">Create Bank Deposit</h3>
+              <p class="text-sm text-gray-600">Deposit cash receipts to bank account</p>
+            </div>
+          </div>
+        </div>
+      </a>
+
+      <a href="/cash/reconciliations/create" class="card hover:shadow-lg transition-shadow cursor-pointer">
+        <div class="card-body">
+          <div class="flex items-center gap-4">
+            <div class="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
+              <i class="pi pi-sync text-2xl text-purple-600"></i>
+            </div>
+            <div>
+              <h3 class="font-semibold text-gray-900">Bank Reconciliation</h3>
+              <p class="text-sm text-gray-600">Reconcile bank account for the month</p>
+            </div>
+          </div>
+        </div>
+      </a>
+    </div>
+
+    <!-- Recent Cash Receipts -->
+    <div class="card">
+      <div class="card-header">
+        <div class="flex justify-between items-center">
+          <h2 class="text-lg font-semibold text-gray-900">Recent Cash Receipts</h2>
+          <a href="/cash/receipts" class="btn btn-sm btn-ghost">View All</a>
+        </div>
+      </div>
+      <div class="card-body p-0">
+        <div class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+              <tr>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">OR No.</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Payor</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Amount</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Payment Mode</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Fund Cluster</th>
+                <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Actions</th>
+              </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-200">
+              {recentReceipts.length === 0 ? (
+                <tr>
+                  <td colspan="7" class="px-4 py-8 text-center text-gray-500">
+                    No recent receipts found
+                  </td>
+                </tr>
+              ) : (
+                recentReceipts.map((receipt) => (
+                  <tr class="hover:bg-gray-50">
+                    <td class="px-4 py-3">
+                      <span class="font-mono text-sm font-medium text-blue-600">{receipt.orNo}</span>
+                    </td>
+                    <td class="px-4 py-3">
+                      <span class="text-sm text-gray-900">
+                        {new Date(receipt.receiptDate).toLocaleDateString('en-PH', {
+                          year: 'numeric',
+                          month: 'short',
+                          day: 'numeric',
+                        })}
+                      </span>
+                    </td>
+                    <td class="px-4 py-3">
+                      <span class="text-sm text-gray-900">{receipt.payorName}</span>
+                    </td>
+                    <td class="px-4 py-3">
+                      <span class="text-sm font-semibold text-gray-900">
+                        {formatCurrency(Number(receipt.amount))}
+                      </span>
+                    </td>
+                    <td class="px-4 py-3">
+                      <span class={`badge badge-sm ${
+                        receipt.paymentMode === 'cash' ? 'badge-success' :
+                        receipt.paymentMode === 'check' ? 'badge-warning' :
+                        'badge-info'
+                      }`}>
+                        {receipt.paymentMode}
+                      </span>
+                    </td>
+                    <td class="px-4 py-3">
+                      <span class="text-sm text-gray-700">
+                        {receipt.fundCluster?.code || 'N/A'}
+                      </span>
+                    </td>
+                    <td class="px-4 py-3 text-center">
+                      <a href={`/cash/receipts/${receipt.id}`} class="btn btn-xs btn-ghost">
+                        <i class="pi pi-eye"></i>
+                      </a>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</MainLayout>

@@ -1,0 +1,261 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import { cashService } from '../../../lib/services/cash.service';
+import { db } from '../../../lib/db/connection';
+import { fundClusters } from '../../../lib/db/schema';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+// Get filter parameters from URL
+const url = new URL(Astro.request.url);
+const startDate = url.searchParams.get('startDate');
+const endDate = url.searchParams.get('endDate');
+const fundClusterId = url.searchParams.get('fundClusterId');
+const paymentMode = url.searchParams.get('paymentMode');
+const search = url.searchParams.get('search');
+
+// Fetch receipts with filters
+const receipts = await cashService.getCashReceipts({
+  startDate: startDate || undefined,
+  endDate: endDate || undefined,
+  fundClusterId: fundClusterId ? parseInt(fundClusterId) : undefined,
+  paymentMode: paymentMode || undefined,
+  search: search || undefined,
+});
+
+// Get fund clusters for filter dropdown
+const allFundClusters = await db.select().from(fundClusters);
+
+const formatCurrency = (amount: number | string) => {
+  return new Intl.NumberFormat('en-PH', {
+    style: 'currency',
+    currency: 'PHP',
+    minimumFractionDigits: 2,
+  }).format(Number(amount));
+};
+---
+
+<MainLayout title="Cash Receipts">
+  <div class="container-fluid py-6">
+    <!-- Page Header -->
+    <div class="page-header">
+      <div>
+        <h1 class="page-title">Cash Receipts</h1>
+        <p class="page-description">View and manage official receipts</p>
+      </div>
+      <div class="flex gap-2">
+        <a href="/cash" class="btn btn-ghost">
+          <i class="pi pi-arrow-left mr-2"></i>
+          Back to Cash Management
+        </a>
+        <a href="/cash/receipts/create" class="btn btn-primary">
+          <i class="pi pi-plus mr-2"></i>
+          Issue New Receipt
+        </a>
+      </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="card mb-6">
+      <div class="card-header">
+        <h3 class="text-lg font-semibold">Filters</h3>
+      </div>
+      <div class="card-body">
+        <form method="get" class="grid grid-cols-1 md:grid-cols-5 gap-4">
+          <!-- Date Range -->
+          <div>
+            <label class="label">
+              <span class="label-text">Start Date</span>
+            </label>
+            <input
+              type="date"
+              name="startDate"
+              value={startDate || ''}
+              class="input input-bordered w-full"
+            />
+          </div>
+
+          <div>
+            <label class="label">
+              <span class="label-text">End Date</span>
+            </label>
+            <input
+              type="date"
+              name="endDate"
+              value={endDate || ''}
+              class="input input-bordered w-full"
+            />
+          </div>
+
+          <!-- Fund Cluster -->
+          <div>
+            <label class="label">
+              <span class="label-text">Fund Cluster</span>
+            </label>
+            <select name="fundClusterId" class="select select-bordered w-full">
+              <option value="">All Fund Clusters</option>
+              {allFundClusters.map((fc) => (
+                <option value={fc.id} selected={fundClusterId === fc.id.toString()}>
+                  {fc.code} - {fc.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <!-- Payment Mode -->
+          <div>
+            <label class="label">
+              <span class="label-text">Payment Mode</span>
+            </label>
+            <select name="paymentMode" class="select select-bordered w-full">
+              <option value="">All Payment Modes</option>
+              <option value="cash" selected={paymentMode === 'cash'}>Cash</option>
+              <option value="check" selected={paymentMode === 'check'}>Check</option>
+              <option value="online" selected={paymentMode === 'online'}>Online Transfer</option>
+            </select>
+          </div>
+
+          <!-- Search -->
+          <div>
+            <label class="label">
+              <span class="label-text">Search</span>
+            </label>
+            <input
+              type="text"
+              name="search"
+              value={search || ''}
+              placeholder="OR No., Payor name..."
+              class="input input-bordered w-full"
+            />
+          </div>
+
+          <!-- Action Buttons -->
+          <div class="md:col-span-5 flex gap-2">
+            <button type="submit" class="btn btn-primary">
+              <i class="pi pi-search mr-2"></i>
+              Apply Filters
+            </button>
+            <a href="/cash/receipts" class="btn btn-ghost">
+              <i class="pi pi-refresh mr-2"></i>
+              Clear Filters
+            </a>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Receipts Table -->
+    <div class="card">
+      <div class="card-header">
+        <div class="flex justify-between items-center">
+          <h3 class="text-lg font-semibold">
+            Cash Receipts ({receipts.length} {receipts.length === 1 ? 'receipt' : 'receipts'})
+          </h3>
+          <button class="btn btn-sm btn-ghost" onclick="window.print()">
+            <i class="pi pi-print mr-2"></i>
+            Print
+          </button>
+        </div>
+      </div>
+      <div class="card-body p-0">
+        <div class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+              <tr>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">OR No.</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Payor</th>
+                <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Payment Mode</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Fund Cluster</th>
+                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Created By</th>
+                <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">Actions</th>
+              </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-200">
+              {receipts.length === 0 ? (
+                <tr>
+                  <td colspan="8" class="px-4 py-8 text-center text-gray-500">
+                    <i class="pi pi-inbox text-4xl mb-2"></i>
+                    <p>No receipts found matching the filters</p>
+                  </td>
+                </tr>
+              ) : (
+                receipts.map((receipt) => (
+                  <tr class="hover:bg-gray-50">
+                    <td class="px-4 py-3">
+                      <a href={`/cash/receipts/${receipt.id}`} class="font-mono text-sm font-medium text-blue-600 hover:underline">
+                        {receipt.orNo}
+                      </a>
+                    </td>
+                    <td class="px-4 py-3">
+                      <span class="text-sm text-gray-900">
+                        {new Date(receipt.receiptDate).toLocaleDateString('en-PH', {
+                          year: 'numeric',
+                          month: 'short',
+                          day: 'numeric',
+                        })}
+                      </span>
+                    </td>
+                    <td class="px-4 py-3">
+                      <span class="text-sm text-gray-900">{receipt.payorName}</span>
+                    </td>
+                    <td class="px-4 py-3 text-right">
+                      <span class="text-sm font-semibold text-gray-900">
+                        {formatCurrency(receipt.amount)}
+                      </span>
+                    </td>
+                    <td class="px-4 py-3">
+                      <span class={`badge badge-sm ${
+                        receipt.paymentMode === 'cash' ? 'badge-success' :
+                        receipt.paymentMode === 'check' ? 'badge-warning' :
+                        'badge-info'
+                      }`}>
+                        {receipt.paymentMode}
+                      </span>
+                      {receipt.paymentMode === 'check' && receipt.checkNo && (
+                        <div class="text-xs text-gray-500 mt-1">
+                          Check: {receipt.checkNo}
+                        </div>
+                      )}
+                    </td>
+                    <td class="px-4 py-3">
+                      <span class="text-sm text-gray-700">
+                        {receipt.fundCluster?.code || 'N/A'}
+                      </span>
+                    </td>
+                    <td class="px-4 py-3">
+                      <span class="text-sm text-gray-700">{receipt.createdBy || 'N/A'}</span>
+                    </td>
+                    <td class="px-4 py-3 text-center">
+                      <div class="flex gap-1 justify-center">
+                        <a href={`/cash/receipts/${receipt.id}`} class="btn btn-xs btn-ghost" title="View Details">
+                          <i class="pi pi-eye"></i>
+                        </a>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+            {receipts.length > 0 && (
+              <tfoot class="bg-gray-50">
+                <tr>
+                  <td colspan="3" class="px-4 py-3 text-right font-semibold">Total:</td>
+                  <td class="px-4 py-3 text-right font-bold text-blue-600">
+                    {formatCurrency(receipts.reduce((sum, r) => sum + Number(r.amount), 0))}
+                  </td>
+                  <td colspan="4"></td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</MainLayout>

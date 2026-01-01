@@ -1,0 +1,133 @@
+---
+import MainLayout from '../../../../layouts/MainLayout.astro';
+import CertificateTravelForm from '../../../../components/forms/travel/CertificateTravelForm.vue';
+import { TravelService } from '../../../../lib/services/travel.service';
+
+const user = Astro.locals.user;
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+const { id } = Astro.params;
+if (!id) {
+  return Astro.redirect('/travel/itinerary');
+}
+
+// Fetch IoT data
+const iot = await TravelService.getIoTById(parseInt(id));
+
+if (!iot) {
+  return Astro.redirect('/travel/itinerary');
+}
+
+// Check if CTC already exists
+const existingCTC = await TravelService.getCTCByIoTId(parseInt(id));
+if (existingCTC) {
+  return Astro.redirect(`/travel/itinerary/${id}`);
+}
+
+// Validate IoT status (must be approved or in_progress)
+const validStatuses = ['approved', 'in_progress'];
+if (!validStatuses.includes(iot.iot.status)) {
+  return Astro.redirect(`/travel/itinerary/${id}`);
+}
+
+const title = `Create Certificate of Travel Completed - ${iot.iot.iotNo}`;
+---
+
+<MainLayout title={title}>
+  <div class="container mx-auto px-4 py-6 max-w-5xl">
+    <!-- Header -->
+    <div class="mb-6">
+      <a href={`/travel/itinerary/${id}`} class="text-blue-600 hover:text-blue-700 inline-flex items-center gap-1 mb-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+        </svg>
+        Back to IoT Details
+      </a>
+      <h1 class="text-3xl font-bold text-gray-900">Create Certificate of Travel Completed</h1>
+      <p class="text-gray-600 mt-1">IoT No: {iot.iot.iotNo}</p>
+    </div>
+
+    <!-- IoT Summary Card -->
+    <div class="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
+      <h2 class="text-lg font-semibold text-gray-900 mb-4">Travel Information</h2>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <p class="text-sm text-gray-600">Employee</p>
+          <p class="font-medium">{iot.employee.firstName} {iot.employee.lastName}</p>
+        </div>
+        <div>
+          <p class="text-sm text-gray-600">Destination</p>
+          <p class="font-medium">{iot.iot.destination}</p>
+        </div>
+        <div>
+          <p class="text-sm text-gray-600">Departure Date</p>
+          <p class="font-medium">{new Date(iot.iot.departureDate).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
+        </div>
+        <div>
+          <p class="text-sm text-gray-600">Return Date</p>
+          <p class="font-medium">{new Date(iot.iot.returnDate).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })}</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Form -->
+    <div id="formContainer">
+      <CertificateTravelForm
+        client:load
+        :iotData={JSON.stringify({
+          id: iot.iot.id,
+          iotNo: iot.iot.iotNo,
+          employeeName: `${iot.employee.firstName} ${iot.employee.lastName}`,
+          destination: iot.iot.destination,
+          departureDate: iot.iot.departureDate,
+          returnDate: iot.iot.returnDate
+        })}
+      />
+    </div>
+  </div>
+
+  <script define:vars={{ iotId: parseInt(id) }}>
+    document.addEventListener('DOMContentLoaded', () => {
+      const formContainer = document.getElementById('formContainer');
+      if (!formContainer) return;
+
+      // Listen for submit event from Vue component
+      formContainer.addEventListener('submit', async (event) => {
+        const customEvent = event;
+        const formData = customEvent.detail;
+
+        try {
+          const response = await fetch(`/api/travel/${iotId}/ctc`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(formData),
+          });
+
+          const data = await response.json();
+
+          if (response.ok) {
+            // Show success message
+            alert(`Certificate of Travel Completed created successfully!\nCTC No: ${data.ctcNo}`);
+
+            // Redirect to the IoT detail page
+            window.location.href = `/travel/itinerary/${iotId}`;
+          } else {
+            alert(`Error: ${data.error || 'Failed to create CTC'}`);
+          }
+        } catch (error) {
+          console.error('Error creating CTC:', error);
+          alert('An error occurred while creating the CTC');
+        }
+      });
+
+      // Listen for cancel event
+      formContainer.addEventListener('cancel', () => {
+        window.location.href = `/travel/itinerary/${iotId}`;
+      });
+    });
+  </script>
+</MainLayout>

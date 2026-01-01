@@ -1,0 +1,254 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+
+const user = Astro.locals.user;
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+const title = 'FAR No. 3 - Statement of Aging of Due and Demandable Obligations';
+---
+
+<MainLayout title={title}>
+  <div class="container mx-auto px-4 py-6">
+    <!-- Header -->
+    <div class="mb-6">
+      <a href="/reports" class="text-blue-600 hover:text-blue-700 inline-flex items-center gap-1 mb-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+        </svg>
+        Back to Reports
+      </a>
+      <h1 class="text-3xl font-bold text-gray-900">FAR No. 3</h1>
+      <p class="text-gray-600 mt-1">Statement of Aging of Due and Demandable Obligations</p>
+    </div>
+
+    <!-- Report Parameters -->
+    <div class="bg-white rounded-lg shadow mb-6">
+      <div class="px-6 py-4 border-b border-gray-200">
+        <h2 class="text-lg font-semibold text-gray-900">Report Parameters</h2>
+      </div>
+      <div class="p-6">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label for="asOfDate" class="block text-sm font-medium text-gray-700 mb-2">As of Date</label>
+            <input
+              type="date"
+              id="asOfDate"
+              class="w-full border border-gray-300 rounded-md px-3 py-2"
+              value={new Date().toISOString().split('T')[0]}
+            />
+          </div>
+          <div>
+            <label for="fundCluster" class="block text-sm font-medium text-gray-700 mb-2">Fund Cluster (Optional)</label>
+            <select id="fundCluster" class="w-full border border-gray-300 rounded-md px-3 py-2">
+              <option value="">All Fund Clusters</option>
+              <!-- Will be populated dynamically -->
+            </select>
+          </div>
+        </div>
+        <div class="mt-4">
+          <button id="generateBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md font-medium">
+            Generate Report
+          </button>
+          <button id="exportExcelBtn" class="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-md font-medium ml-2" disabled>
+            Export to Excel
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Loading State -->
+    <div id="loading" class="hidden bg-white rounded-lg shadow p-8 text-center">
+      <div class="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+      <p class="mt-4 text-gray-600">Generating report...</p>
+    </div>
+
+    <!-- Report Display -->
+    <div id="reportContainer" class="hidden">
+      <div class="bg-white rounded-lg shadow mb-4">
+        <div class="px-6 py-4 border-b border-gray-200 bg-gray-50">
+          <div class="flex justify-between items-center">
+            <div>
+              <h2 class="text-lg font-semibold text-gray-900">Report Results</h2>
+              <p class="text-sm text-gray-600">As of <span id="reportDate"></span></p>
+            </div>
+            <div class="text-sm text-gray-500">
+              Generated: <span id="generatedDate"></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Summary Cards -->
+        <div class="p-6">
+          <div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
+            <div class="bg-blue-50 rounded-lg p-4">
+              <p class="text-sm text-gray-600">Total Obligations</p>
+              <p id="totalObligations" class="text-2xl font-bold text-blue-600">₱0.00</p>
+            </div>
+            <div class="bg-green-50 rounded-lg p-4">
+              <p class="text-sm text-gray-600">Current (0-30 days)</p>
+              <p id="current" class="text-2xl font-bold text-green-600">₱0.00</p>
+            </div>
+            <div class="bg-yellow-50 rounded-lg p-4">
+              <p class="text-sm text-gray-600">31-60 Days</p>
+              <p id="days31to60" class="text-2xl font-bold text-yellow-600">₱0.00</p>
+            </div>
+            <div class="bg-orange-50 rounded-lg p-4">
+              <p class="text-sm text-gray-600">61-90 Days</p>
+              <p id="days61to90" class="text-2xl font-bold text-orange-600">₱0.00</p>
+            </div>
+            <div class="bg-red-50 rounded-lg p-4">
+              <p class="text-sm text-gray-600">Over 90 Days</p>
+              <p id="over90" class="text-2xl font-bold text-red-600">₱0.00</p>
+            </div>
+          </div>
+
+          <!-- Data Table -->
+          <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200">
+              <thead class="bg-gray-50">
+                <tr>
+                  <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Payee</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Reference</th>
+                  <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
+                  <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Age (Days)</th>
+                  <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Category</th>
+                  <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Due Date</th>
+                </tr>
+              </thead>
+              <tbody id="reportTableBody" class="bg-white divide-y divide-gray-200">
+                <!-- Will be populated dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Empty State -->
+    <div id="emptyState" class="bg-white rounded-lg shadow p-12 text-center">
+      <svg class="mx-auto h-16 w-16 text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+      </svg>
+      <h3 class="text-lg font-medium text-gray-900 mb-2">No Report Generated</h3>
+      <p class="text-gray-600">Select parameters above and click "Generate Report" to view FAR No. 3</p>
+    </div>
+
+  </div>
+
+  <script>
+    let currentReportData = null;
+
+    const formatCurrency = (amount: number) => {
+      return new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(amount);
+    };
+
+    const formatDate = (date: string) => {
+      return new Date(date).toLocaleDateString('en-PH', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
+    };
+
+    const getAgingCategory = (days: number) => {
+      if (days <= 30) return 'Current';
+      if (days <= 60) return '31-60 Days';
+      if (days <= 90) return '61-90 Days';
+      return 'Over 90 Days';
+    };
+
+    const getAgingColor = (days: number) => {
+      if (days <= 30) return 'text-green-600';
+      if (days <= 60) return 'text-yellow-600';
+      if (days <= 90) return 'text-orange-600';
+      return 'text-red-600';
+    };
+
+    async function generateReport() {
+      const asOfDate = (document.getElementById('asOfDate') as HTMLInputElement).value;
+      const fundClusterId = (document.getElementById('fundCluster') as HTMLSelectElement).value;
+
+      // Show loading
+      document.getElementById('loading')!.classList.remove('hidden');
+      document.getElementById('reportContainer')!.classList.add('hidden');
+      document.getElementById('emptyState')!.classList.add('hidden');
+
+      try {
+        let url = `/api/reports/far-3?asOfDate=${asOfDate}`;
+        if (fundClusterId) {
+          url += `&fundClusterId=${fundClusterId}`;
+        }
+
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if (!response.ok) {
+          throw new Error(data.error || 'Failed to generate report');
+        }
+
+        currentReportData = data;
+        displayReport(data);
+
+        // Enable export button
+        (document.getElementById('exportExcelBtn') as HTMLButtonElement).disabled = false;
+      } catch (error: any) {
+        console.error('Error generating report:', error);
+        alert(`Error: ${error.message}`);
+        document.getElementById('emptyState')!.classList.remove('hidden');
+      } finally {
+        document.getElementById('loading')!.classList.add('hidden');
+      }
+    }
+
+    function displayReport(data: any) {
+      // Update summary cards
+      document.getElementById('totalObligations')!.textContent = formatCurrency(data.totals.total);
+      document.getElementById('current')!.textContent = formatCurrency(data.totals.current);
+      document.getElementById('days31to60')!.textContent = formatCurrency(data.totals.days31to60);
+      document.getElementById('days61to90')!.textContent = formatCurrency(data.totals.days61to90);
+      document.getElementById('over90')!.textContent = formatCurrency(data.totals.over90);
+
+      // Update report metadata
+      document.getElementById('reportDate')!.textContent = formatDate(data.asOfDate);
+      document.getElementById('generatedDate')!.textContent = formatDate(data.generatedAt);
+
+      // Populate table
+      const tbody = document.getElementById('reportTableBody')!;
+      tbody.innerHTML = '';
+
+      data.obligations.forEach((row: any) => {
+        const tr = document.createElement('tr');
+        tr.className = 'hover:bg-gray-50';
+        tr.innerHTML = `
+          <td class="px-4 py-3">
+            <div class="font-medium text-gray-900">${row.payeeName}</div>
+          </td>
+          <td class="px-4 py-3">
+            <div class="text-sm text-gray-600">${row.referenceNumber || 'N/A'}</div>
+          </td>
+          <td class="px-4 py-3 text-right font-medium">${formatCurrency(row.amount)}</td>
+          <td class="px-4 py-3 text-right ${getAgingColor(row.ageDays)}">${row.ageDays}</td>
+          <td class="px-4 py-3 text-right">
+            <span class="text-xs font-medium ${getAgingColor(row.ageDays)}">${getAgingCategory(row.ageDays)}</span>
+          </td>
+          <td class="px-4 py-3">${row.dueDate ? formatDate(row.dueDate) : 'N/A'}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      // Show report container
+      document.getElementById('reportContainer')!.classList.remove('hidden');
+    }
+
+    // Event listeners
+    document.getElementById('generateBtn')?.addEventListener('click', generateReport);
+
+    document.getElementById('exportExcelBtn')?.addEventListener('click', () => {
+      if (currentReportData) {
+        alert('Excel export functionality will be implemented in the next update.');
+      }
+    });
+  </script>
+</MainLayout>

@@ -1,0 +1,52 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import RevenueSourceForm from '../../../components/forms/revenue/RevenueSourceForm.vue';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+---
+
+<MainLayout title="Create Revenue Source">
+  <div class="container mx-auto px-4 py-6">
+    <!-- Breadcrumb -->
+    <nav class="flex mb-6" aria-label="Breadcrumb">
+      <ol class="inline-flex items-center space-x-1 md:space-x-3">
+        <li class="inline-flex items-center">
+          <a href="/revenue" class="text-gray-700 hover:text-primary-600">
+            Revenue
+          </a>
+        </li>
+        <li>
+          <div class="flex items-center">
+            <i class="pi pi-angle-right text-gray-400"></i>
+            <a href="/revenue/sources" class="ml-1 text-gray-700 hover:text-primary-600 md:ml-2">
+              Revenue Sources
+            </a>
+          </div>
+        </li>
+        <li aria-current="page">
+          <div class="flex items-center">
+            <i class="pi pi-angle-right text-gray-400"></i>
+            <span class="ml-1 text-gray-500 md:ml-2">Create</span>
+          </div>
+        </li>
+      </ol>
+    </nav>
+
+    <!-- Page Header -->
+    <div class="mb-6">
+      <h1 class="text-3xl font-bold text-gray-900">Create Revenue Source</h1>
+      <p class="mt-1 text-sm text-gray-600">
+        Add a new revenue category or source
+      </p>
+    </div>
+
+    <!-- Form Card -->
+    <div class="bg-white rounded-lg shadow border border-gray-200 p-6">
+      <RevenueSourceForm client:only="vue" />
+    </div>
+  </div>
+</MainLayout>

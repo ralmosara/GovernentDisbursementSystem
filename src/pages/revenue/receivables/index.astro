@@ -1,0 +1,285 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import { revenueService } from '../../../lib/services/revenue.service';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+// Get filter parameters
+const status = Astro.url.searchParams.get('status');
+const debtorName = Astro.url.searchParams.get('debtorName');
+const revenueSourceId = Astro.url.searchParams.get('revenueSourceId');
+const overdue = Astro.url.searchParams.get('overdue') === 'true';
+
+// Build filters
+const filters: any = {};
+if (status) filters.status = status;
+if (debtorName) filters.debtorName = debtorName;
+if (revenueSourceId) filters.revenueSourceId = parseInt(revenueSourceId);
+if (overdue) filters.overdue = true;
+
+// Fetch accounts receivable
+const ars = await revenueService.getAccountsReceivable(filters);
+
+// Calculate totals
+const totalAmount = ars.reduce((sum: number, ar: any) => sum + parseFloat(ar.amount), 0);
+const totalBalance = ars.reduce((sum: number, ar: any) => sum + parseFloat(ar.balance), 0);
+const totalCollected = ars.reduce((sum: number, ar: any) => sum + parseFloat(ar.amountCollected), 0);
+
+// Get revenue sources for filter dropdown
+const revenueSources = await revenueService.getRevenueSources(true);
+---
+
+<MainLayout title="Accounts Receivable">
+  <div class="container mx-auto px-4 py-6">
+    <!-- Page Header -->
+    <div class="flex items-center justify-between mb-6">
+      <div>
+        <h1 class="text-3xl font-bold text-gray-900">Accounts Receivable</h1>
+        <p class="mt-1 text-sm text-gray-600">
+          Track outstanding payments and receivables
+        </p>
+      </div>
+      <a
+        href="/revenue/receivables/create"
+        class="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700"
+      >
+        <i class="pi pi-plus mr-2"></i>
+        Create AR
+      </a>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div class="bg-white rounded-lg shadow p-4 border border-gray-200">
+        <p class="text-sm font-medium text-gray-600">Total Billed</p>
+        <p class="text-2xl font-bold text-gray-900">
+          ₱{totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+        </p>
+      </div>
+      <div class="bg-white rounded-lg shadow p-4 border border-gray-200">
+        <p class="text-sm font-medium text-gray-600">Total Collected</p>
+        <p class="text-2xl font-bold text-green-600">
+          ₱{totalCollected.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+        </p>
+      </div>
+      <div class="bg-white rounded-lg shadow p-4 border border-gray-200">
+        <p class="text-sm font-medium text-gray-600">Outstanding Balance</p>
+        <p class="text-2xl font-bold text-yellow-600">
+          ₱{totalBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+        </p>
+      </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="bg-white rounded-lg shadow border border-gray-200 p-4 mb-6">
+      <form method="GET" class="grid grid-cols-1 md:grid-cols-5 gap-4">
+        <div>
+          <label for="status" class="block text-sm font-medium text-gray-700 mb-1">
+            Status
+          </label>
+          <select
+            id="status"
+            name="status"
+            class="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+          >
+            <option value="">All Status</option>
+            <option value="outstanding" selected={status === 'outstanding'}>Outstanding</option>
+            <option value="partial" selected={status === 'partial'}>Partial</option>
+            <option value="paid" selected={status === 'paid'}>Paid</option>
+            <option value="written_off" selected={status === 'written_off'}>Written Off</option>
+          </select>
+        </div>
+        <div>
+          <label for="debtorName" class="block text-sm font-medium text-gray-700 mb-1">
+            Debtor Name
+          </label>
+          <input
+            type="text"
+            id="debtorName"
+            name="debtorName"
+            value={debtorName || ''}
+            placeholder="Search debtor..."
+            class="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+          />
+        </div>
+        <div>
+          <label for="revenueSourceId" class="block text-sm font-medium text-gray-700 mb-1">
+            Revenue Source
+          </label>
+          <select
+            id="revenueSourceId"
+            name="revenueSourceId"
+            class="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+          >
+            <option value="">All Sources</option>
+            {revenueSources.map((source: any) => (
+              <option value={source.id} selected={revenueSourceId === source.id.toString()}>
+                {source.name}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div class="flex items-end">
+          <label class="flex items-center">
+            <input
+              type="checkbox"
+              name="overdue"
+              value="true"
+              checked={overdue}
+              class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+            />
+            <span class="ml-2 text-sm text-gray-700">Overdue Only</span>
+          </label>
+        </div>
+        <div class="flex items-end space-x-2">
+          <button
+            type="submit"
+            class="flex-1 px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+          >
+            <i class="pi pi-filter mr-2"></i>
+            Apply
+          </button>
+          <a
+            href="/revenue/receivables"
+            class="px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+          >
+            <i class="pi pi-times"></i>
+          </a>
+        </div>
+      </form>
+    </div>
+
+    <!-- AR Table -->
+    <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+      {ars.length > 0 ? (
+        <div class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+              <tr>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  AR No
+                </th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Debtor
+                </th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Revenue Source
+                </th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Invoice Date
+                </th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Due Date
+                </th>
+                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Amount
+                </th>
+                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Balance
+                </th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Status
+                </th>
+                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-200">
+              {ars.map((ar: any) => {
+                const isOverdue = new Date(ar.dueDate) < new Date() && ar.status !== 'paid' && ar.status !== 'written_off';
+                return (
+                  <tr class:list={['hover:bg-gray-50', { 'bg-red-50': isOverdue }]}>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-primary-600">
+                      <a href={`/revenue/receivables/${ar.id}`}>{ar.arNo}</a>
+                    </td>
+                    <td class="px-6 py-4 text-sm text-gray-900">
+                      {ar.debtorName}
+                    </td>
+                    <td class="px-6 py-4 text-sm text-gray-900">
+                      {ar.revenueSource?.name || '-'}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {new Date(ar.invoiceDate).toLocaleDateString('en-PH')}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {new Date(ar.dueDate).toLocaleDateString('en-PH')}
+                      {isOverdue && (
+                        <span class="ml-1 text-red-600 font-semibold">(OVERDUE)</span>
+                      )}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900">
+                      ₱{parseFloat(ar.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-right font-medium text-gray-900">
+                      ₱{parseFloat(ar.balance).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm">
+                      {ar.status === 'outstanding' && (
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800">
+                          Outstanding
+                        </span>
+                      )}
+                      {ar.status === 'partial' && (
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                          Partial
+                        </span>
+                      )}
+                      {ar.status === 'paid' && (
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                          Paid
+                        </span>
+                      )}
+                      {ar.status === 'written_off' && (
+                        <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                          Written Off
+                        </span>
+                      )}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                      <a
+                        href={`/revenue/receivables/${ar.id}`}
+                        class="text-primary-600 hover:text-primary-900"
+                      >
+                        View
+                      </a>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div class="px-6 py-12 text-center">
+          <i class="pi pi-inbox text-gray-400 text-4xl mb-4"></i>
+          <h3 class="text-lg font-medium text-gray-900 mb-2">No accounts receivable found</h3>
+          <p class="text-gray-500 mb-4">
+            {Object.keys(filters).length > 0
+              ? 'Try adjusting your filters or create a new AR.'
+              : 'Get started by creating your first accounts receivable.'}
+          </p>
+          <a
+            href="/revenue/receivables/create"
+            class="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700"
+          >
+            <i class="pi pi-plus mr-2"></i>
+            Create AR
+          </a>
+        </div>
+      )}
+    </div>
+
+    <!-- Summary -->
+    {ars.length > 0 && (
+      <div class="mt-4 text-sm text-gray-600">
+        Showing {ars.length} account(s) receivable
+        {Object.keys(filters).length > 0 && ' with filters applied'}
+      </div>
+    )}
+  </div>
+</MainLayout>

@@ -1,0 +1,281 @@
+---
+import MainLayout from '../../layouts/MainLayout.astro';
+import { revenueService } from '../../lib/services/revenue.service';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+// Fetch dashboard metrics and data
+const metrics = await revenueService.getDashboardMetrics();
+const recentEntries = await revenueService.getRecentRevenueEntries(10);
+const overdueARs = await revenueService.getOverdueReceivables();
+const agingReport = await revenueService.getARAgingReport();
+
+// Calculate total overdue amount
+const totalOverdueAmount = overdueARs.reduce(
+  (sum: number, ar: any) => sum + parseFloat(ar.balance),
+  0
+);
+---
+
+<MainLayout title="Revenue Management Dashboard">
+  <div class="container mx-auto px-4 py-6">
+    <!-- Page Header -->
+    <div class="flex items-center justify-between mb-6">
+      <div>
+        <h1 class="text-3xl font-bold text-gray-900">Revenue Management Dashboard</h1>
+        <p class="mt-1 text-sm text-gray-600">
+          Overview of revenue, collections, and accounts receivable
+        </p>
+      </div>
+      <div class="flex space-x-3">
+        <a
+          href="/revenue/entries/create"
+          class="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700"
+        >
+          <i class="pi pi-plus mr-2"></i>
+          Record Revenue
+        </a>
+      </div>
+    </div>
+
+    <!-- 4 Stat Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+      <!-- Today's Revenue -->
+      <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
+        <div class="flex items-center">
+          <div class="flex-shrink-0">
+            <div class="p-3 bg-green-100 rounded-md">
+              <i class="pi pi-dollar text-green-600 text-xl"></i>
+            </div>
+          </div>
+          <div class="ml-4 flex-1">
+            <p class="text-sm font-medium text-gray-600">Today's Revenue</p>
+            <p class="text-2xl font-bold text-gray-900">
+              ₱{metrics.todayRevenue.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Month-to-Date Revenue -->
+      <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
+        <div class="flex items-center">
+          <div class="flex-shrink-0">
+            <div class="p-3 bg-blue-100 rounded-md">
+              <i class="pi pi-chart-line text-blue-600 text-xl"></i>
+            </div>
+          </div>
+          <div class="ml-4 flex-1">
+            <p class="text-sm font-medium text-gray-600">Month-to-Date Revenue</p>
+            <p class="text-2xl font-bold text-gray-900">
+              ₱{metrics.mtdRevenue.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Outstanding AR -->
+      <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
+        <div class="flex items-center">
+          <div class="flex-shrink-0">
+            <div class="p-3 bg-yellow-100 rounded-md">
+              <i class="pi pi-list text-yellow-600 text-xl"></i>
+            </div>
+          </div>
+          <div class="ml-4 flex-1">
+            <p class="text-sm font-medium text-gray-600">Outstanding AR</p>
+            <p class="text-2xl font-bold text-gray-900">
+              ₱{metrics.totalOutstandingAR.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Collection Rate -->
+      <div class="bg-white rounded-lg shadow p-6 border border-gray-200">
+        <div class="flex items-center">
+          <div class="flex-shrink-0">
+            <div class="p-3 bg-purple-100 rounded-md">
+              <i class="pi pi-percentage text-purple-600 text-xl"></i>
+            </div>
+          </div>
+          <div class="ml-4 flex-1">
+            <p class="text-sm font-medium text-gray-600">Collection Rate</p>
+            <p class="text-2xl font-bold text-gray-900">
+              {metrics.collectionRate.toFixed(1)}%
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <a
+        href="/revenue/entries/create"
+        class="bg-white rounded-lg shadow p-6 border border-gray-200 hover:border-primary-500 transition-colors cursor-pointer"
+      >
+        <div class="flex items-center">
+          <div class="flex-shrink-0">
+            <div class="p-3 bg-green-100 rounded-md">
+              <i class="pi pi-plus-circle text-green-600 text-xl"></i>
+            </div>
+          </div>
+          <div class="ml-4">
+            <h3 class="text-lg font-semibold text-gray-900">Record Revenue</h3>
+            <p class="text-sm text-gray-600">Create new revenue entry</p>
+          </div>
+        </div>
+      </a>
+
+      <a
+        href="/revenue/receivables/create"
+        class="bg-white rounded-lg shadow p-6 border border-gray-200 hover:border-primary-500 transition-colors cursor-pointer"
+      >
+        <div class="flex items-center">
+          <div class="flex-shrink-0">
+            <div class="p-3 bg-blue-100 rounded-md">
+              <i class="pi pi-file-edit text-blue-600 text-xl"></i>
+            </div>
+          </div>
+          <div class="ml-4">
+            <h3 class="text-lg font-semibold text-gray-900">Create AR</h3>
+            <p class="text-sm text-gray-600">Record accounts receivable</p>
+          </div>
+        </div>
+      </a>
+
+      <a
+        href="/revenue/collections/create"
+        class="bg-white rounded-lg shadow p-6 border border-gray-200 hover:border-primary-500 transition-colors cursor-pointer"
+      >
+        <div class="flex items-center">
+          <div class="flex-shrink-0">
+            <div class="p-3 bg-purple-100 rounded-md">
+              <i class="pi pi-money-bill text-purple-600 text-xl"></i>
+            </div>
+          </div>
+          <div class="ml-4">
+            <h3 class="text-lg font-semibold text-gray-900">Record Collection</h3>
+            <p class="text-sm text-gray-600">Collect AR payment</p>
+          </div>
+        </div>
+      </a>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <!-- Recent Revenue Entries -->
+      <div class="bg-white rounded-lg shadow border border-gray-200">
+        <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+          <h2 class="text-lg font-semibold text-gray-900">Recent Revenue Entries</h2>
+          <a href="/revenue/entries" class="text-sm text-primary-600 hover:text-primary-700">
+            View all <i class="pi pi-arrow-right ml-1"></i>
+          </a>
+        </div>
+        <div class="overflow-x-auto">
+          {recentEntries.length > 0 ? (
+            <table class="min-w-full divide-y divide-gray-200">
+              <thead class="bg-gray-50">
+                <tr>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Entry No
+                  </th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Date
+                  </th>
+                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Source
+                  </th>
+                  <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Amount
+                  </th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-200">
+                {recentEntries.map((entry: any) => (
+                  <tr class="hover:bg-gray-50">
+                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-primary-600">
+                      <a href={`/revenue/entries/${entry.id}`}>{entry.entryNo}</a>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                      {new Date(entry.entryDate).toLocaleDateString('en-PH')}
+                    </td>
+                    <td class="px-6 py-4 text-sm text-gray-900">
+                      {entry.revenueSource?.name || '-'}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-right font-medium text-gray-900">
+                      ₱{parseFloat(entry.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div class="px-6 py-12 text-center">
+              <i class="pi pi-inbox text-gray-400 text-4xl mb-4"></i>
+              <p class="text-gray-500">No revenue entries yet</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <!-- AR Aging Report -->
+      <div class="bg-white rounded-lg shadow border border-gray-200">
+        <div class="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+          <h2 class="text-lg font-semibold text-gray-900">AR Aging Report</h2>
+          <a href="/revenue/receivables" class="text-sm text-primary-600 hover:text-primary-700">
+            View all AR <i class="pi pi-arrow-right ml-1"></i>
+          </a>
+        </div>
+        <div class="p-6">
+          <div class="space-y-4">
+            {agingReport.map((bucket: any) => (
+              <div class="flex items-center justify-between">
+                <div class="flex-1">
+                  <p class="text-sm font-medium text-gray-900">{bucket.label}</p>
+                  <p class="text-xs text-gray-500">{bucket.count} account(s)</p>
+                </div>
+                <div class="text-right">
+                  <p class="text-lg font-semibold text-gray-900">
+                    ₱{parseFloat(bucket.total).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Overdue AR Alert -->
+    {overdueARs.length > 0 && (
+      <div class="mt-6 bg-red-50 border border-red-200 rounded-lg p-6">
+        <div class="flex items-start">
+          <div class="flex-shrink-0">
+            <i class="pi pi-exclamation-triangle text-red-600 text-2xl"></i>
+          </div>
+          <div class="ml-4 flex-1">
+            <h3 class="text-lg font-semibold text-red-800">Overdue Receivables</h3>
+            <p class="mt-1 text-sm text-red-700">
+              {overdueARs.length} account(s) are past due with a total balance of ₱
+              {totalOverdueAmount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+            </p>
+            <div class="mt-4">
+              <a
+                href="/revenue/receivables?overdue=true"
+                class="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-red-600 hover:bg-red-700"
+              >
+                View Overdue Accounts
+                <i class="pi pi-arrow-right ml-2"></i>
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
+  </div>
+</MainLayout>

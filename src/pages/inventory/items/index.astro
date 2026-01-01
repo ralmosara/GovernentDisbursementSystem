@@ -1,0 +1,279 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import { assetService } from '../../../lib/services/asset.service';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+// Get query parameters
+const url = new URL(Astro.request.url);
+const search = url.searchParams.get('search') || '';
+const isActive = url.searchParams.get('isActive');
+const lowStock = url.searchParams.get('lowStock') === 'true';
+
+// Fetch inventory items
+let items: any[] = [];
+
+try {
+  const filters: any = {};
+  if (search) filters.search = search;
+  if (isActive !== null) filters.isActive = isActive === 'true';
+  if (lowStock) filters.lowStock = true;
+
+  items = await assetService.getInventoryItems(filters);
+} catch (error) {
+  console.error('Error loading inventory items:', error);
+}
+
+const getStockStatusConfig = (status: string) => {
+  const configs: Record<string, { label: string; classes: string }> = {
+    adequate: { label: 'Adequate', classes: 'bg-green-100 text-green-800' },
+    low: { label: 'Low Stock', classes: 'bg-orange-100 text-orange-800' },
+    out: { label: 'Out of Stock', classes: 'bg-red-100 text-red-800' },
+    excess: { label: 'Excess', classes: 'bg-purple-100 text-purple-800' },
+  };
+  return configs[status] || configs.adequate;
+};
+---
+
+<MainLayout title="Inventory Items">
+  <div class="container mx-auto px-4 py-6">
+    <!-- Page Header -->
+    <div class="flex justify-between items-center mb-6">
+      <div>
+        <h1 class="text-3xl font-bold text-gray-900">Inventory Items</h1>
+        <p class="mt-1 text-sm text-gray-600">
+          Manage stock items and supplies
+        </p>
+      </div>
+      <a
+        href="/inventory/items/create"
+        class="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700"
+      >
+        <i class="pi pi-plus mr-2"></i>
+        Add Item
+      </a>
+    </div>
+
+    <!-- Filters -->
+    <div class="bg-white rounded-lg shadow border border-gray-200 p-4 mb-6">
+      <form method="GET" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div class="md:col-span-2">
+          <label for="search" class="block text-sm font-medium text-gray-700 mb-1">
+            Search
+          </label>
+          <input
+            type="text"
+            id="search"
+            name="search"
+            value={search}
+            placeholder="Item name, code, or description..."
+            class="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500"
+          />
+        </div>
+
+        <div>
+          <label for="isActive" class="block text-sm font-medium text-gray-700 mb-1">
+            Status
+          </label>
+          <select
+            id="isActive"
+            name="isActive"
+            class="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500"
+          >
+            <option value="">All Items</option>
+            <option value="true" selected={isActive === 'true'}>Active Only</option>
+            <option value="false" selected={isActive === 'false'}>Inactive Only</option>
+          </select>
+        </div>
+
+        <div class="flex items-end space-x-2">
+          <div class="flex-1">
+            <label class="block text-sm font-medium text-gray-700 mb-1">
+              Stock Level
+            </label>
+            <div class="flex items-center h-10">
+              <input
+                type="checkbox"
+                id="lowStock"
+                name="lowStock"
+                value="true"
+                checked={lowStock}
+                class="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300 rounded"
+              />
+              <label for="lowStock" class="ml-2 text-sm text-gray-900">
+                Low Stock Only
+              </label>
+            </div>
+          </div>
+          <button
+            type="submit"
+            class="px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 font-medium"
+          >
+            Apply
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Items Table -->
+    <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+      {items.length > 0 ? (
+        <div class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+              <tr>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Item Code
+                </th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Item Name
+                </th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Unit
+                </th>
+                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Unit Cost
+                </th>
+                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Quantity
+                </th>
+                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Total Value
+                </th>
+                <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Stock Status
+                </th>
+                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-200">
+              {items.map((item: any) => {
+                const stockConfig = getStockStatusConfig(item.stockStatus);
+                return (
+                  <tr class="hover:bg-gray-50">
+                    <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                      {item.itemCode}
+                    </td>
+                    <td class="px-6 py-4 text-sm text-gray-900">
+                      <div class="font-medium">{item.itemName}</div>
+                      {item.description && (
+                        <div class="text-xs text-gray-500 mt-1">{item.description}</div>
+                      )}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      {item.unit}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-right text-gray-900">
+                      ₱{Number(item.unitCost).toLocaleString()}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-right font-medium text-gray-900">
+                      {item.quantityOnHand}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-sm text-right font-semibold text-gray-900">
+                      ₱{item.totalValue.toLocaleString()}
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-center">
+                      <span class={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${stockConfig.classes}`}>
+                        {stockConfig.label}
+                      </span>
+                    </td>
+                    <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                      <a
+                        href={`/inventory/items/${item.id}`}
+                        class="text-primary-600 hover:text-primary-900"
+                      >
+                        View
+                      </a>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div class="px-6 py-12 text-center">
+          <i class="pi pi-inbox text-gray-400 text-4xl mb-4"></i>
+          <h3 class="text-lg font-medium text-gray-900 mb-2">No inventory items found</h3>
+          <p class="text-gray-500 mb-4">
+            {search || isActive || lowStock
+              ? 'No items match your filters.'
+              : 'Start by adding your first inventory item.'}
+          </p>
+          <a
+            href="/inventory/items/create"
+            class="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700"
+          >
+            <i class="pi pi-plus mr-2"></i>
+            Add Item
+          </a>
+        </div>
+      )}
+    </div>
+
+    <!-- Summary Cards -->
+    {items.length > 0 && (
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-6">
+        <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+          <div class="flex items-center">
+            <div class="p-3 bg-blue-100 rounded-full">
+              <i class="pi pi-shopping-bag text-blue-600 text-xl"></i>
+            </div>
+            <div class="ml-4">
+              <p class="text-sm font-medium text-gray-500">Total Items</p>
+              <p class="text-2xl font-bold text-gray-900">{items.length}</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+          <div class="flex items-center">
+            <div class="p-3 bg-green-100 rounded-full">
+              <i class="pi pi-dollar text-green-600 text-xl"></i>
+            </div>
+            <div class="ml-4">
+              <p class="text-sm font-medium text-gray-500">Total Value</p>
+              <p class="text-2xl font-bold text-gray-900">
+                ₱{items.reduce((sum, item) => sum + item.totalValue, 0).toLocaleString()}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+          <div class="flex items-center">
+            <div class="p-3 bg-orange-100 rounded-full">
+              <i class="pi pi-exclamation-triangle text-orange-600 text-xl"></i>
+            </div>
+            <div class="ml-4">
+              <p class="text-sm font-medium text-gray-500">Low Stock</p>
+              <p class="text-2xl font-bold text-gray-900">
+                {items.filter(item => item.stockStatus === 'low' || item.stockStatus === 'out').length}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+          <div class="flex items-center">
+            <div class="p-3 bg-purple-100 rounded-full">
+              <i class="pi pi-chart-bar text-purple-600 text-xl"></i>
+            </div>
+            <div class="ml-4">
+              <p class="text-sm font-medium text-gray-500">Avg Unit Cost</p>
+              <p class="text-2xl font-bold text-gray-900">
+                ₱{(items.reduce((sum, item) => sum + parseFloat(item.unitCost), 0) / items.length).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
+  </div>
+</MainLayout>

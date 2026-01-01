@@ -262,14 +262,23 @@ const formatDate = (date: Date | string | null) => {
                           <i class="pi pi-eye"></i>
                         </a>
                         {dv.status === 'approved' && (
-                          <button
-                            type="button"
-                            class="text-green-600 hover:text-green-800"
-                            title="Print DV"
-                            onclick={`window.open('/disbursements/${dv.id}/print', '_blank')`}
-                          >
-                            <i class="pi pi-print"></i>
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              class="text-green-600 hover:text-green-800"
+                              title="Print DV"
+                              onclick={`window.open('/disbursements/${dv.id}/print', '_blank')`}
+                            >
+                              <i class="pi pi-print"></i>
+                            </button>
+                            <a
+                              href={`/api/disbursements/${dv.id}/excel`}
+                              class="text-success-600 hover:text-success-800"
+                              title="Download Excel"
+                            >
+                              <i class="pi pi-file-excel"></i>
+                            </a>
+                          </>
                         )}
                       </div>
                     </td>

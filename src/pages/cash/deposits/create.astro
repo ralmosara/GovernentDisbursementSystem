@@ -1,0 +1,69 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import BankDepositForm from '../../../components/forms/cash/BankDepositForm.vue';
+import { db } from '../../../lib/db/connection';
+import { bankAccounts, cashReceipts } from '../../../lib/db/schema';
+import { isNull } from 'drizzle-orm';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+// Fetch bank accounts
+const allBankAccounts = await db.select().from(bankAccounts);
+
+// Fetch undeposited cash receipts (where bankDepositId is null)
+const availableReceipts = await db
+  .select()
+  .from(cashReceipts)
+  .where(isNull(cashReceipts.bankDepositId));
+---
+
+<MainLayout title="Create Bank Deposit">
+  <div class="container mx-auto px-4 py-6 max-w-6xl">
+    <!-- Page Header -->
+    <div class="mb-6">
+      <a href="/cash/deposits" class="text-blue-600 hover:text-blue-700 inline-flex items-center gap-1 mb-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+        </svg>
+        Back to Bank Deposits
+      </a>
+      <h1 class="text-3xl font-bold text-gray-900">Create Bank Deposit</h1>
+      <p class="text-gray-600 mt-1">Prepare a bank deposit slip with selected cash receipts</p>
+    </div>
+
+    <!-- Form Card -->
+    <div class="card">
+      <div class="card-header">
+        <h2 class="text-lg font-semibold text-gray-900">Bank Deposit Information</h2>
+      </div>
+      <div class="card-body">
+        <BankDepositForm
+          client:load
+          bankAccounts={JSON.stringify(allBankAccounts)}
+          availableReceipts={JSON.stringify(availableReceipts)}
+        />
+      </div>
+    </div>
+
+    <!-- Help Text -->
+    <div class="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+      <div class="flex gap-3">
+        <i class="pi pi-info-circle text-blue-600 text-xl"></i>
+        <div>
+          <h3 class="font-semibold text-blue-900 mb-1">Important Notes:</h3>
+          <ul class="text-sm text-blue-800 space-y-1">
+            <li>• Only undeposited cash receipts are shown in the list</li>
+            <li>• Select multiple receipts to include in the bank deposit</li>
+            <li>• Deposit slip number will be automatically generated</li>
+            <li>• Ensure the total amount matches the actual deposit to the bank</li>
+            <li>• Once created, you must confirm the deposit after receiving bank validation</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</MainLayout>

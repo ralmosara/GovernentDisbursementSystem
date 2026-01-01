@@ -1,0 +1,400 @@
+---
+import { TravelService } from '../../../../lib/services/travel.service';
+
+const user = Astro.locals.user;
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+const { id } = Astro.params;
+if (!id || isNaN(parseInt(id))) {
+  return Astro.redirect('/travel/itinerary');
+}
+
+const iot = await TravelService.getIoTById(parseInt(id));
+const liquidation = await TravelService.getLiquidationByIoTId(parseInt(id));
+
+if (!iot || !liquidation) {
+  return Astro.redirect('/travel/itinerary');
+}
+
+const formatDate = (date: Date | string | null) => {
+  if (!date) return 'N/A';
+  const d = typeof date === 'string' ? new Date(date) : date;
+  return d.toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' });
+};
+
+const formatCurrency = (amount: string | number) => {
+  return new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(parseFloat(amount.toString()));
+};
+
+const totalExpenses = parseFloat(liquidation.liquidationReport.totalExpenses.toString());
+const cashAdvance = parseFloat(liquidation.liquidationReport.cashAdvanceAmount.toString());
+const refund = parseFloat(liquidation.liquidationReport.refundAmount?.toString() || '0');
+const additionalClaim = parseFloat(liquidation.liquidationReport.additionalClaim?.toString() || '0');
+---
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LR {liquidation.liquidationReport.lrNo} - Print</title>
+  <style>
+    @media print {
+      @page {
+        size: letter;
+        margin: 0.5in;
+      }
+
+      body {
+        print-color-adjust: exact;
+        -webkit-print-color-adjust: exact;
+      }
+
+      .no-print {
+        display: none !important;
+      }
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: Arial, sans-serif;
+      font-size: 10pt;
+      line-height: 1.4;
+      color: #000;
+      background: #fff;
+      padding: 20px;
+    }
+
+    .lr-container {
+      max-width: 8.5in;
+      margin: 0 auto;
+      background: white;
+      border: 2px solid #000;
+      padding: 0.5in;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 20px;
+      border-bottom: 2px solid #000;
+      padding-bottom: 10px;
+    }
+
+    .header h1 {
+      font-size: 12pt;
+      font-weight: bold;
+      margin-bottom: 3px;
+    }
+
+    .header h2 {
+      font-size: 16pt;
+      font-weight: bold;
+      margin: 10px 0;
+    }
+
+    .lr-number {
+      font-size: 12pt;
+      font-weight: bold;
+      margin-bottom: 15px;
+      text-align: right;
+    }
+
+    .section {
+      margin-bottom: 15px;
+    }
+
+    .field {
+      margin-bottom: 6px;
+      display: flex;
+    }
+
+    .field-label {
+      font-weight: bold;
+      width: 180px;
+      flex-shrink: 0;
+    }
+
+    .field-value {
+      flex: 1;
+      border-bottom: 1px solid #000;
+      padding-bottom: 2px;
+    }
+
+    .section-title {
+      font-weight: bold;
+      font-size: 11pt;
+      margin: 15px 0 10px 0;
+      text-decoration: underline;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 10px 0;
+    }
+
+    th, td {
+      border: 1px solid #000;
+      padding: 6px;
+      text-align: left;
+      font-size: 9pt;
+    }
+
+    th {
+      background: #e0e0e0;
+      font-weight: bold;
+    }
+
+    td.amount {
+      text-align: right;
+    }
+
+    .summary-box {
+      border: 2px solid #000;
+      padding: 15px;
+      margin: 20px 0;
+      background: #f9f9f9;
+    }
+
+    .summary-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      font-size: 11pt;
+    }
+
+    .summary-row.total {
+      border-top: 2px solid #000;
+      padding-top: 8px;
+      margin-top: 8px;
+      font-weight: bold;
+      font-size: 12pt;
+    }
+
+    .summary-row.highlight {
+      background: #fff3cd;
+      padding: 8px;
+      margin: 8px -8px;
+      font-weight: bold;
+    }
+
+    .refund-box {
+      background: #d1ecf1;
+    }
+
+    .claim-box {
+      background: #d4edda;
+    }
+
+    .signatures {
+      margin-top: 30px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 30px;
+    }
+
+    .signature-box {
+      text-align: center;
+    }
+
+    .signature-line {
+      border-top: 1px solid #000;
+      margin-top: 50px;
+      padding-top: 5px;
+      font-weight: bold;
+    }
+
+    .signature-title {
+      font-size: 9pt;
+      margin-top: 3px;
+    }
+
+    .print-button {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      padding: 12px 24px;
+      background: #2563eb;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      cursor: pointer;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+
+    .print-button:hover {
+      background: #1d4ed8;
+    }
+  </style>
+</head>
+<body>
+  <button class="print-button no-print" onclick="window.print()">Print</button>
+
+  <div class="lr-container">
+    <!-- Header -->
+    <div class="header">
+      <h1>Republic of the Philippines</h1>
+      <h1>[OFFICE NAME]</h1>
+      <h2>LIQUIDATION REPORT</h2>
+    </div>
+
+    <!-- LR Number -->
+    <div class="lr-number">
+      LR No: {liquidation.liquidationReport.lrNo}
+    </div>
+
+    <!-- Reference Information -->
+    <div class="section">
+      <div class="field">
+        <span class="field-label">Reference IoT No:</span>
+        <span class="field-value">{iot.iot.iotNo}</span>
+      </div>
+      <div class="field">
+        <span class="field-label">Name of Employee:</span>
+        <span class="field-value">{iot.employee.firstName} {iot.employee.lastName}</span>
+      </div>
+      <div class="field">
+        <span class="field-label">Position:</span>
+        <span class="field-value">{iot.employee.position || 'N/A'}</span>
+      </div>
+      <div class="field">
+        <span class="field-label">Destination:</span>
+        <span class="field-value">{iot.iot.destination}</span>
+      </div>
+      <div class="field">
+        <span class="field-label">Travel Period:</span>
+        <span class="field-value">{formatDate(iot.iot.departureDate)} to {formatDate(iot.iot.returnDate)}</span>
+      </div>
+      <div class="field">
+        <span class="field-label">Fund Cluster:</span>
+        <span class="field-value">{iot.fundCluster.name}</span>
+      </div>
+    </div>
+
+    <!-- Expense Details -->
+    <div class="section-title">ITEMIZED EXPENSES</div>
+    <table>
+      <thead>
+        <tr>
+          <th style="width: 12%">Date</th>
+          <th style="width: 20%">Category</th>
+          <th style="width: 38%">Description</th>
+          <th style="width: 15%">OR/Receipt No.</th>
+          <th style="width: 15%">Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        {liquidation.expenseItems && liquidation.expenseItems.length > 0 ? (
+          liquidation.expenseItems.map((item) => (
+            <tr>
+              <td>{formatDate(item.expenseDate)}</td>
+              <td>{item.category}</td>
+              <td>{item.description}</td>
+              <td>{item.receiptNumber || 'N/A'}</td>
+              <td class="amount">{formatCurrency(item.amount)}</td>
+            </tr>
+          ))
+        ) : (
+          <tr>
+            <td colspan="5" style="text-align: center; font-style: italic;">No expense items recorded</td>
+          </tr>
+        )}
+      </tbody>
+      <tfoot>
+        <tr style="font-weight: bold; background: #f0f0f0;">
+          <td colspan="4" style="text-align: right;">TOTAL EXPENSES:</td>
+          <td class="amount">{formatCurrency(totalExpenses)}</td>
+        </tr>
+      </tfoot>
+    </table>
+
+    <!-- Summary and Settlement -->
+    <div class="section-title">LIQUIDATION SUMMARY</div>
+    <div class="summary-box">
+      <div class="summary-row">
+        <span>Cash Advance Received:</span>
+        <span>{formatCurrency(cashAdvance)}</span>
+      </div>
+      <div class="summary-row total">
+        <span>Total Expenses Incurred:</span>
+        <span>{formatCurrency(totalExpenses)}</span>
+      </div>
+      <div class="summary-row" style="border-top: 1px solid #000; padding-top: 10px; margin-top: 10px;">
+        <span>Balance:</span>
+        <span>{formatCurrency(Math.abs(totalExpenses - cashAdvance))}</span>
+      </div>
+
+      {refund > 0 && (
+        <div class="summary-row highlight refund-box">
+          <span><strong>REFUND TO AGENCY:</strong></span>
+          <span><strong>{formatCurrency(refund)}</strong></span>
+        </div>
+      )}
+
+      {additionalClaim > 0 && (
+        <div class="summary-row highlight claim-box">
+          <span><strong>ADDITIONAL CLAIM:</strong></span>
+          <span><strong>{formatCurrency(additionalClaim)}</strong></span>
+        </div>
+      )}
+
+      {refund === 0 && additionalClaim === 0 && (
+        <div class="summary-row highlight" style="background: #e8f5e9;">
+          <span><strong>STATUS:</strong></span>
+          <span><strong>BALANCED - NO REFUND OR ADDITIONAL CLAIM</strong></span>
+        </div>
+      )}
+    </div>
+
+    {liquidation.liquidationReport.remarks && (
+      <div>
+        <div class="section-title">REMARKS</div>
+        <div style="border: 1px solid #000; padding: 10px; min-height: 60px; background: white;">
+          {liquidation.liquidationReport.remarks}
+        </div>
+      </div>
+    )}
+
+    <!-- Supporting Documents Checklist -->
+    <div class="section-title">SUPPORTING DOCUMENTS ATTACHED</div>
+    <div style="border: 1px solid #000; padding: 10px; min-height: 80px; background: white;">
+      <div style="margin-bottom: 5px;">☐ Official Receipts</div>
+      <div style="margin-bottom: 5px;">☐ Certificate of Travel Completed</div>
+      <div style="margin-bottom: 5px;">☐ Itinerary of Travel (approved)</div>
+      <div style="margin-bottom: 5px;">☐ Other relevant documents</div>
+    </div>
+
+    <!-- Signatures -->
+    <div class="signatures">
+      <div class="signature-box">
+        <div class="signature-line">
+          {iot.employee.firstName} {iot.employee.lastName}
+        </div>
+        <div class="signature-title">Employee's Signature over Printed Name</div>
+        <div class="signature-title">Date: {formatDate(liquidation.liquidationReport.submittedAt)}</div>
+      </div>
+
+      <div class="signature-box">
+        <div class="signature-line">
+          [ACCOUNTING OFFICER]
+        </div>
+        <div class="signature-title">Verified and Approved by</div>
+        <div class="signature-title">Date: _______________</div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div style="margin-top: 30px; font-size: 9pt; text-align: center; font-style: italic;">
+      This is a system-generated document. Printed on {new Date().toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })}.
+    </div>
+  </div>
+</body>
+</html>

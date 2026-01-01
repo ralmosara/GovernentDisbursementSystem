@@ -1,0 +1,590 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import { TravelService } from '../../../lib/services/travel.service';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+const { id } = Astro.params;
+
+if (!id || isNaN(parseInt(id))) {
+  return Astro.redirect('/travel/itinerary');
+}
+
+// Get IoT details
+const iot = await TravelService.getIoTById(parseInt(id));
+
+if (!iot) {
+  return Astro.redirect('/travel/itinerary');
+}
+
+// Get CTC if exists
+const ctc = await TravelService.getCTCByIoTId(parseInt(id));
+
+// Get Liquidation if exists
+const liquidation = await TravelService.getLiquidationByIoTId(parseInt(id));
+
+// Format helpers
+const formatDate = (date: Date | string | null) => {
+  if (!date) return 'N/A';
+  const d = typeof date === 'string' ? new Date(date) : date;
+  return d.toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' });
+};
+
+const formatDateTime = (date: Date | string | null) => {
+  if (!date) return 'N/A';
+  const d = typeof date === 'string' ? new Date(date) : date;
+  return d.toLocaleString('en-PH', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  });
+};
+
+const formatCurrency = (amount: string | number | null) => {
+  if (!amount) return '₱0.00';
+  const num = typeof amount === 'string' ? parseFloat(amount) : amount;
+  return new Intl.NumberFormat('en-PH', {
+    style: 'currency',
+    currency: 'PHP'
+  }).format(num);
+};
+
+const getStatusBadge = (status: string) => {
+  switch (status) {
+    case 'draft':
+      return 'badge-secondary';
+    case 'pending_approval':
+      return 'badge-warning';
+    case 'approved':
+      return 'badge-success';
+    case 'in_progress':
+      return 'badge-info';
+    case 'completed':
+      return 'badge-primary';
+    case 'cancelled':
+      return 'badge-dark';
+    default:
+      return 'badge-secondary';
+  }
+};
+
+const getStatusLabel = (status: string) => {
+  const labels: Record<string, string> = {
+    draft: 'Draft',
+    pending_approval: 'Pending Approval',
+    approved: 'Approved',
+    in_progress: 'In Progress',
+    completed: 'Completed',
+    cancelled: 'Cancelled',
+  };
+  return labels[status] || status;
+};
+
+const title = `IoT: ${iot.iot.iotNo}`;
+---
+
+<MainLayout title={title}>
+  <div class="container mx-auto px-4 py-6">
+    <!-- Header -->
+    <div class="mb-6">
+      <nav class="mb-4">
+        <a href="/travel" class="text-primary-600 hover:text-primary-800">Travel</a>
+        <span class="mx-2 text-gray-400">/</span>
+        <a href="/travel/itinerary" class="text-primary-600 hover:text-primary-800">Itinerary</a>
+        <span class="mx-2 text-gray-400">/</span>
+        <span class="text-gray-600">{iot.iot.iotNo}</span>
+      </nav>
+
+      <div class="flex justify-between items-start">
+        <div>
+          <h1 class="text-3xl font-bold text-gray-900">Itinerary of Travel</h1>
+          <p class="text-gray-600 mt-1">IoT No: {iot.iot.iotNo}</p>
+        </div>
+        <div>
+          <span class={`badge ${getStatusBadge(iot.iot.status)}`}>
+            {getStatusLabel(iot.iot.status)}
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Main Content Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+      <!-- Main Content (2 columns) -->
+      <div class="lg:col-span-2 space-y-6">
+
+        <!-- Basic Information Card -->
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">Basic Information</h2>
+          </div>
+          <div class="card-body">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700">IoT Number</label>
+                <p class="text-gray-900 font-semibold">{iot.iot.iotNo}</p>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700">Fund Cluster</label>
+                <p class="text-gray-900">{iot.fundCluster?.code} - {iot.fundCluster?.name}</p>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700">Destination</label>
+                <p class="text-gray-900">{iot.iot.destination}</p>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700">Status</label>
+                <span class={`badge ${getStatusBadge(iot.iot.status)}`}>
+                  {getStatusLabel(iot.iot.status)}
+                </span>
+              </div>
+              <div class="md:col-span-2">
+                <label class="block text-sm font-medium text-gray-700">Purpose</label>
+                <p class="text-gray-900">{iot.iot.purpose}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Employee Information Card -->
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">Employee/Traveler Information</h2>
+          </div>
+          <div class="card-body">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700">Name</label>
+                <p class="text-gray-900 font-semibold">{iot.employee?.firstName} {iot.employee?.lastName}</p>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700">Employee No.</label>
+                <p class="text-gray-900">{iot.employee?.employeeNo}</p>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700">Position</label>
+                <p class="text-gray-900">{iot.employee?.position || 'N/A'}</p>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700">Division/Office</label>
+                <p class="text-gray-900">{iot.employee?.divisionOffice || 'N/A'}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Travel Details Card -->
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">Travel Details</h2>
+          </div>
+          <div class="card-body">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-sm font-medium text-gray-700">Departure Date</label>
+                <p class="text-gray-900 font-semibold">{formatDate(iot.iot.departureDate)}</p>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700">Return Date</label>
+                <p class="text-gray-900 font-semibold">{formatDate(iot.iot.returnDate)}</p>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700">Estimated Cost</label>
+                <p class="text-gray-900 font-bold text-lg">{formatCurrency(iot.iot.estimatedCost)}</p>
+              </div>
+              <div>
+                <label class="block text-sm font-medium text-gray-700">Cash Advance Requested</label>
+                <p class="text-gray-900 font-bold text-lg">{formatCurrency(iot.iot.cashAdvanceAmount)}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Itinerary Card -->
+        {iot.iot.itineraryBefore && Array.isArray(iot.iot.itineraryBefore) && iot.iot.itineraryBefore.length > 0 && (
+          <div class="card">
+            <div class="card-header">
+              <h2 class="card-title">Planned Itinerary</h2>
+            </div>
+            <div class="card-body">
+              <div class="overflow-x-auto">
+                <table class="min-w-full divide-y divide-gray-200">
+                  <thead class="bg-gray-50">
+                    <tr>
+                      <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                      <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Location</th>
+                      <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Activity</th>
+                    </tr>
+                  </thead>
+                  <tbody class="bg-white divide-y divide-gray-200">
+                    {iot.iot.itineraryBefore.map((item: any) => (
+                      <tr>
+                        <td class="px-4 py-3 text-sm text-gray-900">{item.date}</td>
+                        <td class="px-4 py-3 text-sm text-gray-900">{item.location}</td>
+                        <td class="px-4 py-3 text-sm text-gray-900">{item.activity}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <!-- CTC Information Card (if exists) -->
+        {ctc && (
+          <div class="card">
+            <div class="card-header">
+              <h2 class="card-title">Certificate of Travel Completed</h2>
+            </div>
+            <div class="card-body">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-sm font-medium text-gray-700">CTC Number</label>
+                  <p class="text-gray-900 font-semibold">{ctc.ctc.ctcNo}</p>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700">Travel Completed</label>
+                  <p class="text-gray-900">{ctc.ctc.travelCompleted ? 'Yes' : 'No'}</p>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700">Actual Departure</label>
+                  <p class="text-gray-900">{formatDateTime(ctc.ctc.actualDepartureDate)}</p>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700">Actual Return</label>
+                  <p class="text-gray-900">{formatDateTime(ctc.ctc.actualReturnDate)}</p>
+                </div>
+                <div class="md:col-span-2">
+                  <label class="block text-sm font-medium text-gray-700">Completion Remarks</label>
+                  <p class="text-gray-900">{ctc.ctc.completionRemarks || 'No remarks'}</p>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700">Certified By</label>
+                  <p class="text-gray-900">{ctc.certifiedByUser?.firstName} {ctc.certifiedByUser?.lastName}</p>
+                  <p class="text-sm text-gray-500">{formatDateTime(ctc.ctc.certifiedDate)}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <!-- Liquidation Information Card (if exists) -->
+        {liquidation && (
+          <div class="card">
+            <div class="card-header">
+              <h2 class="card-title">Liquidation Report</h2>
+            </div>
+            <div class="card-body">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label class="block text-sm font-medium text-gray-700">LR Number</label>
+                  <p class="text-gray-900 font-semibold">{liquidation.lrNo}</p>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700">Status</label>
+                  <p class="text-gray-900">{liquidation.status}</p>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700">Cash Advance</label>
+                  <p class="text-gray-900 font-bold">{formatCurrency(liquidation.cashAdvanceAmount)}</p>
+                </div>
+                <div>
+                  <label class="block text-sm font-medium text-gray-700">Total Expenses</label>
+                  <p class="text-gray-900 font-bold">{formatCurrency(liquidation.totalExpenses)}</p>
+                </div>
+                {liquidation.refundAmount && parseFloat(liquidation.refundAmount) > 0 && (
+                  <div>
+                    <label class="block text-sm font-medium text-gray-700">Refund Amount</label>
+                    <p class="text-green-600 font-bold text-lg">{formatCurrency(liquidation.refundAmount)}</p>
+                  </div>
+                )}
+                {liquidation.additionalClaim && parseFloat(liquidation.additionalClaim) > 0 && (
+                  <div>
+                    <label class="block text-sm font-medium text-gray-700">Additional Claim</label>
+                    <p class="text-blue-600 font-bold text-lg">{formatCurrency(liquidation.additionalClaim)}</p>
+                  </div>
+                )}
+              </div>
+
+              {liquidation.expenseItems && liquidation.expenseItems.length > 0 && (
+                <div class="mt-4">
+                  <h3 class="font-semibold mb-2">Expense Items</h3>
+                  <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200">
+                      <thead class="bg-gray-50">
+                        <tr>
+                          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Date</th>
+                          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Category</th>
+                          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500">Description</th>
+                          <th class="px-4 py-2 text-right text-xs font-medium text-gray-500">Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody class="bg-white divide-y divide-gray-200">
+                        {liquidation.expenseItems.map((item: any) => (
+                          <tr>
+                            <td class="px-4 py-2 text-sm text-gray-900">{formatDate(item.expenseDate)}</td>
+                            <td class="px-4 py-2 text-sm text-gray-900">{item.expenseCategory}</td>
+                            <td class="px-4 py-2 text-sm text-gray-900">{item.description}</td>
+                            <td class="px-4 py-2 text-sm text-gray-900 text-right font-semibold">{formatCurrency(item.amount)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+      </div>
+
+      <!-- Sidebar (1 column) -->
+      <div class="space-y-6">
+
+        <!-- Actions Card -->
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">Actions</h2>
+          </div>
+          <div class="card-body space-y-3">
+
+            {/* Draft status - Submit for Approval */}
+            {iot.iot.status === 'draft' && (
+              <button
+                id="submit-approval-btn"
+                class="btn btn-primary w-full"
+              >
+                Submit for Approval
+              </button>
+            )}
+
+            {/* Pending Approval status - Approve/Reject */}
+            {iot.iot.status === 'pending_approval' && (
+              <>
+                <button
+                  id="approve-btn"
+                  class="btn btn-success w-full"
+                >
+                  <i class="pi pi-check mr-2"></i>
+                  Approve Travel
+                </button>
+                <button
+                  id="reject-btn"
+                  class="btn btn-danger w-full"
+                >
+                  <i class="pi pi-times mr-2"></i>
+                  Reject
+                </button>
+              </>
+            )}
+
+            {/* Approved status - Start Travel */}
+            {iot.iot.status === 'approved' && (
+              <button
+                id="start-travel-btn"
+                class="btn btn-info w-full"
+              >
+                <i class="pi pi-play mr-2"></i>
+                Start Travel
+              </button>
+            )}
+
+            {/* Approved or In Progress - Create CTC */}
+            {(iot.iot.status === 'approved' || iot.iot.status === 'in_progress') && !ctc && (
+              <a
+                href={`/travel/itinerary/${id}/ctc`}
+                class="btn btn-primary w-full text-center"
+              >
+                <i class="pi pi-file-edit mr-2"></i>
+                Create Travel Completion
+              </a>
+            )}
+
+            {/* Completed - Create Liquidation */}
+            {iot.iot.status === 'completed' && !liquidation && (
+              <a
+                href={`/travel/itinerary/${id}/liquidation`}
+                class="btn btn-primary w-full text-center"
+              >
+                <i class="pi pi-calculator mr-2"></i>
+                Create Liquidation Report
+              </a>
+            )}
+
+            <hr class="my-4" />
+
+            {/* Print/Export Actions */}
+            <a
+              href={`/travel/itinerary/${id}/print`}
+              target="_blank"
+              class="btn btn-secondary w-full text-center"
+            >
+              <i class="pi pi-print mr-2"></i>
+              Print IoT
+            </a>
+
+            <a
+              href={`/api/travel/${id}/excel`}
+              download
+              class="btn btn-secondary w-full text-center"
+            >
+              <i class="pi pi-file-excel mr-2"></i>
+              Export to Excel
+            </a>
+
+            {ctc && (
+              <a
+                href={`/travel/itinerary/${id}/ctc-print`}
+                target="_blank"
+                class="btn btn-secondary w-full text-center"
+              >
+                <i class="pi pi-print mr-2"></i>
+                Print CTC
+              </a>
+            )}
+
+            {liquidation && (
+              <a
+                href={`/travel/itinerary/${id}/liquidation-print`}
+                target="_blank"
+                class="btn btn-secondary w-full text-center"
+              >
+                <i class="pi pi-print mr-2"></i>
+                Print Liquidation
+              </a>
+            )}
+          </div>
+        </div>
+
+        <!-- Metadata Card -->
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">Metadata</h2>
+          </div>
+          <div class="card-body space-y-3 text-sm">
+            <div>
+              <label class="block font-medium text-gray-700">Created</label>
+              <p class="text-gray-600">{formatDateTime(iot.iot.createdAt)}</p>
+            </div>
+            <div>
+              <label class="block font-medium text-gray-700">Last Updated</label>
+              <p class="text-gray-600">{formatDateTime(iot.iot.updatedAt)}</p>
+            </div>
+            {iot.iot.approvedDate && (
+              <div>
+                <label class="block font-medium text-gray-700">Approved</label>
+                <p class="text-gray-600">{formatDateTime(iot.iot.approvedDate)}</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <script define:vars={{ iotId: parseInt(id), status: iot.iot.status }}>
+    // Submit for Approval
+    const submitApprovalBtn = document.getElementById('submit-approval-btn');
+    submitApprovalBtn?.addEventListener('click', async () => {
+      if (!confirm('Submit this travel request for approval?')) return;
+
+      submitApprovalBtn.disabled = true;
+      submitApprovalBtn.innerHTML = '<i class="pi pi-spin pi-spinner mr-2"></i> Submitting...';
+
+      try {
+        const response = await fetch(`/api/travel/${iotId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'submit' })
+        });
+
+        if (response.ok) {
+          alert('Travel request submitted for approval');
+          window.location.reload();
+        } else {
+          const error = await response.json();
+          alert('Error: ' + error.message);
+          submitApprovalBtn.disabled = false;
+          submitApprovalBtn.innerHTML = 'Submit for Approval';
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        alert('An error occurred');
+        submitApprovalBtn.disabled = false;
+        submitApprovalBtn.innerHTML = 'Submit for Approval';
+      }
+    });
+
+    // Approve IoT
+    const approveBtn = document.getElementById('approve-btn');
+    approveBtn?.addEventListener('click', async () => {
+      if (!confirm('Approve this travel request?')) return;
+
+      approveBtn.disabled = true;
+      approveBtn.innerHTML = '<i class="pi pi-spin pi-spinner mr-2"></i> Approving...';
+
+      try {
+        const response = await fetch(`/api/travel/${iotId}/approve`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+
+        if (response.ok) {
+          alert('Travel request approved');
+          window.location.reload();
+        } else {
+          const error = await response.json();
+          alert('Error: ' + error.message);
+          approveBtn.disabled = false;
+          approveBtn.innerHTML = '<i class="pi pi-check mr-2"></i> Approve Travel';
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        alert('An error occurred');
+        approveBtn.disabled = false;
+        approveBtn.innerHTML = '<i class="pi pi-check mr-2"></i> Approve Travel';
+      }
+    });
+
+    // Start Travel
+    const startTravelBtn = document.getElementById('start-travel-btn');
+    startTravelBtn?.addEventListener('click', async () => {
+      if (!confirm('Mark this travel as started?')) return;
+
+      startTravelBtn.disabled = true;
+      startTravelBtn.innerHTML = '<i class="pi pi-spin pi-spinner mr-2"></i> Starting...';
+
+      try {
+        const response = await fetch(`/api/travel/${iotId}/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        });
+
+        if (response.ok) {
+          alert('Travel started');
+          window.location.reload();
+        } else {
+          const error = await response.json();
+          alert('Error: ' + error.message);
+          startTravelBtn.disabled = false;
+          startTravelBtn.innerHTML = '<i class="pi pi-play mr-2"></i> Start Travel';
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        alert('An error occurred');
+        startTravelBtn.disabled = false;
+        startTravelBtn.innerHTML = '<i class="pi pi-play mr-2"></i> Start Travel';
+      }
+    });
+  </script>
+</MainLayout>

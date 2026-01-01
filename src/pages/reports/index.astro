@@ -50,7 +50,7 @@ const currentYear = new Date().getFullYear();
               <li>• Budget utilization rates</li>
             </ul>
           </div>
-          <a href="/reports/bar" class="btn btn-primary w-full">
+          <a href="/reports/bar/1" class="btn btn-primary w-full">
             <i class="pi pi-file-excel mr-2"></i>
             Generate BAR No. 1
           </a>
@@ -83,7 +83,7 @@ const currentYear = new Date().getFullYear();
               <li>• Net worth calculation</li>
             </ul>
           </div>
-          <a href="/reports/far/balance-sheet" class="btn btn-primary w-full">
+          <a href="/reports/far/1" class="btn btn-primary w-full">
             <i class="pi pi-file-excel mr-2"></i>
             Generate FAR No. 1
           </a>
@@ -95,30 +95,63 @@ const currentYear = new Date().getFullYear();
         <div class="card-header bg-purple-50">
           <div class="flex items-center gap-3">
             <div class="w-12 h-12 bg-purple-600 rounded-lg flex items-center justify-center">
-              <i class="pi pi-dollar text-2xl text-white"></i>
+              <i class="pi pi-clock text-2xl text-white"></i>
             </div>
             <div>
               <h3 class="text-lg font-semibold text-gray-900">FAR No. 3</h3>
-              <p class="text-sm text-gray-600">Statement of Sources and Application of Funds</p>
+              <p class="text-sm text-gray-600">Aging of Due and Demandable Obligations</p>
             </div>
           </div>
         </div>
         <div class="card-body">
           <p class="text-gray-700 mb-4">
-            Cash flow statement showing sources and uses of government funds for a reporting period.
+            Report showing obligations categorized by age to monitor overdue payables and obligations.
           </p>
           <div class="bg-gray-50 p-3 rounded-lg mb-4">
             <p class="text-sm font-semibold text-gray-700 mb-2">Report includes:</p>
             <ul class="text-sm text-gray-600 space-y-1">
-              <li>• Opening balance</li>
-              <li>• Revenue collections & allotments</li>
-              <li>• Disbursements by category</li>
-              <li>• Closing balance</li>
+              <li>• Current (0-30 days)</li>
+              <li>• 31-60 days aging</li>
+              <li>• 61-90 days aging</li>
+              <li>• Over 90 days aging</li>
             </ul>
           </div>
-          <a href="/reports/far/cash-flow" class="btn btn-primary w-full">
+          <a href="/reports/far/3" class="btn btn-primary w-full">
             <i class="pi pi-file-excel mr-2"></i>
             Generate FAR No. 3
+          </a>
+        </div>
+      </div>
+
+      <!-- FAR No. 4 Card -->
+      <div class="card hover:shadow-lg transition-shadow">
+        <div class="card-header bg-orange-50">
+          <div class="flex items-center gap-3">
+            <div class="w-12 h-12 bg-orange-600 rounded-lg flex items-center justify-center">
+              <i class="pi pi-dollar text-2xl text-white"></i>
+            </div>
+            <div>
+              <h3 class="text-lg font-semibold text-gray-900">FAR No. 4</h3>
+              <p class="text-sm text-gray-600">Monthly Report of Disbursements</p>
+            </div>
+          </div>
+        </div>
+        <div class="card-body">
+          <p class="text-gray-700 mb-4">
+            Monthly disbursement report showing all payments made during a specific month.
+          </p>
+          <div class="bg-gray-50 p-3 rounded-lg mb-4">
+            <p class="text-sm font-semibold text-gray-700 mb-2">Report includes:</p>
+            <ul class="text-sm text-gray-600 space-y-1">
+              <li>• DV numbers and dates</li>
+              <li>• Payee information</li>
+              <li>• Check numbers</li>
+              <li>• Disbursement amounts</li>
+            </ul>
+          </div>
+          <a href="/reports/far/4" class="btn btn-primary w-full">
+            <i class="pi pi-file-excel mr-2"></i>
+            Generate FAR No. 4
           </a>
         </div>
       </div>
@@ -162,7 +195,7 @@ const currentYear = new Date().getFullYear();
       <div class="card-body">
         <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
           <button
-            onclick="window.location.href='/reports/bar?fiscalYear={currentYear}'"
+            onclick="window.location.href='/reports/bar/1'"
             class="btn btn-ghost justify-start text-left"
           >
             <i class="pi pi-chart-bar mr-3 text-blue-600"></i>
@@ -173,58 +206,28 @@ const currentYear = new Date().getFullYear();
           </button>
 
           <button
-            onclick="window.location.href='/reports/far/balance-sheet?asOfDate={new Date().toISOString().split('T')[0]}'"
+            onclick="window.location.href='/reports/far/1'"
             class="btn btn-ghost justify-start text-left"
           >
             <i class="pi pi-briefcase mr-3 text-green-600"></i>
             <div>
-              <p class="font-semibold">Current Balance Sheet</p>
-              <p class="text-xs text-gray-500">As of today</p>
+              <p class="font-semibold">FAR No. 1 Report</p>
+              <p class="text-xs text-gray-500">Annual budget cycle</p>
             </div>
           </button>
 
           <button
-            onclick="generateQuarterlyFAR()"
+            onclick="window.location.href='/reports/far/3'"
             class="btn btn-ghost justify-start text-left"
           >
-            <i class="pi pi-dollar mr-3 text-purple-600"></i>
+            <i class="pi pi-clock mr-3 text-purple-600"></i>
             <div>
-              <p class="font-semibold">Quarterly Cash Flow</p>
-              <p class="text-xs text-gray-500">Current quarter FAR No. 3</p>
+              <p class="font-semibold">Aging Obligations</p>
+              <p class="text-xs text-gray-500">FAR No. 3 aging report</p>
             </div>
           </button>
         </div>
       </div>
     </div>
   </div>
-
-  <script>
-    function generateQuarterlyFAR() {
-      const now = new Date();
-      const year = now.getFullYear();
-      const month = now.getMonth();
-
-      // Determine current quarter
-      let fromDate, toDate;
-      if (month < 3) {
-        // Q1: Jan - Mar
-        fromDate = `${year}-01-01`;
-        toDate = `${year}-03-31`;
-      } else if (month < 6) {
-        // Q2: Apr - Jun
-        fromDate = `${year}-04-01`;
-        toDate = `${year}-06-30`;
-      } else if (month < 9) {
-        // Q3: Jul - Sep
-        fromDate = `${year}-07-01`;
-        toDate = `${year}-09-30`;
-      } else {
-        // Q4: Oct - Dec
-        fromDate = `${year}-10-01`;
-        toDate = `${year}-12-31`;
-      }
-
-      window.location.href = `/reports/far/cash-flow?fromDate=${fromDate}&toDate=${toDate}`;
-    }
-  </script>
 </MainLayout>

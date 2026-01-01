@@ -518,7 +518,7 @@ export class PaymentService {
       stale: allPayments.filter(p => p.status === 'stale').length,
       totalAmount: allPayments
         .filter(p => p.status !== 'cancelled')
-        .reduce((sum, p) => sum + parseFloat(p.amount.toString()), 0),
+        .reduce((sum, p) => sum + (p.amount ? parseFloat(p.amount.toString()) : 0), 0),
     };
 
     return stats;

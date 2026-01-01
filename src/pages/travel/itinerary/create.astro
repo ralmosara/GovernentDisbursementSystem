@@ -1,0 +1,77 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import TravelItineraryForm from '../../../components/forms/travel/TravelItineraryForm.vue';
+
+const user = Astro.locals.user;
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+const title = 'Create Itinerary of Travel';
+---
+
+<MainLayout title={title}>
+  <div class="container mx-auto px-4 py-6 max-w-5xl">
+    <!-- Header -->
+    <div class="mb-6">
+      <a href="/travel/itinerary" class="text-blue-600 hover:text-blue-700 inline-flex items-center gap-1 mb-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+        </svg>
+        Back to Travel List
+      </a>
+      <h1 class="text-3xl font-bold text-gray-900">Create Itinerary of Travel</h1>
+      <p class="text-gray-600 mt-1">Complete the form below to create a new travel request</p>
+    </div>
+
+    <!-- Form -->
+    <div id="formContainer">
+      <TravelItineraryForm client:load mode="create" />
+    </div>
+  </div>
+
+  <script>
+    import type { EventListener } from 'vue';
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const formContainer = document.getElementById('formContainer');
+      if (!formContainer) return;
+
+      // Listen for submit event from Vue component
+      formContainer.addEventListener('submit', async (event: Event) => {
+        const customEvent = event as CustomEvent;
+        const formData = customEvent.detail;
+
+        try {
+          const response = await fetch('/api/travel', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(formData),
+          });
+
+          const data = await response.json();
+
+          if (response.ok) {
+            // Show success message
+            alert(`Travel request created successfully!\nIoT No: ${data.iotNo}`);
+
+            // Redirect to the IoT detail page
+            window.location.href = `/travel/itinerary/${data.iotId}`;
+          } else {
+            alert(`Error: ${data.error || 'Failed to create travel request'}`);
+          }
+        } catch (error) {
+          console.error('Error creating IoT:', error);
+          alert('An error occurred while creating the travel request');
+        }
+      });
+
+      // Listen for cancel event
+      formContainer.addEventListener('cancel', () => {
+        window.location.href = '/travel/itinerary';
+      });
+    });
+  </script>
+</MainLayout>

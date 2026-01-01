@@ -1,5 +1,5 @@
 import { db } from '../db/connection';
-import { disbursementVouchers, payments, fundClusters } from '../db/schema';
+import { disbursementVouchers, payments, fundClusters, officialReceiptSeries, bankDeposits, cashAdvances, revenueEntries, accountsReceivable, collections, fixedAssets, inventoryItems, assetDisposals, inventoryTransactions, physicalInventoryCount } from '../db/schema';
 import { and, eq, like, desc, sql, isNotNull } from 'drizzle-orm';
 
 /**
@@ -158,4 +158,327 @@ export async function generateJEVNumber(fiscalYear: number, month?: number): Pro
   const serial = '0001'; // TODO: Implement auto-increment from journal entries table
 
   return `${year}-${monthStr}-${serial}`;
+}
+
+/**
+ * Generate Official Receipt (OR) number from OR series
+ * Format: SERIES-NNNNNN (e.g., "2024-000001")
+ *
+ * @param orSeriesId - The OR series ID
+ * @returns Promise<string> - The generated OR number
+ * @throws Error if series not found, inactive, or exhausted
+ */
+export async function generateORNumber(orSeriesId: number): Promise<string> {
+  // Get OR series record
+  const series = await db
+    .select()
+    .from(officialReceiptSeries)
+    .where(eq(officialReceiptSeries.id, orSeriesId))
+    .limit(1);
+
+  if (!series[0]) {
+    throw new Error('OR series not found');
+  }
+
+  // Check if series is active
+  if (!series[0].isActive) {
+    throw new Error('OR series is inactive');
+  }
+
+  // Check if series is exhausted
+  if (series[0].currentNumber >= series[0].endNumber) {
+    throw new Error('OR series exhausted. Please create a new series.');
+  }
+
+  // Increment current number
+  const nextNumber = series[0].currentNumber + 1;
+
+  // Format OR number: SERIES-NNNNNN
+  const orNo = `${series[0].seriesCode}-${String(nextNumber).padStart(6, '0')}`;
+
+  // Update series current number
+  await db
+    .update(officialReceiptSeries)
+    .set({ currentNumber: nextNumber })
+    .where(eq(officialReceiptSeries.id, orSeriesId));
+
+  return orNo;
+}
+
+/**
+ * Generate Deposit Slip number
+ * Format: DS-YYYY-NNNN
+ *
+ * @returns Promise<string> - The generated deposit slip number
+ */
+export async function generateDepositSlipNumber(): Promise<string> {
+  const year = new Date().getFullYear();
+
+  // Get latest deposit for current year
+  const latestDeposit = await db
+    .select({ depositSlipNo: bankDeposits.depositSlipNo })
+    .from(bankDeposits)
+    .where(sql`YEAR(${bankDeposits.depositDate}) = ${year}`)
+    .orderBy(desc(bankDeposits.id))
+    .limit(1);
+
+  let serial = 1;
+
+  if (latestDeposit.length > 0 && latestDeposit[0].depositSlipNo) {
+    // Extract serial from format DS-YYYY-NNNN
+    const parts = latestDeposit[0].depositSlipNo.split('-');
+    if (parts.length === 3) {
+      serial = parseInt(parts[2], 10) + 1;
+    }
+  }
+
+  // Format: DS-YYYY-NNNN
+  return `DS-${year}-${String(serial).padStart(4, '0')}`;
+}
+
+/**
+ * Generate Cash Advance number
+ * Format: CA-YYYY-NNNN
+ *
+ * @returns Promise<string> - The generated cash advance number
+ */
+export async function generateCANumber(): Promise<string> {
+  const year = new Date().getFullYear();
+
+  // Get latest cash advance for current year
+  const latestCA = await db
+    .select({ caNo: cashAdvances.caNo })
+    .from(cashAdvances)
+    .where(sql`YEAR(${cashAdvances.dateIssued}) = ${year}`)
+    .orderBy(desc(cashAdvances.id))
+    .limit(1);
+
+  let serial = 1;
+
+  if (latestCA.length > 0 && latestCA[0].caNo) {
+    // Extract serial from format CA-YYYY-NNNN
+    const parts = latestCA[0].caNo.split('-');
+    if (parts.length === 3) {
+      serial = parseInt(parts[2], 10) + 1;
+    }
+  }
+
+  // Format: CA-YYYY-NNNN
+  return `CA-${year}-${String(serial).padStart(4, '0')}`;
+}
+
+/**
+ * Generate Revenue Entry number in format: REV-YYYY-NNNN
+ * Serial resets at the beginning of each year
+ *
+ * @returns Promise<string> - The generated entry number (e.g., "REV-2026-0001")
+ */
+export async function generateRevenueEntryNumber(): Promise<string> {
+  const year = new Date().getFullYear();
+
+  const latestEntry = await db
+    .select({ entryNo: revenueEntries.entryNo })
+    .from(revenueEntries)
+    .where(sql`YEAR(${revenueEntries.entryDate}) = ${year}`)
+    .orderBy(desc(revenueEntries.id))
+    .limit(1);
+
+  let serial = 1;
+  if (latestEntry.length > 0 && latestEntry[0].entryNo) {
+    const parts = latestEntry[0].entryNo.split('-');
+    if (parts.length === 3) {
+      serial = parseInt(parts[2], 10) + 1;
+    }
+  }
+
+  return `REV-${year}-${String(serial).padStart(4, '0')}`;
+}
+
+/**
+ * Generate Accounts Receivable number in format: AR-YYYY-NNNN
+ * Serial resets at the beginning of each year
+ *
+ * @returns Promise<string> - The generated AR number (e.g., "AR-2026-0001")
+ */
+export async function generateARNumber(): Promise<string> {
+  const year = new Date().getFullYear();
+
+  const latestAR = await db
+    .select({ arNo: accountsReceivable.arNo })
+    .from(accountsReceivable)
+    .where(sql`YEAR(${accountsReceivable.invoiceDate}) = ${year}`)
+    .orderBy(desc(accountsReceivable.id))
+    .limit(1);
+
+  let serial = 1;
+  if (latestAR.length > 0 && latestAR[0].arNo) {
+    const parts = latestAR[0].arNo.split('-');
+    if (parts.length === 3) {
+      serial = parseInt(parts[2], 10) + 1;
+    }
+  }
+
+  return `AR-${year}-${String(serial).padStart(4, '0')}`;
+}
+
+/**
+ * Generate Collection number in format: COL-YYYY-NNNN
+ * Serial resets at the beginning of each year
+ *
+ * @returns Promise<string> - The generated collection number (e.g., "COL-2026-0001")
+ */
+export async function generateCollectionNumber(): Promise<string> {
+  const year = new Date().getFullYear();
+
+  const latestCollection = await db
+    .select({ collectionNo: collections.collectionNo })
+    .from(collections)
+    .where(sql`YEAR(${collections.collectionDate}) = ${year}`)
+    .orderBy(desc(collections.id))
+    .limit(1);
+
+  let serial = 1;
+  if (latestCollection.length > 0 && latestCollection[0].collectionNo) {
+    const parts = latestCollection[0].collectionNo.split('-');
+    if (parts.length === 3) {
+      serial = parseInt(parts[2], 10) + 1;
+    }
+  }
+
+  return `COL-${year}-${String(serial).padStart(4, '0')}`;
+}
+
+/**
+ * Generate Fixed Asset number in format: ASSET-YYYY-NNNN
+ * Serial resets at the beginning of each year
+ *
+ * @returns Promise<string> - The generated asset number (e.g., "ASSET-2026-0001")
+ */
+export async function generateAssetNumber(): Promise<string> {
+  const year = new Date().getFullYear();
+
+  const latestAsset = await db
+    .select({ assetNo: fixedAssets.assetNo })
+    .from(fixedAssets)
+    .where(sql`YEAR(${fixedAssets.acquisitionDate}) = ${year}`)
+    .orderBy(desc(fixedAssets.id))
+    .limit(1);
+
+  let serial = 1;
+  if (latestAsset.length > 0 && latestAsset[0].assetNo) {
+    const parts = latestAsset[0].assetNo.split('-');
+    if (parts.length === 3) {
+      serial = parseInt(parts[2], 10) + 1;
+    }
+  }
+
+  return `ASSET-${year}-${String(serial).padStart(4, '0')}`;
+}
+
+/**
+ * Generate Inventory Item code in format: INV-YYYY-NNNN
+ * Serial resets at the beginning of each year
+ *
+ * @returns Promise<string> - The generated inventory code (e.g., "INV-2026-0001")
+ */
+export async function generateInventoryCode(): Promise<string> {
+  const year = new Date().getFullYear();
+
+  const latestItem = await db
+    .select({ itemCode: inventoryItems.itemCode })
+    .from(inventoryItems)
+    .where(sql`${inventoryItems.itemCode} LIKE ${'INV-' + year + '-%'}`)
+    .orderBy(desc(inventoryItems.id))
+    .limit(1);
+
+  let serial = 1;
+  if (latestItem.length > 0 && latestItem[0].itemCode) {
+    const parts = latestItem[0].itemCode.split('-');
+    if (parts.length === 3) {
+      serial = parseInt(parts[2], 10) + 1;
+    }
+  }
+
+  return `INV-${year}-${String(serial).padStart(4, '0')}`;
+}
+
+/**
+ * Generate Disposal number in format: DSP-YYYY-NNNN
+ * Serial resets at the beginning of each year
+ *
+ * @returns Promise<string> - The generated disposal number (e.g., "DSP-2026-0001")
+ */
+export async function generateDisposalNumber(): Promise<string> {
+  const year = new Date().getFullYear();
+
+  const latestDisposal = await db
+    .select({ disposalNo: assetDisposals.disposalNo })
+    .from(assetDisposals)
+    .where(sql`YEAR(${assetDisposals.disposalDate}) = ${year}`)
+    .orderBy(desc(assetDisposals.id))
+    .limit(1);
+
+  let serial = 1;
+  if (latestDisposal.length > 0 && latestDisposal[0].disposalNo) {
+    const parts = latestDisposal[0].disposalNo.split('-');
+    if (parts.length === 3) {
+      serial = parseInt(parts[2], 10) + 1;
+    }
+  }
+
+  return `DSP-${year}-${String(serial).padStart(4, '0')}`;
+}
+
+/**
+ * Generate Inventory Transaction number in format: INVT-YYYY-NNNN
+ * Serial resets at the beginning of each year
+ *
+ * @returns Promise<string> - The generated transaction number (e.g., "INVT-2026-0001")
+ */
+export async function generateInventoryTransactionNumber(): Promise<string> {
+  const year = new Date().getFullYear();
+
+  const latestTransaction = await db
+    .select({ transactionNo: inventoryTransactions.transactionNo })
+    .from(inventoryTransactions)
+    .where(sql`YEAR(${inventoryTransactions.transactionDate}) = ${year}`)
+    .orderBy(desc(inventoryTransactions.id))
+    .limit(1);
+
+  let serial = 1;
+  if (latestTransaction.length > 0 && latestTransaction[0].transactionNo) {
+    const parts = latestTransaction[0].transactionNo.split('-');
+    if (parts.length === 3) {
+      serial = parseInt(parts[2], 10) + 1;
+    }
+  }
+
+  return `INVT-${year}-${String(serial).padStart(4, '0')}`;
+}
+
+/**
+ * Generate Physical Count number in format: PCOUNT-YYYY-NNNN
+ * Serial resets at the beginning of each year
+ *
+ * @returns Promise<string> - The generated physical count number (e.g., "PCOUNT-2026-0001")
+ */
+export async function generatePhysicalCountNumber(): Promise<string> {
+  const year = new Date().getFullYear();
+
+  const latestCount = await db
+    .select({ countNo: physicalInventoryCount.countNo })
+    .from(physicalInventoryCount)
+    .where(sql`YEAR(${physicalInventoryCount.countDate}) = ${year}`)
+    .orderBy(desc(physicalInventoryCount.id))
+    .limit(1);
+
+  let serial = 1;
+  if (latestCount.length > 0 && latestCount[0].countNo) {
+    const parts = latestCount[0].countNo.split('-');
+    if (parts.length === 3) {
+      serial = parseInt(parts[2], 10) + 1;
+    }
+  }
+
+  return `PCOUNT-${year}-${String(serial).padStart(4, '0')}`;
 }

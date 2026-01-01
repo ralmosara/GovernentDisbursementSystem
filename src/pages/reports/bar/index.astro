@@ -10,7 +10,7 @@ if (!user) {
 }
 
 // Get all fund clusters for dropdown
-const allFundClusters = await db.select().from(fundClusters).where({ isActive: true });
+const allFundClusters = await db.select().from(fundClusters);
 
 const currentYear = new Date().getFullYear();
 const fiscalYears = Array.from({ length: 5 }, (_, i) => currentYear - i);

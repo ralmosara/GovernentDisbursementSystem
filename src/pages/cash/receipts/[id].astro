@@ -1,0 +1,215 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import { cashService } from '../../../lib/services/cash.service';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+const { id } = Astro.params;
+
+if (!id) {
+  return Astro.redirect('/cash/receipts');
+}
+
+// Fetch receipt details
+const receipt = await cashService.getCashReceiptById(parseInt(id));
+
+if (!receipt) {
+  return Astro.redirect('/cash/receipts');
+}
+
+const formatCurrency = (amount: number | string) => {
+  return new Intl.NumberFormat('en-PH', {
+    style: 'currency',
+    currency: 'PHP',
+    minimumFractionDigits: 2,
+  }).format(Number(amount));
+};
+
+const formatDate = (date: Date | string) => {
+  return new Date(date).toLocaleDateString('en-PH', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  });
+};
+
+const formatDateTime = (date: Date | string) => {
+  return new Date(date).toLocaleDateString('en-PH', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
+---
+
+<MainLayout title={`Official Receipt - ${receipt.orNo}`}>
+  <div class="container mx-auto px-4 py-6 max-w-4xl">
+    <!-- Page Header -->
+    <div class="mb-6">
+      <a href="/cash/receipts" class="text-blue-600 hover:text-blue-700 inline-flex items-center gap-1 mb-2">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
+        </svg>
+        Back to Cash Receipts
+      </a>
+      <div class="flex justify-between items-start">
+        <div>
+          <h1 class="text-3xl font-bold text-gray-900">Official Receipt</h1>
+          <p class="text-gray-600 mt-1 font-mono text-xl">{receipt.orNo}</p>
+        </div>
+        <div class="flex gap-2">
+          <button onclick="window.print()" class="btn btn-ghost">
+            <i class="pi pi-print mr-2"></i>
+            Print
+          </button>
+          <button class="btn btn-primary" onclick="alert('PDF generation will be implemented soon')">
+            <i class="pi pi-file-pdf mr-2"></i>
+            Download PDF
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Receipt Details Card -->
+    <div class="card mb-6">
+      <div class="card-header bg-blue-50">
+        <h2 class="text-lg font-semibold text-gray-900">Receipt Information</h2>
+      </div>
+      <div class="card-body">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <!-- Left Column -->
+          <div class="space-y-4">
+            <div>
+              <label class="text-sm font-medium text-gray-500">OR Number</label>
+              <p class="text-lg font-mono font-bold text-blue-600">{receipt.orNo}</p>
+            </div>
+
+            <div>
+              <label class="text-sm font-medium text-gray-500">Receipt Date</label>
+              <p class="text-lg font-semibold">{formatDate(receipt.receiptDate)}</p>
+            </div>
+
+            <div>
+              <label class="text-sm font-medium text-gray-500">Payor Name</label>
+              <p class="text-lg font-semibold">{receipt.payorName}</p>
+            </div>
+
+            <div>
+              <label class="text-sm font-medium text-gray-500">Amount</label>
+              <p class="text-2xl font-bold text-green-600">{formatCurrency(receipt.amount)}</p>
+            </div>
+          </div>
+
+          <!-- Right Column -->
+          <div class="space-y-4">
+            <div>
+              <label class="text-sm font-medium text-gray-500">Payment Mode</label>
+              <p>
+                <span class={`badge ${
+                  receipt.paymentMode === 'cash' ? 'badge-success' :
+                  receipt.paymentMode === 'check' ? 'badge-warning' :
+                  'badge-info'
+                }`}>
+                  {receipt.paymentMode}
+                </span>
+              </p>
+            </div>
+
+            {receipt.paymentMode === 'check' && (
+              <div class="bg-yellow-50 p-3 rounded-lg space-y-2">
+                <h3 class="font-semibold text-sm text-gray-700">Check Details</h3>
+                <div>
+                  <label class="text-xs font-medium text-gray-500">Check Number</label>
+                  <p class="font-mono">{receipt.checkNo || 'N/A'}</p>
+                </div>
+                <div>
+                  <label class="text-xs font-medium text-gray-500">Check Date</label>
+                  <p>{receipt.checkDate ? formatDate(receipt.checkDate) : 'N/A'}</p>
+                </div>
+                <div>
+                  <label class="text-xs font-medium text-gray-500">Bank Name</label>
+                  <p>{receipt.checkBank || 'N/A'}</p>
+                </div>
+              </div>
+            )}
+
+            <div>
+              <label class="text-sm font-medium text-gray-500">Fund Cluster</label>
+              <p class="text-lg">
+                {receipt.fundCluster ? (
+                  <span class="font-semibold">{receipt.fundCluster.code} - {receipt.fundCluster.name}</span>
+                ) : (
+                  <span class="text-gray-400">N/A</span>
+                )}
+              </p>
+            </div>
+
+            {receipt.revenueSource && (
+              <div>
+                <label class="text-sm font-medium text-gray-500">Revenue Source</label>
+                <p class="text-lg">
+                  <span class="font-semibold">{receipt.revenueSource.code} - {receipt.revenueSource.name}</span>
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <!-- Particulars -->
+        <div class="mt-6 pt-6 border-t">
+          <label class="text-sm font-medium text-gray-500">Particulars</label>
+          <p class="mt-2 text-gray-900 whitespace-pre-wrap">{receipt.particulars}</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Metadata Card -->
+    <div class="card">
+      <div class="card-header">
+        <h2 class="text-lg font-semibold text-gray-900">Metadata</h2>
+      </div>
+      <div class="card-body">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label class="text-sm font-medium text-gray-500">Created By</label>
+            <p class="text-gray-900">
+              {receipt.createdBy ? receipt.createdBy.fullName : 'N/A'}
+              {receipt.createdBy && (
+                <span class="text-sm text-gray-500"> (@{receipt.createdBy.username})</span>
+              )}
+            </p>
+          </div>
+
+          <div>
+            <label class="text-sm font-medium text-gray-500">Created At</label>
+            <p class="text-gray-900">{formatDateTime(receipt.createdAt)}</p>
+          </div>
+
+          <div>
+            <label class="text-sm font-medium text-gray-500">OR Series</label>
+            <p class="text-gray-900">Series ID: {receipt.orSeriesId}</p>
+          </div>
+
+          <div>
+            <label class="text-sm font-medium text-gray-500">Receipt ID</label>
+            <p class="text-gray-900 font-mono">#{receipt.id}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</MainLayout>
+
+<style>
+  @media print {
+    .btn, a[href*="/cash/receipts"] {
+      display: none;
+    }
+  }
+</style>

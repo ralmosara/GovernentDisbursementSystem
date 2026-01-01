@@ -1,0 +1,351 @@
+---
+import { TravelService } from '../../../../lib/services/travel.service';
+
+const user = Astro.locals.user;
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+const { id } = Astro.params;
+if (!id || isNaN(parseInt(id))) {
+  return Astro.redirect('/travel/itinerary');
+}
+
+const iot = await TravelService.getIoTById(parseInt(id));
+if (!iot) {
+  return Astro.redirect('/travel/itinerary');
+}
+
+const formatDate = (date: Date | string | null) => {
+  if (!date) return 'N/A';
+  const d = typeof date === 'string' ? new Date(date) : date;
+  return d.toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' });
+};
+
+const formatCurrency = (amount: string | number) => {
+  return new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(parseFloat(amount.toString()));
+};
+---
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IoT {iot.iot.iotNo} - Print</title>
+  <style>
+    @media print {
+      @page {
+        size: letter;
+        margin: 0.5in;
+      }
+
+      body {
+        print-color-adjust: exact;
+        -webkit-print-color-adjust: exact;
+      }
+
+      .no-print {
+        display: none !important;
+      }
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: Arial, sans-serif;
+      font-size: 11pt;
+      line-height: 1.4;
+      color: #000;
+      background: #fff;
+      padding: 20px;
+    }
+
+    .iot-container {
+      max-width: 8.5in;
+      margin: 0 auto;
+      background: white;
+      border: 2px solid #000;
+      padding: 0.5in;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 20px;
+      border-bottom: 2px solid #000;
+      padding-bottom: 10px;
+    }
+
+    .header h1 {
+      font-size: 12pt;
+      font-weight: bold;
+      margin-bottom: 3px;
+    }
+
+    .header h2 {
+      font-size: 16pt;
+      font-weight: bold;
+      margin: 10px 0;
+    }
+
+    .iot-number {
+      font-size: 12pt;
+      font-weight: bold;
+      margin-bottom: 15px;
+      text-align: right;
+    }
+
+    .section {
+      margin-bottom: 15px;
+    }
+
+    .field {
+      margin-bottom: 8px;
+      display: flex;
+    }
+
+    .field-label {
+      font-weight: bold;
+      width: 180px;
+      flex-shrink: 0;
+    }
+
+    .field-value {
+      flex: 1;
+      border-bottom: 1px solid #000;
+      padding-bottom: 2px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 15px 0;
+    }
+
+    th, td {
+      border: 1px solid #000;
+      padding: 8px;
+      text-align: left;
+    }
+
+    th {
+      background: #e0e0e0;
+      font-weight: bold;
+      font-size: 10pt;
+    }
+
+    .itinerary-table {
+      margin: 20px 0;
+    }
+
+    .section-title {
+      font-weight: bold;
+      font-size: 12pt;
+      margin: 15px 0 10px 0;
+      text-decoration: underline;
+    }
+
+    .cost-summary {
+      border: 2px solid #000;
+      padding: 15px;
+      margin: 20px 0;
+      background: #f9f9f9;
+    }
+
+    .cost-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 8px;
+      font-size: 11pt;
+    }
+
+    .cost-row.total {
+      border-top: 2px solid #000;
+      padding-top: 8px;
+      margin-top: 8px;
+      font-weight: bold;
+      font-size: 12pt;
+    }
+
+    .signatures {
+      margin-top: 40px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 30px;
+    }
+
+    .signature-box {
+      text-align: center;
+    }
+
+    .signature-line {
+      border-top: 1px solid #000;
+      margin-top: 50px;
+      padding-top: 5px;
+      font-weight: bold;
+    }
+
+    .signature-title {
+      font-size: 9pt;
+      margin-top: 3px;
+    }
+
+    .print-button {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      padding: 12px 24px;
+      background: #2563eb;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      cursor: pointer;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+
+    .print-button:hover {
+      background: #1d4ed8;
+    }
+  </style>
+</head>
+<body>
+  <button class="print-button no-print" onclick="window.print()">Print</button>
+
+  <div class="iot-container">
+    <!-- Header -->
+    <div class="header">
+      <h1>Republic of the Philippines</h1>
+      <h1>[OFFICE NAME]</h1>
+      <h2>ITINERARY OF TRAVEL</h2>
+    </div>
+
+    <!-- IoT Number -->
+    <div class="iot-number">
+      IoT No: {iot.iot.iotNo}
+    </div>
+
+    <!-- Employee Information -->
+    <div class="section">
+      <div class="field">
+        <span class="field-label">Name of Employee:</span>
+        <span class="field-value">{iot.employee.firstName} {iot.employee.lastName}</span>
+      </div>
+      <div class="field">
+        <span class="field-label">Position:</span>
+        <span class="field-value">{iot.employee.position || 'N/A'}</span>
+      </div>
+      <div class="field">
+        <span class="field-label">Division/Office:</span>
+        <span class="field-value">{iot.employee.division || 'N/A'}</span>
+      </div>
+      <div class="field">
+        <span class="field-label">Employee No:</span>
+        <span class="field-value">{iot.employee.employeeNo}</span>
+      </div>
+    </div>
+
+    <!-- Travel Information -->
+    <div class="section">
+      <div class="field">
+        <span class="field-label">Destination:</span>
+        <span class="field-value">{iot.iot.destination}</span>
+      </div>
+      <div class="field">
+        <span class="field-label">Purpose of Travel:</span>
+        <span class="field-value">{iot.iot.purpose}</span>
+      </div>
+      <div class="field">
+        <span class="field-label">Departure Date:</span>
+        <span class="field-value">{formatDate(iot.iot.departureDate)}</span>
+      </div>
+      <div class="field">
+        <span class="field-label">Return Date:</span>
+        <span class="field-value">{formatDate(iot.iot.returnDate)}</span>
+      </div>
+      <div class="field">
+        <span class="field-label">Fund Cluster:</span>
+        <span class="field-value">{iot.fundCluster.name}</span>
+      </div>
+    </div>
+
+    <!-- Itinerary Details -->
+    <div class="section-title">PLANNED ITINERARY</div>
+    <div class="itinerary-table">
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 15%">Date</th>
+            <th style="width: 30%">Location</th>
+            <th style="width: 35%">Activity</th>
+            <th style="width: 20%">Transportation</th>
+          </tr>
+        </thead>
+        <tbody>
+          {iot.iot.itineraryBefore && Array.isArray(iot.iot.itineraryBefore) && iot.iot.itineraryBefore.length > 0 ? (
+            iot.iot.itineraryBefore.map((item: any) => (
+              <tr>
+                <td>{formatDate(item.date)}</td>
+                <td>{item.location || 'N/A'}</td>
+                <td>{item.activity || 'N/A'}</td>
+                <td>{item.transportation || 'N/A'}</td>
+              </tr>
+            ))
+          ) : (
+            <tr>
+              <td colspan="4" style="text-align: center; font-style: italic;">No itinerary details provided</td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Cost Breakdown -->
+    <div class="section-title">COST BREAKDOWN</div>
+    <div class="cost-summary">
+      <div class="cost-row">
+        <span>Estimated Cost:</span>
+        <span>{formatCurrency(iot.iot.estimatedCost || 0)}</span>
+      </div>
+      <div class="cost-row">
+        <span>Cash Advance:</span>
+        <span>{formatCurrency(iot.iot.cashAdvanceAmount || 0)}</span>
+      </div>
+      {iot.iot.dvId && (
+        <div class="cost-row">
+          <span>Cash Advance DV:</span>
+          <span>DV No. (see attached)</span>
+        </div>
+      )}
+    </div>
+
+    <!-- Signatures -->
+    <div class="signatures">
+      <div class="signature-box">
+        <div class="signature-line">
+          {iot.employee.firstName} {iot.employee.lastName}
+        </div>
+        <div class="signature-title">Traveler's Signature over Printed Name</div>
+        <div class="signature-title">Date: _______________</div>
+      </div>
+
+      <div class="signature-box">
+        <div class="signature-line">
+          [AUTHORIZED OFFICIAL]
+        </div>
+        <div class="signature-title">Approved by</div>
+        <div class="signature-title">Date: _______________</div>
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div style="margin-top: 30px; font-size: 9pt; text-align: center; font-style: italic;">
+      This is a system-generated document. Printed on {new Date().toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })}.
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,199 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+
+const user = Astro.locals.user;
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+const title = 'Travel Liquidation Reports';
+---
+
+<MainLayout title={title}>
+  <div class="container mx-auto px-4 py-6">
+    <!-- Header -->
+    <div class="mb-6">
+      <h1 class="text-3xl font-bold text-gray-900">Travel Liquidation Reports</h1>
+      <p class="text-gray-600 mt-1">Manage travel expense liquidation reports</p>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div class="bg-white rounded-lg shadow p-6">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-sm text-gray-600">Pending Review</p>
+            <p id="pendingCount" class="text-3xl font-bold text-yellow-600">-</p>
+          </div>
+          <div class="bg-yellow-100 rounded-full p-3">
+            <svg class="w-8 h-8 text-yellow-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-lg shadow p-6">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-sm text-gray-600">Approved</p>
+            <p id="approvedCount" class="text-3xl font-bold text-green-600">-</p>
+          </div>
+          <div class="bg-green-100 rounded-full p-3">
+            <svg class="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-lg shadow p-6">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-sm text-gray-600">Unliquidated Travels</p>
+            <p id="unliquidatedCount" class="text-3xl font-bold text-red-600">-</p>
+          </div>
+          <div class="bg-red-100 rounded-full p-3">
+            <svg class="w-8 h-8 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
+            </svg>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Unliquidated Travels List -->
+    <div class="bg-white rounded-lg shadow mb-6">
+      <div class="px-6 py-4 border-b border-gray-200">
+        <h2 class="text-lg font-semibold text-gray-900">Unliquidated Completed Travels</h2>
+        <p class="text-sm text-gray-600">These travels need liquidation reports</p>
+      </div>
+
+      <div id="unliquidatedLoading" class="p-8 text-center">
+        <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+        <p class="mt-2 text-gray-600">Loading unliquidated travels...</p>
+      </div>
+
+      <div id="unliquidatedContainer" class="hidden">
+        <div class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+              <tr>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">IoT No.</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Employee</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Destination</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Travel Period</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cash Advance</th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="unliquidatedTableBody" class="bg-white divide-y divide-gray-200">
+            </tbody>
+          </table>
+        </div>
+
+        <div id="unliquidatedEmpty" class="hidden p-8 text-center">
+          <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+          </svg>
+          <p class="mt-4 text-gray-600">All completed travels have been liquidated!</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    async function loadDashboardData() {
+      try {
+        const response = await fetch('/api/travel/dashboard');
+        const data = await response.json();
+
+        // Update counts
+        const pendingCount = document.getElementById('pendingCount');
+        const approvedCount = document.getElementById('approvedCount');
+        const unliquidatedCount = document.getElementById('unliquidatedCount');
+
+        if (pendingCount) pendingCount.textContent = '0'; // TODO: Get actual pending liquidations count
+        if (approvedCount) approvedCount.textContent = '0'; // TODO: Get actual approved liquidations count
+        if (unliquidatedCount) unliquidatedCount.textContent = String(data.unliquidatedTravels?.length || 0);
+
+        // Display unliquidated travels
+        displayUnliquidatedTravels(data.unliquidatedTravels || []);
+      } catch (error) {
+        console.error('Error loading dashboard data:', error);
+      }
+    }
+
+    function displayUnliquidatedTravels(travels) {
+      const loading = document.getElementById('unliquidatedLoading');
+      const container = document.getElementById('unliquidatedContainer');
+      const tableBody = document.getElementById('unliquidatedTableBody');
+      const emptyState = document.getElementById('unliquidatedEmpty');
+
+      if (loading) loading.classList.add('hidden');
+      if (container) container.classList.remove('hidden');
+
+      if (!travels || travels.length === 0) {
+        if (tableBody) tableBody.innerHTML = '';
+        if (emptyState) emptyState.classList.remove('hidden');
+        return;
+      }
+
+      if (emptyState) emptyState.classList.add('hidden');
+
+      if (tableBody) {
+        tableBody.innerHTML = travels.map(item => {
+          const iot = item.iot;
+          const employee = item.employee;
+
+          return `
+            <tr class="hover:bg-gray-50">
+              <td class="px-6 py-4 whitespace-nowrap">
+                <a href="/travel/itinerary/${iot.id}" class="text-blue-600 hover:text-blue-800 font-medium">
+                  ${iot.iotNo}
+                </a>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap">
+                <div class="text-sm font-medium text-gray-900">${employee?.firstName} ${employee?.lastName}</div>
+                <div class="text-sm text-gray-500">${employee?.employeeNo}</div>
+              </td>
+              <td class="px-6 py-4">
+                <div class="text-sm text-gray-900">${iot.destination}</div>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap">
+                <div class="text-sm text-gray-900">${formatDate(iot.departureDate)}</div>
+                <div class="text-sm text-gray-500">to ${formatDate(iot.returnDate)}</div>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap">
+                <div class="text-sm font-medium text-gray-900">${formatCurrency(iot.cashAdvanceAmount)}</div>
+              </td>
+              <td class="px-6 py-4 whitespace-nowrap text-sm">
+                <a
+                  href="/travel/itinerary/${iot.id}#liquidation"
+                  class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-sm font-medium inline-block"
+                >
+                  Create Liquidation
+                </a>
+              </td>
+            </tr>
+          `;
+        }).join('');
+      }
+    }
+
+    function formatDate(dateString) {
+      if (!dateString) return '';
+      const date = new Date(dateString);
+      return date.toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
+    }
+
+    function formatCurrency(value) {
+      if (!value) return '₱0.00';
+      return new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' }).format(value);
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      loadDashboardData();
+    });
+  </script>
+</MainLayout>

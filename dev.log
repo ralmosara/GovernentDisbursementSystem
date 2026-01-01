@@ -1,0 +1,17 @@
+
+> philippine-government-fms@0.0.1 dev
+> astro dev
+
+[2m16:50:31[22m [34m[@astrojs/node][39m Enabling sessions with filesystem storage
+[2m16:50:31[22m [34m[types][39m Generated [2m18ms[22m
+[2m16:50:31[22m [34m[content][39m Syncing content
+[2m16:50:31[22m [34m[content][39m Synced content
+[2m16:50:34[22m [34m[vite][39m Port 4321 is in use, trying another one...
+[2m16:50:34[22m [34m[vite][39m Port 4322 is in use, trying another one...
+
+[42m[1m astro [22m[49m [32mv5.16.6[39m [2mready in[22m 3896 [2mms[22m
+
+[2m┃[22m Local    [36mhttp://localhost:4323/[39m
+[2m┃[22m Network  [36mhttp://192.168.205.211:4323/[39m
+
+[2m16:50:34[22m [32mwatching for file changes...[39m
