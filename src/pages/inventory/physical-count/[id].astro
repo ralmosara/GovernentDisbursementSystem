@@ -1,0 +1,318 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import { assetService } from '../../../lib/services/asset.service';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+const id = parseInt(Astro.params.id || '0');
+
+if (!id) {
+  return Astro.redirect('/inventory/physical-count');
+}
+
+let count: any = null;
+let error: string | null = null;
+
+try {
+  count = await assetService.getPhysicalCountById(id);
+  if (!count) {
+    error = 'Physical count not found';
+  }
+} catch (err) {
+  console.error('Error loading physical count:', err);
+  error = 'Failed to load physical count';
+}
+
+if (error || !count) {
+  return Astro.redirect('/inventory/physical-count');
+}
+
+const variance = count.physicalQuantity - count.systemQuantity;
+const hasVariance = variance !== 0;
+---
+
+<MainLayout title={`Physical Count - ${count.countNo}`}>
+  <div class="container mx-auto px-4 py-6">
+    <!-- Breadcrumb -->
+    <nav class="flex mb-4" aria-label="Breadcrumb">
+      <ol class="inline-flex items-center space-x-1 md:space-x-3">
+        <li class="inline-flex items-center">
+          <a href="/inventory/physical-count" class="text-gray-700 hover:text-primary-600">
+            Physical Count
+          </a>
+        </li>
+        <li>
+          <div class="flex items-center">
+            <i class="pi pi-chevron-right text-gray-400 text-sm"></i>
+            <span class="ml-1 text-gray-500 md:ml-2">{count.countNo}</span>
+          </div>
+        </li>
+      </ol>
+    </nav>
+
+    <!-- Page Header -->
+    <div class="flex justify-between items-center mb-6">
+      <div>
+        <h1 class="text-3xl font-bold text-gray-900">Physical Count Details</h1>
+        <p class="mt-1 text-sm text-gray-600">
+          Count No: {count.countNo}
+        </p>
+      </div>
+      <div class="flex space-x-3">
+        <a
+          href="/inventory/physical-count"
+          class="inline-flex items-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+        >
+          <i class="pi pi-arrow-left mr-2"></i>
+          Back to List
+        </a>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- Main Details -->
+      <div class="lg:col-span-2 space-y-6">
+        <!-- Count Information -->
+        <div class="bg-white rounded-lg shadow border border-gray-200">
+          <div class="px-6 py-4 border-b border-gray-200">
+            <h2 class="text-lg font-semibold text-gray-900">Count Information</h2>
+          </div>
+          <div class="p-6">
+            <dl class="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div>
+                <dt class="text-sm font-medium text-gray-500">Count Number</dt>
+                <dd class="mt-1 text-sm font-semibold text-gray-900">{count.countNo}</dd>
+              </div>
+              <div>
+                <dt class="text-sm font-medium text-gray-500">Count Date</dt>
+                <dd class="mt-1 text-sm text-gray-900">
+                  {new Date(count.countDate).toLocaleDateString()}
+                </dd>
+              </div>
+              <div>
+                <dt class="text-sm font-medium text-gray-500">Counted By</dt>
+                <dd class="mt-1 text-sm text-gray-900">{count.countedBy || '-'}</dd>
+              </div>
+              <div>
+                <dt class="text-sm font-medium text-gray-500">Verified By</dt>
+                <dd class="mt-1 text-sm text-gray-900">{count.verifiedBy || '-'}</dd>
+              </div>
+            </dl>
+          </div>
+        </div>
+
+        <!-- Item Details -->
+        {count.item && (
+          <div class="bg-white rounded-lg shadow border border-gray-200">
+            <div class="px-6 py-4 border-b border-gray-200">
+              <h2 class="text-lg font-semibold text-gray-900">Item Details</h2>
+            </div>
+            <div class="p-6">
+              <dl class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <dt class="text-sm font-medium text-gray-500">Item Code</dt>
+                  <dd class="mt-1 text-sm font-semibold text-gray-900">{count.item.itemCode}</dd>
+                </div>
+                <div>
+                  <dt class="text-sm font-medium text-gray-500">Item Name</dt>
+                  <dd class="mt-1 text-sm text-gray-900">{count.item.itemName}</dd>
+                </div>
+                <div>
+                  <dt class="text-sm font-medium text-gray-500">Category</dt>
+                  <dd class="mt-1 text-sm text-gray-900">{count.item.category || '-'}</dd>
+                </div>
+                <div>
+                  <dt class="text-sm font-medium text-gray-500">Unit</dt>
+                  <dd class="mt-1 text-sm text-gray-900">{count.item.unit}</dd>
+                </div>
+                <div>
+                  <dt class="text-sm font-medium text-gray-500">Unit Cost</dt>
+                  <dd class="mt-1 text-sm text-gray-900">
+                    ₱{Number(count.item.unitCost).toLocaleString()}
+                  </dd>
+                </div>
+                <div>
+                  <dt class="text-sm font-medium text-gray-500">Current Stock</dt>
+                  <dd class="mt-1 text-sm text-gray-900">
+                    {count.item.quantityOnHand} {count.item.unit}
+                  </dd>
+                </div>
+              </dl>
+
+              <div class="mt-4 pt-4 border-t border-gray-200">
+                <a
+                  href={`/inventory/items/${count.item.id}`}
+                  class="text-sm text-primary-600 hover:text-primary-900"
+                >
+                  View full item details →
+                </a>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <!-- Quantity Comparison -->
+        <div class="bg-white rounded-lg shadow border border-gray-200">
+          <div class="px-6 py-4 border-b border-gray-200">
+            <h2 class="text-lg font-semibold text-gray-900">Quantity Comparison</h2>
+          </div>
+          <div class="p-6">
+            <div class="grid grid-cols-3 gap-6">
+              <div class="text-center">
+                <dt class="text-sm font-medium text-gray-500 mb-2">System Quantity</dt>
+                <dd class="text-3xl font-bold text-gray-900">
+                  {count.systemQuantity}
+                </dd>
+                <p class="text-xs text-gray-500 mt-1">{count.item?.unit}</p>
+              </div>
+
+              <div class="text-center">
+                <dt class="text-sm font-medium text-gray-500 mb-2">Physical Quantity</dt>
+                <dd class="text-3xl font-bold text-primary-600">
+                  {count.physicalQuantity}
+                </dd>
+                <p class="text-xs text-gray-500 mt-1">{count.item?.unit}</p>
+              </div>
+
+              <div class="text-center">
+                <dt class="text-sm font-medium text-gray-500 mb-2">Variance</dt>
+                <dd class={`text-3xl font-bold ${hasVariance ? (variance > 0 ? 'text-green-600' : 'text-red-600') : 'text-gray-400'}`}>
+                  {variance > 0 ? '+' : ''}{variance}
+                </dd>
+                <p class="text-xs text-gray-500 mt-1">{count.item?.unit}</p>
+              </div>
+            </div>
+
+            {hasVariance && (
+              <div class="mt-6 p-4 rounded-lg" class:list={[
+                variance > 0 ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'
+              ]}>
+                <div class="flex">
+                  <div class="flex-shrink-0">
+                    <i class={`pi ${variance > 0 ? 'pi-arrow-up' : 'pi-arrow-down'} text-xl ${variance > 0 ? 'text-green-600' : 'text-red-600'}`}></i>
+                  </div>
+                  <div class="ml-3">
+                    <h3 class={`text-sm font-medium ${variance > 0 ? 'text-green-800' : 'text-red-800'}`}>
+                      {variance > 0 ? 'Overage Detected' : 'Shortage Detected'}
+                    </h3>
+                    <p class={`mt-1 text-sm ${variance > 0 ? 'text-green-700' : 'text-red-700'}`}>
+                      The physical count is {Math.abs(variance)} {count.item?.unit} {variance > 0 ? 'higher' : 'lower'} than the system records.
+                      Variance value: <strong>{variance > 0 ? '+' : ''}₱{Math.abs(count.varianceValue).toLocaleString()}</strong>
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {!hasVariance && (
+              <div class="mt-6 p-4 bg-green-50 border border-green-200 rounded-lg">
+                <div class="flex">
+                  <div class="flex-shrink-0">
+                    <i class="pi pi-check-circle text-green-600 text-xl"></i>
+                  </div>
+                  <div class="ml-3">
+                    <h3 class="text-sm font-medium text-green-800">Accurate Count</h3>
+                    <p class="mt-1 text-sm text-green-700">
+                      Physical quantity matches system records perfectly. No adjustment needed.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <!-- Remarks -->
+        {count.remarks && (
+          <div class="bg-white rounded-lg shadow border border-gray-200">
+            <div class="px-6 py-4 border-b border-gray-200">
+              <h2 class="text-lg font-semibold text-gray-900">Remarks</h2>
+            </div>
+            <div class="p-6">
+              <p class="text-sm text-gray-700 whitespace-pre-wrap">{count.remarks}</p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <!-- Sidebar -->
+      <div class="lg:col-span-1 space-y-6">
+        <!-- Summary Card -->
+        <div class="bg-white rounded-lg shadow border border-gray-200">
+          <div class="px-6 py-4 border-b border-gray-200">
+            <h2 class="text-lg font-semibold text-gray-900">Summary</h2>
+          </div>
+          <div class="p-6 space-y-4">
+            <div>
+              <dt class="text-xs font-medium text-gray-500 uppercase">Variance Quantity</dt>
+              <dd class={`mt-1 text-2xl font-bold ${hasVariance ? (variance > 0 ? 'text-green-600' : 'text-red-600') : 'text-gray-400'}`}>
+                {variance > 0 ? '+' : ''}{variance} {count.item?.unit}
+              </dd>
+            </div>
+
+            <div class="pt-4 border-t border-gray-200">
+              <dt class="text-xs font-medium text-gray-500 uppercase">Variance Value</dt>
+              <dd class={`mt-1 text-2xl font-bold ${hasVariance ? (count.varianceValue > 0 ? 'text-green-600' : 'text-red-600') : 'text-gray-400'}`}>
+                {count.varianceValue > 0 ? '+' : ''}₱{Math.abs(count.varianceValue).toLocaleString()}
+              </dd>
+            </div>
+
+            {hasVariance && (
+              <div class="pt-4 border-t border-gray-200">
+                <p class="text-xs text-gray-500">
+                  An adjustment transaction was automatically created to reconcile this variance.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="bg-white rounded-lg shadow border border-gray-200">
+          <div class="px-6 py-4 border-b border-gray-200">
+            <h2 class="text-lg font-semibold text-gray-900">Actions</h2>
+          </div>
+          <div class="p-6 space-y-3">
+            <a
+              href={`/inventory/items/${count.item?.id}`}
+              class="block w-full text-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+            >
+              <i class="pi pi-box mr-2"></i>
+              View Item
+            </a>
+            <a
+              href={`/inventory/transactions?itemId=${count.item?.id}`}
+              class="block w-full text-center px-4 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+            >
+              <i class="pi pi-list mr-2"></i>
+              View Transactions
+            </a>
+          </div>
+        </div>
+
+        <!-- Metadata -->
+        <div class="bg-white rounded-lg shadow border border-gray-200">
+          <div class="px-6 py-4 border-b border-gray-200">
+            <h2 class="text-lg font-semibold text-gray-900">Metadata</h2>
+          </div>
+          <div class="p-6 space-y-3 text-xs text-gray-500">
+            <div>
+              <span class="font-medium">Created:</span>
+              <div>{new Date(count.createdAt).toLocaleString()}</div>
+            </div>
+            {count.createdBy && (
+              <div>
+                <span class="font-medium">Created By:</span>
+                <div>User #{count.createdBy}</div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</MainLayout>

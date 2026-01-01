@@ -1,0 +1,83 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+---
+
+<MainLayout title="New Physical Count">
+  <div class="container mx-auto px-4 py-6">
+    <!-- Breadcrumb -->
+    <nav class="flex mb-4" aria-label="Breadcrumb">
+      <ol class="inline-flex items-center space-x-1 md:space-x-3">
+        <li class="inline-flex items-center">
+          <a href="/inventory/physical-count" class="text-gray-700 hover:text-primary-600">
+            Physical Count
+          </a>
+        </li>
+        <li>
+          <div class="flex items-center">
+            <i class="pi pi-chevron-right text-gray-400 text-sm"></i>
+            <span class="ml-1 text-gray-500 md:ml-2">New Count</span>
+          </div>
+        </li>
+      </ol>
+    </nav>
+
+    <!-- Page Header -->
+    <div class="mb-6">
+      <h1 class="text-3xl font-bold text-gray-900">New Physical Count</h1>
+      <p class="mt-1 text-sm text-gray-600">
+        Record actual inventory quantities
+      </p>
+    </div>
+
+    <!-- Form Container -->
+    <div class="bg-white rounded-lg shadow border border-gray-200 p-6">
+      <div id="physical-count-form"></div>
+    </div>
+  </div>
+</MainLayout>
+
+<script>
+  import { createApp } from 'vue';
+  import PhysicalCountForm from '../../../components/forms/inventory/PhysicalCountForm.vue';
+
+  const app = createApp(PhysicalCountForm, {
+    onSubmit: async (formData: any) => {
+      try {
+        const response = await fetch('/api/inventory/physical-count', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(formData),
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || 'Failed to create physical count');
+        }
+
+        const result = await response.json();
+
+        // Show success message
+        alert(`Physical count ${result.countNo} created successfully!`);
+
+        // Redirect to physical count detail page
+        window.location.href = `/inventory/physical-count/${result.id}`;
+      } catch (error: any) {
+        console.error('Error creating physical count:', error);
+        alert(error.message || 'Failed to create physical count. Please try again.');
+      }
+    },
+    onCancel: () => {
+      window.location.href = '/inventory/physical-count';
+    },
+  });
+
+  app.mount('#physical-count-form');
+</script>

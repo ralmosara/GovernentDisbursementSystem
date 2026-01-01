@@ -1292,6 +1292,361 @@ export class AssetService {
       return 'adequate';
     }
   }
+
+  // ============================================
+  // INVENTORY TRANSACTIONS MANAGEMENT
+  // ============================================
+
+  async createInventoryTransaction(data: CreateInventoryTransactionData, userId: number): Promise<{ id: number; transactionNo: string }> {
+    try {
+      // Generate transaction number
+      const transactionNo = await generateInventoryTransactionNumber();
+
+      // Get item details
+      const item = await this.getInventoryItemById(data.itemId);
+      if (!item) {
+        throw new Error('Item not found');
+      }
+
+      // Validate quantity for issue transactions
+      if (data.transactionType === 'issue' && item.quantityOnHand < data.quantity) {
+        throw new Error('Insufficient quantity on hand');
+      }
+
+      // Insert transaction record
+      const [result] = await db.insert(inventoryTransactions).values({
+        transactionNo,
+        itemId: data.itemId,
+        transactionDate: data.transactionDate,
+        transactionType: data.transactionType,
+        quantity: data.quantity,
+        unitCost: data.unitCost || item.unitCost,
+        reference: data.reference,
+        requestedBy: data.requestedBy,
+        remarks: data.remarks,
+        createdBy: userId,
+      });
+
+      const transactionId = Number(result.insertId);
+
+      // Update inventory quantity based on transaction type
+      let operation: 'add' | 'subtract' | 'set' = 'set';
+      if (data.transactionType === 'receipt') {
+        operation = 'add';
+      } else if (data.transactionType === 'issue') {
+        operation = 'subtract';
+      } else if (data.transactionType === 'adjustment') {
+        operation = 'set';
+      }
+
+      await this.adjustInventoryQuantity(data.itemId, data.quantity, operation);
+
+      return { id: transactionId, transactionNo };
+    } catch (error) {
+      console.error('Error creating inventory transaction:', error);
+      throw error;
+    }
+  }
+
+  async getInventoryTransactions(filters?: {
+    itemId?: number;
+    transactionType?: string;
+    fromDate?: string;
+    toDate?: string;
+  }): Promise<Array<any>> {
+    try {
+      const conditions = [];
+
+      if (filters?.itemId) {
+        conditions.push(eq(inventoryTransactions.itemId, filters.itemId));
+      }
+      if (filters?.transactionType) {
+        conditions.push(eq(inventoryTransactions.transactionType, filters.transactionType));
+      }
+      if (filters?.fromDate) {
+        conditions.push(gte(inventoryTransactions.transactionDate, filters.fromDate));
+      }
+      if (filters?.toDate) {
+        conditions.push(lte(inventoryTransactions.transactionDate, filters.toDate));
+      }
+
+      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+      const results = await db
+        .select()
+        .from(inventoryTransactions)
+        .leftJoin(inventoryItems, eq(inventoryTransactions.itemId, inventoryItems.id))
+        .leftJoin(users, eq(inventoryTransactions.createdBy, users.id))
+        .where(whereClause)
+        .orderBy(desc(inventoryTransactions.transactionDate), desc(inventoryTransactions.createdAt));
+
+      return results.map((row) => ({
+        id: row.inventory_transactions.id,
+        transactionNo: row.inventory_transactions.transactionNo,
+        transactionDate: row.inventory_transactions.transactionDate,
+        transactionType: row.inventory_transactions.transactionType,
+        quantity: row.inventory_transactions.quantity,
+        unitCost: row.inventory_transactions.unitCost,
+        totalValue: parseFloat(row.inventory_transactions.unitCost || '0') * (row.inventory_transactions.quantity || 0),
+        reference: row.inventory_transactions.reference,
+        requestedBy: row.inventory_transactions.requestedBy,
+        remarks: row.inventory_transactions.remarks,
+        item: row.inventory_items ? {
+          id: row.inventory_items.id,
+          itemCode: row.inventory_items.itemCode,
+          itemName: row.inventory_items.itemName,
+          unit: row.inventory_items.unit,
+        } : null,
+        createdBy: row.users ? {
+          id: row.users.id,
+          name: row.users.name,
+        } : null,
+        createdAt: row.inventory_transactions.createdAt,
+      }));
+    } catch (error) {
+      console.error('Error getting inventory transactions:', error);
+      throw error;
+    }
+  }
+
+  async getInventoryTransactionById(id: number): Promise<any> {
+    try {
+      const results = await db
+        .select()
+        .from(inventoryTransactions)
+        .leftJoin(inventoryItems, eq(inventoryTransactions.itemId, inventoryItems.id))
+        .leftJoin(users, eq(inventoryTransactions.createdBy, users.id))
+        .where(eq(inventoryTransactions.id, id))
+        .limit(1);
+
+      if (results.length === 0) {
+        return null;
+      }
+
+      const row = results[0];
+      return {
+        id: row.inventory_transactions.id,
+        transactionNo: row.inventory_transactions.transactionNo,
+        transactionDate: row.inventory_transactions.transactionDate,
+        transactionType: row.inventory_transactions.transactionType,
+        quantity: row.inventory_transactions.quantity,
+        unitCost: row.inventory_transactions.unitCost,
+        totalValue: parseFloat(row.inventory_transactions.unitCost || '0') * (row.inventory_transactions.quantity || 0),
+        reference: row.inventory_transactions.reference,
+        requestedBy: row.inventory_transactions.requestedBy,
+        remarks: row.inventory_transactions.remarks,
+        item: row.inventory_items ? {
+          id: row.inventory_items.id,
+          itemCode: row.inventory_items.itemCode,
+          itemName: row.inventory_items.itemName,
+          description: row.inventory_items.description,
+          unit: row.inventory_items.unit,
+          quantityOnHand: row.inventory_items.quantityOnHand,
+        } : null,
+        createdBy: row.users ? {
+          id: row.users.id,
+          name: row.users.name,
+        } : null,
+        createdAt: row.inventory_transactions.createdAt,
+      };
+    } catch (error) {
+      console.error('Error getting inventory transaction by ID:', error);
+      throw error;
+    }
+  }
+
+  async deleteInventoryTransaction(id: number): Promise<void> {
+    try {
+      // Get transaction details
+      const transaction = await this.getInventoryTransactionById(id);
+      if (!transaction) {
+        throw new Error('Transaction not found');
+      }
+
+      // Reverse the transaction effect on inventory
+      if (transaction.transactionType === 'receipt') {
+        await this.adjustInventoryQuantity(transaction.item.id, transaction.quantity, 'subtract');
+      } else if (transaction.transactionType === 'issue') {
+        await this.adjustInventoryQuantity(transaction.item.id, transaction.quantity, 'add');
+      }
+
+      // Delete the transaction
+      await db.delete(inventoryTransactions).where(eq(inventoryTransactions.id, id));
+    } catch (error) {
+      console.error('Error deleting inventory transaction:', error);
+      throw error;
+    }
+  }
+
+  async getItemTransactionHistory(itemId: number, limit: number = 50): Promise<Array<any>> {
+    try {
+      return await this.getInventoryTransactions({ itemId });
+    } catch (error) {
+      console.error('Error getting item transaction history:', error);
+      throw error;
+    }
+  }
+
+  // ============================================
+  // PHYSICAL INVENTORY COUNT MANAGEMENT
+  // ============================================
+
+  async createPhysicalCount(data: CreatePhysicalCountData, userId: number): Promise<{ id: number; countNo: string }> {
+    try {
+      // Generate count number
+      const countNo = await generatePhysicalCountNumber();
+
+      // Get item to get system quantity
+      const item = await this.getInventoryItemById(data.itemId);
+      if (!item) {
+        throw new Error('Item not found');
+      }
+
+      const systemQuantity = data.systemQuantity || item.quantityOnHand;
+      const physicalQuantity = data.physicalQuantity;
+      const variance = physicalQuantity - systemQuantity;
+      const varianceValue = variance * parseFloat(item.unitCost);
+
+      const [result] = await db.insert(physicalInventoryCount).values({
+        countNo,
+        countDate: data.countDate,
+        itemId: data.itemId,
+        systemQuantity,
+        physicalQuantity,
+        variance,
+        varianceValue: varianceValue.toString(),
+        remarks: data.remarks,
+        countedBy: data.countedBy,
+        verifiedBy: data.verifiedBy,
+        createdBy: userId,
+      });
+
+      const countId = Number(result.insertId);
+
+      // If variance exists, create adjustment transaction
+      if (variance !== 0) {
+        await this.createInventoryTransaction(
+          {
+            itemId: data.itemId,
+            transactionDate: data.countDate,
+            transactionType: 'adjustment',
+            quantity: physicalQuantity,
+            reference: countNo,
+            requestedBy: data.countedBy,
+            remarks: `Physical count adjustment: ${variance > 0 ? '+' : ''}${variance} ${item.unit}`,
+          },
+          userId
+        );
+      }
+
+      return { id: countId, countNo };
+    } catch (error) {
+      console.error('Error creating physical count:', error);
+      throw error;
+    }
+  }
+
+  async getPhysicalCounts(filters?: {
+    itemId?: number;
+    fromDate?: string;
+    toDate?: string;
+  }): Promise<Array<any>> {
+    try {
+      const conditions = [];
+
+      if (filters?.itemId) {
+        conditions.push(eq(physicalInventoryCount.itemId, filters.itemId));
+      }
+      if (filters?.fromDate) {
+        conditions.push(gte(physicalInventoryCount.countDate, filters.fromDate));
+      }
+      if (filters?.toDate) {
+        conditions.push(lte(physicalInventoryCount.countDate, filters.toDate));
+      }
+
+      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+      const results = await db
+        .select()
+        .from(physicalInventoryCount)
+        .leftJoin(inventoryItems, eq(physicalInventoryCount.itemId, inventoryItems.id))
+        .leftJoin(users, eq(physicalInventoryCount.verifiedBy, users.id))
+        .where(whereClause)
+        .orderBy(desc(physicalInventoryCount.countDate));
+
+      return results.map((row) => ({
+        id: row.physical_inventory_count.id,
+        countNo: row.physical_inventory_count.countNo,
+        countDate: row.physical_inventory_count.countDate,
+        systemQuantity: row.physical_inventory_count.systemQuantity,
+        physicalQuantity: row.physical_inventory_count.physicalQuantity,
+        variance: row.physical_inventory_count.variance,
+        varianceValue: row.physical_inventory_count.varianceValue,
+        remarks: row.physical_inventory_count.remarks,
+        countedBy: row.physical_inventory_count.countedBy,
+        item: row.inventory_items ? {
+          id: row.inventory_items.id,
+          itemCode: row.inventory_items.itemCode,
+          itemName: row.inventory_items.itemName,
+          unit: row.inventory_items.unit,
+        } : null,
+        verifiedBy: row.users ? {
+          id: row.users.id,
+          name: row.users.name,
+        } : null,
+        createdAt: row.physical_inventory_count.createdAt,
+      }));
+    } catch (error) {
+      console.error('Error getting physical counts:', error);
+      throw error;
+    }
+  }
+
+  async getPhysicalCountById(id: number): Promise<any> {
+    try {
+      const results = await db
+        .select()
+        .from(physicalInventoryCount)
+        .leftJoin(inventoryItems, eq(physicalInventoryCount.itemId, inventoryItems.id))
+        .leftJoin(users, eq(physicalInventoryCount.verifiedBy, users.id))
+        .where(eq(physicalInventoryCount.id, id))
+        .limit(1);
+
+      if (results.length === 0) {
+        return null;
+      }
+
+      const row = results[0];
+      return {
+        id: row.physical_inventory_count.id,
+        countNo: row.physical_inventory_count.countNo,
+        countDate: row.physical_inventory_count.countDate,
+        systemQuantity: row.physical_inventory_count.systemQuantity,
+        physicalQuantity: row.physical_inventory_count.physicalQuantity,
+        variance: row.physical_inventory_count.variance,
+        varianceValue: row.physical_inventory_count.varianceValue,
+        remarks: row.physical_inventory_count.remarks,
+        countedBy: row.physical_inventory_count.countedBy,
+        item: row.inventory_items ? {
+          id: row.inventory_items.id,
+          itemCode: row.inventory_items.itemCode,
+          itemName: row.inventory_items.itemName,
+          description: row.inventory_items.description,
+          unit: row.inventory_items.unit,
+          unitCost: row.inventory_items.unitCost,
+          quantityOnHand: row.inventory_items.quantityOnHand,
+        } : null,
+        verifiedBy: row.users ? {
+          id: row.users.id,
+          name: row.users.name,
+        } : null,
+        createdAt: row.physical_inventory_count.createdAt,
+      };
+    } catch (error) {
+      console.error('Error getting physical count by ID:', error);
+      throw error;
+    }
+  }
 }
 
 // ============================================

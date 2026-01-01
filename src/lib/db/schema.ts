@@ -927,3 +927,319 @@ export const physicalInventoryCountRelations = relations(physicalInventoryCount,
     references: [users.id],
   }),
 }));
+
+// ============================================
+// 7. PAYROLL & PERSONNEL MANAGEMENT
+// ============================================
+
+// Employees Table (extends users table with payroll-specific fields)
+export const employees = mysqlTable('employees', {
+  id: int('id').primaryKey().autoincrement(),
+  userId: int('user_id').unique().notNull(), // Links to users table
+  employeeNo: varchar('employee_no', { length: 50 }).unique().notNull(),
+  firstName: varchar('first_name', { length: 100 }).notNull(),
+  lastName: varchar('last_name', { length: 100 }).notNull(),
+  middleName: varchar('middle_name', { length: 100 }),
+  suffix: varchar('suffix', { length: 20 }),
+  dateOfBirth: date('date_of_birth'),
+  civilStatus: mysqlEnum('civil_status', ['Single', 'Married', 'Widowed', 'Separated']),
+  gender: mysqlEnum('gender', ['Male', 'Female']),
+
+  // Employment Details
+  position: varchar('position', { length: 100 }).notNull(),
+  salaryGrade: varchar('salary_grade', { length: 20 }),
+  stepIncrement: int('step_increment').default(1),
+  appointmentStatus: mysqlEnum('appointment_status', ['Permanent', 'Temporary', 'Casual', 'Contractual', 'Co-terminus']).default('Permanent'),
+  employmentStatus: mysqlEnum('employment_status', ['Active', 'Resigned', 'Retired', 'Terminated', 'On Leave']).default('Active'),
+  dateHired: date('date_hired').notNull(),
+  dateRegularized: date('date_regularized'),
+  dateResigned: date('date_resigned'),
+
+  // Salary Information
+  basicSalary: decimal('basic_salary', { precision: 15, scale: 2 }).notNull(),
+  pera: decimal('pera', { precision: 10, scale: 2 }).default('0'), // Personnel Economic Relief Allowance
+  additionalAllowance: decimal('additional_allowance', { precision: 10, scale: 2 }).default('0'),
+
+  // Government IDs and Numbers
+  tinNo: varchar('tin_no', { length: 20 }), // Tax Identification Number
+  gsisNo: varchar('gsis_no', { length: 20 }), // GSIS ID
+  philhealthNo: varchar('philhealth_no', { length: 20 }), // PhilHealth Number
+  pagibigNo: varchar('pagibig_no', { length: 20 }), // Pag-IBIG Number
+
+  // Bank Details
+  bankName: varchar('bank_name', { length: 100 }),
+  bankAccountNo: varchar('bank_account_no', { length: 50 }),
+  bankAccountName: varchar('bank_account_name', { length: 200 }),
+
+  // Contact Information
+  mobileNo: varchar('mobile_no', { length: 20 }),
+  email: varchar('email', { length: 255 }),
+  address: text('address'),
+
+  // Tax Exemptions
+  taxExemptionCode: varchar('tax_exemption_code', { length: 10 }).default('S'), // S, S1, S2, S3, S4, ME, ME1, ME2, ME3, ME4, Z
+  numberOfDependents: int('number_of_dependents').default(0),
+
+  isActive: boolean('is_active').default(true),
+  createdBy: int('created_by'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
+});
+
+// Payroll Periods
+export const payrollPeriods = mysqlTable('payroll_periods', {
+  id: int('id').primaryKey().autoincrement(),
+  periodNo: varchar('period_no', { length: 50 }).unique().notNull(), // Format: PAY-YYYY-MM
+  periodName: varchar('period_name', { length: 100 }).notNull(), // "January 2024", "February 2024"
+  periodType: mysqlEnum('period_type', ['Regular', 'Special', '13th Month', 'Mid-Year Bonus']).default('Regular'),
+  month: int('month').notNull(), // 1-12
+  year: int('year').notNull(), // 2024, 2025, etc.
+  periodStart: date('period_start').notNull(),
+  periodEnd: date('period_end').notNull(),
+  payDate: date('pay_date').notNull(),
+  status: mysqlEnum('status', ['Draft', 'Processing', 'Completed', 'Posted', 'Cancelled']).default('Draft'),
+  totalEmployees: int('total_employees').default(0),
+  totalGrossPay: decimal('total_gross_pay', { precision: 15, scale: 2 }).default('0'),
+  totalDeductions: decimal('total_deductions', { precision: 15, scale: 2 }).default('0'),
+  totalNetPay: decimal('total_net_pay', { precision: 15, scale: 2 }).default('0'),
+  processedBy: int('processed_by'),
+  processedAt: datetime('processed_at'),
+  remarks: text('remarks'),
+  createdBy: int('created_by'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
+});
+
+// Payroll Transactions
+export const payrollTransactions = mysqlTable('payroll_transactions', {
+  id: int('id').primaryKey().autoincrement(),
+  payrollPeriodId: int('payroll_period_id').notNull(),
+  employeeId: int('employee_id').notNull(),
+
+  // Earnings
+  basicSalary: decimal('basic_salary', { precision: 15, scale: 2 }).notNull(),
+  pera: decimal('pera', { precision: 10, scale: 2 }).default('0'),
+  additionalAllowance: decimal('additional_allowance', { precision: 10, scale: 2 }).default('0'),
+  overtime: decimal('overtime', { precision: 10, scale: 2 }).default('0'),
+  otherEarnings: decimal('other_earnings', { precision: 10, scale: 2 }).default('0'),
+  grossPay: decimal('gross_pay', { precision: 15, scale: 2 }).notNull(),
+
+  // Statutory Deductions
+  gsisContribution: decimal('gsis_contribution', { precision: 10, scale: 2 }).default('0'),
+  philhealthContribution: decimal('philhealth_contribution', { precision: 10, scale: 2 }).default('0'),
+  pagibigContribution: decimal('pagibig_contribution', { precision: 10, scale: 2 }).default('0'),
+  withholdingTax: decimal('withholding_tax', { precision: 10, scale: 2 }).default('0'),
+
+  // Other Deductions
+  gsisLoan: decimal('gsis_loan', { precision: 10, scale: 2 }).default('0'),
+  pagibigLoan: decimal('pagibig_loan', { precision: 10, scale: 2 }).default('0'),
+  salaryLoan: decimal('salary_loan', { precision: 10, scale: 2 }).default('0'),
+  otherDeductions: decimal('other_deductions', { precision: 10, scale: 2 }).default('0'),
+
+  totalDeductions: decimal('total_deductions', { precision: 15, scale: 2 }).notNull(),
+  netPay: decimal('net_pay', { precision: 15, scale: 2 }).notNull(),
+
+  // Payment Details
+  paymentStatus: mysqlEnum('payment_status', ['Pending', 'Paid', 'Cancelled']).default('Pending'),
+  paymentDate: date('payment_date'),
+  paymentReference: varchar('payment_reference', { length: 100 }),
+
+  remarks: text('remarks'),
+  createdBy: int('created_by'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
+});
+
+// Employee Deductions (recurring monthly deductions)
+export const employeeDeductions = mysqlTable('employee_deductions', {
+  id: int('id').primaryKey().autoincrement(),
+  employeeId: int('employee_id').notNull(),
+  deductionType: mysqlEnum('deduction_type', ['GSIS Loan', 'Pag-IBIG Loan', 'Salary Loan', 'Other']).notNull(),
+  deductionName: varchar('deduction_name', { length: 100 }).notNull(),
+  amount: decimal('amount', { precision: 10, scale: 2 }).notNull(),
+  startDate: date('start_date').notNull(),
+  endDate: date('end_date'),
+  installments: int('installments'), // Total number of months to deduct
+  installmentsPaid: int('installments_paid').default(0),
+  balance: decimal('balance', { precision: 10, scale: 2 }),
+  isActive: boolean('is_active').default(true),
+  remarks: text('remarks'),
+  createdBy: int('created_by'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
+});
+
+// Payroll Adjustments (one-time adjustments)
+export const payrollAdjustments = mysqlTable('payroll_adjustments', {
+  id: int('id').primaryKey().autoincrement(),
+  employeeId: int('employee_id').notNull(),
+  adjustmentType: mysqlEnum('adjustment_type', ['Salary Increase', 'Step Increment', 'Retroactive Pay', 'Correction', 'Other']).notNull(),
+  adjustmentName: varchar('adjustment_name', { length: 100 }).notNull(),
+  amount: decimal('amount', { precision: 15, scale: 2 }).notNull(),
+  isAddition: boolean('is_addition').default(true), // true = addition, false = deduction
+  effectiveDate: date('effective_date').notNull(),
+  appliedInPeriod: int('applied_in_period'), // payroll_period_id where this was applied
+  status: mysqlEnum('status', ['Pending', 'Applied', 'Cancelled']).default('Pending'),
+  remarks: text('remarks'),
+  approvedBy: int('approved_by'),
+  approvedAt: datetime('approved_at'),
+  createdBy: int('created_by'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
+});
+
+// Government Remittances Tracking
+export const remittances = mysqlTable('remittances', {
+  id: int('id').primaryKey().autoincrement(),
+  remittanceNo: varchar('remittance_no', { length: 50 }).unique().notNull(), // REM-YYYY-NNNN
+  payrollPeriodId: int('payroll_period_id').notNull(),
+  remittanceType: mysqlEnum('remittance_type', ['GSIS', 'PhilHealth', 'Pag-IBIG', 'BIR']).notNull(),
+  month: int('month').notNull(),
+  year: int('year').notNull(),
+
+  // Amounts
+  employeeShare: decimal('employee_share', { precision: 15, scale: 2 }).notNull(),
+  employerShare: decimal('employer_share', { precision: 15, scale: 2 }).notNull(),
+  totalAmount: decimal('total_amount', { precision: 15, scale: 2 }).notNull(),
+
+  // Payment Details
+  dueDate: date('due_date').notNull(),
+  paymentDate: date('payment_date'),
+  referenceNo: varchar('reference_no', { length: 100 }),
+  paymentStatus: mysqlEnum('payment_status', ['Pending', 'Paid', 'Overdue']).default('Pending'),
+
+  remarks: text('remarks'),
+  processedBy: int('processed_by'),
+  createdBy: int('created_by'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
+});
+
+// 13th Month Pay
+export const thirteenthMonthPay = mysqlTable('thirteenth_month_pay', {
+  id: int('id').primaryKey().autoincrement(),
+  year: int('year').notNull(),
+  employeeId: int('employee_id').notNull(),
+
+  // Computation
+  totalBasicSalary: decimal('total_basic_salary', { precision: 15, scale: 2 }).notNull(), // Sum of basic salary for the year
+  monthsWorked: decimal('months_worked', { precision: 5, scale: 2 }).notNull(), // Pro-rated for new employees
+  thirteenthMonthAmount: decimal('thirteenth_month_amount', { precision: 15, scale: 2 }).notNull(), // total_basic_salary / 12
+  withholdingTax: decimal('withholding_tax', { precision: 10, scale: 2 }).default('0'),
+  netAmount: decimal('net_amount', { precision: 15, scale: 2 }).notNull(),
+
+  // Payment Details
+  paymentDate: date('payment_date'),
+  paymentStatus: mysqlEnum('payment_status', ['Pending', 'Paid', 'Cancelled']).default('Pending'),
+  paymentReference: varchar('payment_reference', { length: 100 }),
+
+  remarks: text('remarks'),
+  processedBy: int('processed_by'),
+  processedAt: datetime('processed_at'),
+  createdBy: int('created_by'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
+});
+
+// ============================================
+// PAYROLL RELATIONS
+// ============================================
+
+export const employeesRelations = relations(employees, ({ one, many }) => ({
+  user: one(users, {
+    fields: [employees.userId],
+    references: [users.id],
+  }),
+  payrollTransactions: many(payrollTransactions),
+  deductions: many(employeeDeductions),
+  adjustments: many(payrollAdjustments),
+  thirteenthMonthPayments: many(thirteenthMonthPay),
+  createdByUser: one(users, {
+    fields: [employees.createdBy],
+    references: [users.id],
+  }),
+}));
+
+export const payrollPeriodsRelations = relations(payrollPeriods, ({ many, one }) => ({
+  transactions: many(payrollTransactions),
+  remittances: many(remittances),
+  processedByUser: one(users, {
+    fields: [payrollPeriods.processedBy],
+    references: [users.id],
+  }),
+  createdByUser: one(users, {
+    fields: [payrollPeriods.createdBy],
+    references: [users.id],
+  }),
+}));
+
+export const payrollTransactionsRelations = relations(payrollTransactions, ({ one }) => ({
+  period: one(payrollPeriods, {
+    fields: [payrollTransactions.payrollPeriodId],
+    references: [payrollPeriods.id],
+  }),
+  employee: one(employees, {
+    fields: [payrollTransactions.employeeId],
+    references: [employees.id],
+  }),
+  createdByUser: one(users, {
+    fields: [payrollTransactions.createdBy],
+    references: [users.id],
+  }),
+}));
+
+export const employeeDeductionsRelations = relations(employeeDeductions, ({ one }) => ({
+  employee: one(employees, {
+    fields: [employeeDeductions.employeeId],
+    references: [employees.id],
+  }),
+  createdByUser: one(users, {
+    fields: [employeeDeductions.createdBy],
+    references: [users.id],
+  }),
+}));
+
+export const payrollAdjustmentsRelations = relations(payrollAdjustments, ({ one }) => ({
+  employee: one(employees, {
+    fields: [payrollAdjustments.employeeId],
+    references: [employees.id],
+  }),
+  approvedByUser: one(users, {
+    fields: [payrollAdjustments.approvedBy],
+    references: [users.id],
+  }),
+  createdByUser: one(users, {
+    fields: [payrollAdjustments.createdBy],
+    references: [users.id],
+  }),
+}));
+
+export const remittancesRelations = relations(remittances, ({ one }) => ({
+  period: one(payrollPeriods, {
+    fields: [remittances.payrollPeriodId],
+    references: [payrollPeriods.id],
+  }),
+  processedByUser: one(users, {
+    fields: [remittances.processedBy],
+    references: [users.id],
+  }),
+  createdByUser: one(users, {
+    fields: [remittances.createdBy],
+    references: [users.id],
+  }),
+}));
+
+export const thirteenthMonthPayRelations = relations(thirteenthMonthPay, ({ one }) => ({
+  employee: one(employees, {
+    fields: [thirteenthMonthPay.employeeId],
+    references: [employees.id],
+  }),
+  processedByUser: one(users, {
+    fields: [thirteenthMonthPay.processedBy],
+    references: [users.id],
+  }),
+  createdByUser: one(users, {
+    fields: [thirteenthMonthPay.createdBy],
+    references: [users.id],
+  }),
+}));
