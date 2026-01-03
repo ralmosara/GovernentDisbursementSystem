@@ -14,7 +14,14 @@
     "db:setup": "tsx scripts/setup-database.ts",
     "db:seed": "tsx src/lib/db/seed.ts",
     "db:reset-budget": "tsx scripts/reset-budget-tables.ts",
-    "seed": "tsx src/lib/db/seed.ts"
+    "seed": "tsx src/lib/db/seed.ts",
+    "test": "vitest",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:coverage": "vitest run --coverage",
+    "test:ui": "vitest --ui",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "@astrojs/node": "^9.0.0",

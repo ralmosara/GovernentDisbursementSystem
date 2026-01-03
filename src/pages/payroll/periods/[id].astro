@@ -1,0 +1,366 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import { payrollService } from '../../../lib/services/payroll.service';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+const id = parseInt(Astro.params.id || '0');
+
+// Fetch period details
+const period = await payrollService.getPayrollPeriodById(id);
+
+if (!period) {
+  return Astro.redirect('/payroll/periods');
+}
+
+// Fetch transactions if period has been processed
+let transactions: any[] = [];
+if (period.status !== 'Draft') {
+  try {
+    transactions = await payrollService.getPayrollTransactions(id);
+  } catch (error) {
+    console.error('Error fetching transactions:', error);
+  }
+}
+
+// Format currency
+function formatCurrency(amount: number | string | null): string {
+  if (!amount) return '₱0.00';
+  const num = typeof amount === 'string' ? parseFloat(amount) : amount;
+  return '₱' + num.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// Format date
+function formatDate(date: Date | string | null): string {
+  if (!date) return '-';
+  const d = typeof date === 'string' ? new Date(date) : date;
+  return d.toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' });
+}
+
+// Get status badge class
+function getStatusBadge(status: string): string {
+  const badges: Record<string, string> = {
+    'Draft': 'badge-primary',
+    'Processing': 'badge-warning',
+    'Completed': 'badge-success',
+    'Posted': 'badge-info',
+    'Cancelled': 'badge-danger',
+  };
+  return badges[status] || 'badge-secondary';
+}
+---
+
+<MainLayout title={`Payroll Period ${period.periodNo}`}>
+  <div class="container-fluid py-6">
+    <!-- Breadcrumb -->
+    <nav class="flex mb-4" aria-label="Breadcrumb">
+      <ol class="inline-flex items-center space-x-1 md:space-x-3">
+        <li class="inline-flex items-center">
+          <a href="/payroll/periods" class="text-gray-700 hover:text-primary-600">
+            Payroll Periods
+          </a>
+        </li>
+        <li>
+          <div class="flex items-center">
+            <i class="pi pi-chevron-right text-gray-400 text-sm"></i>
+            <span class="ml-1 text-gray-500 md:ml-2">{period.periodNo}</span>
+          </div>
+        </li>
+      </ol>
+    </nav>
+
+    <!-- Page Header -->
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
+      <div>
+        <h1 class="text-3xl font-bold text-gray-900">{period.periodNo}</h1>
+        <p class="mt-1 text-sm text-gray-600">
+          {period.periodName || `${period.periodType} Payroll Period`}
+        </p>
+      </div>
+      <div class="mt-4 md:mt-0">
+        <span class={`badge ${getStatusBadge(period.status)}`}>
+          {period.status}
+        </span>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- Main Content -->
+      <div class="lg:col-span-2 space-y-6">
+        <!-- Period Information -->
+        <div class="bg-white rounded-lg shadow border border-gray-200 p-6">
+          <h2 class="text-xl font-semibold text-gray-900 mb-4">Period Information</h2>
+
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label class="block text-sm font-medium text-gray-600">Period Number</label>
+              <p class="mt-1 text-sm text-gray-900">{period.periodNo}</p>
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium text-gray-600">Period Type</label>
+              <p class="mt-1 text-sm text-gray-900">{period.periodType}</p>
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium text-gray-600">Month / Year</label>
+              <p class="mt-1 text-sm text-gray-900">
+                {new Date(period.year, period.month - 1).toLocaleDateString('en-PH', { month: 'long', year: 'numeric' })}
+              </p>
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium text-gray-600">Pay Date</label>
+              <p class="mt-1 text-sm text-gray-900">{formatDate(period.payDate)}</p>
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium text-gray-600">Period Start</label>
+              <p class="mt-1 text-sm text-gray-900">{formatDate(period.periodStart)}</p>
+            </div>
+
+            <div>
+              <label class="block text-sm font-medium text-gray-600">Period End</label>
+              <p class="mt-1 text-sm text-gray-900">{formatDate(period.periodEnd)}</p>
+            </div>
+
+            {period.remarks && (
+              <div class="md:col-span-2">
+                <label class="block text-sm font-medium text-gray-600">Remarks</label>
+                <p class="mt-1 text-sm text-gray-900">{period.remarks}</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <!-- Payroll Statistics -->
+        {period.status !== 'Draft' && (
+          <div class="bg-white rounded-lg shadow border border-gray-200 p-6">
+            <h2 class="text-xl font-semibold text-gray-900 mb-4">Payroll Statistics</h2>
+
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div class="text-center">
+                <p class="text-sm text-gray-600">Employees</p>
+                <p class="text-2xl font-bold text-gray-900 mt-1">{period.totalEmployees || 0}</p>
+              </div>
+
+              <div class="text-center">
+                <p class="text-sm text-gray-600">Gross Pay</p>
+                <p class="text-lg font-bold text-gray-900 mt-1">{formatCurrency(period.totalGrossPay)}</p>
+              </div>
+
+              <div class="text-center">
+                <p class="text-sm text-gray-600">Deductions</p>
+                <p class="text-lg font-bold text-red-600 mt-1">{formatCurrency(period.totalDeductions)}</p>
+              </div>
+
+              <div class="text-center">
+                <p class="text-sm text-gray-600">Net Pay</p>
+                <p class="text-lg font-bold text-green-600 mt-1">{formatCurrency(period.totalNetPay)}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <!-- Payroll Transactions -->
+        {transactions.length > 0 && (
+          <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+            <div class="p-6 border-b border-gray-200">
+              <div class="flex items-center justify-between">
+                <h2 class="text-xl font-semibold text-gray-900">Payroll Transactions</h2>
+                <a
+                  href={`/payroll/periods/${period.id}/transactions`}
+                  class="text-sm text-primary-600 hover:text-primary-700"
+                >
+                  View All <i class="pi pi-arrow-right ml-1"></i>
+                </a>
+              </div>
+            </div>
+
+            <div class="overflow-x-auto">
+              <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                      Employee
+                    </th>
+                    <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">
+                      Gross Pay
+                    </th>
+                    <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">
+                      Deductions
+                    </th>
+                    <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">
+                      Net Pay
+                    </th>
+                  </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                  {transactions.slice(0, 5).map((t: any) => (
+                    <tr class="hover:bg-gray-50">
+                      <td class="px-6 py-4 whitespace-nowrap">
+                        <div class="flex flex-col">
+                          <div class="text-sm font-medium text-gray-900">
+                            {t.employee?.firstName} {t.employee?.lastName}
+                          </div>
+                          <div class="text-xs text-gray-500">{t.employee?.employeeNo}</div>
+                        </div>
+                      </td>
+                      <td class="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-900">
+                        {formatCurrency(t.grossPay)}
+                      </td>
+                      <td class="px-6 py-4 whitespace-nowrap text-right text-sm text-red-600">
+                        {formatCurrency(t.totalDeductions)}
+                      </td>
+                      <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium text-green-600">
+                        {formatCurrency(t.netPay)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {transactions.length > 5 && (
+              <div class="p-4 bg-gray-50 text-center">
+                <a
+                  href={`/payroll/periods/${period.id}/transactions`}
+                  class="text-sm text-primary-600 hover:text-primary-700"
+                >
+                  View all {transactions.length} transactions
+                </a>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <!-- Sidebar -->
+      <div class="space-y-6">
+        <!-- Actions Card -->
+        <div class="bg-white rounded-lg shadow border border-gray-200 p-6">
+          <h2 class="text-lg font-semibold text-gray-900 mb-4">Actions</h2>
+
+          <div class="space-y-3">
+            {period.status === 'Draft' && (
+              <button
+                type="button"
+                class="w-full btn btn-success"
+                onclick="processPayroll()"
+              >
+                <i class="pi pi-play mr-2"></i>
+                Process Payroll
+              </button>
+            )}
+
+            {(period.status === 'Completed' || period.status === 'Posted') && (
+              <>
+                <a
+                  href={`/payroll/periods/${period.id}/transactions`}
+                  class="w-full btn btn-primary block text-center"
+                >
+                  <i class="pi pi-list mr-2"></i>
+                  View Transactions
+                </a>
+
+                <button
+                  type="button"
+                  class="w-full btn btn-secondary"
+                  onclick="generateRemittances()"
+                >
+                  <i class="pi pi-file-export mr-2"></i>
+                  Generate Remittances
+                </button>
+              </>
+            )}
+
+            <a
+              href="/payroll/periods"
+              class="w-full btn btn-ghost block text-center"
+            >
+              <i class="pi pi-arrow-left mr-2"></i>
+              Back to Periods
+            </a>
+          </div>
+        </div>
+
+        <!-- Processing Info Card -->
+        {period.processedBy && period.processedAt && (
+          <div class="bg-white rounded-lg shadow border border-gray-200 p-6">
+            <h2 class="text-lg font-semibold text-gray-900 mb-4">Processing Info</h2>
+
+            <div class="space-y-3">
+              <div>
+                <label class="block text-sm font-medium text-gray-600">Processed At</label>
+                <p class="mt-1 text-sm text-gray-900">
+                  {formatDate(period.processedAt)}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  </div>
+</MainLayout>
+
+<script define:vars={{ periodId: period.id }}>
+  async function processPayroll() {
+    if (!confirm('Are you sure you want to process payroll for this period? This will calculate payroll for all active employees.')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/payroll/periods/${periodId}/process`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to process payroll');
+      }
+
+      const result = await response.json();
+
+      alert(`Payroll processed successfully!\n\nTotal Employees: ${result.totalEmployees}\nTotal Net Pay: ₱${result.totalNetPay.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`);
+
+      window.location.reload();
+    } catch (error) {
+      console.error('Error processing payroll:', error);
+      alert(error.message || 'Failed to process payroll. Please try again.');
+    }
+  }
+
+  async function generateRemittances() {
+    if (!confirm('Generate government remittances for this period?')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/payroll/periods/${periodId}/remittances`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to generate remittances');
+      }
+
+      alert('Remittances generated successfully!');
+      window.location.href = '/payroll/remittances';
+    } catch (error) {
+      console.error('Error generating remittances:', error);
+      alert(error.message || 'Failed to generate remittances. Please try again.');
+    }
+  }
+</script>

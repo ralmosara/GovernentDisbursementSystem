@@ -1,0 +1,88 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import { payrollService } from '../../../lib/services/payroll.service';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+// Fetch active employees for dropdown
+const employees = await payrollService.getEmployees({ isActive: true });
+---
+
+<MainLayout title="Create Employee Deduction">
+  <div class="container mx-auto px-4 py-6">
+    <!-- Breadcrumb -->
+    <nav class="flex mb-4" aria-label="Breadcrumb">
+      <ol class="inline-flex items-center space-x-1 md:space-x-3">
+        <li class="inline-flex items-center">
+          <a href="/payroll/deductions" class="text-gray-700 hover:text-primary-600">
+            Deductions
+          </a>
+        </li>
+        <li>
+          <div class="flex items-center">
+            <i class="pi pi-chevron-right text-gray-400 text-sm"></i>
+            <span class="ml-1 text-gray-500 md:ml-2">Create Deduction</span>
+          </div>
+        </li>
+      </ol>
+    </nav>
+
+    <!-- Page Header -->
+    <div class="mb-6">
+      <h1 class="text-3xl font-bold text-gray-900">Create Employee Deduction</h1>
+      <p class="mt-1 text-sm text-gray-600">
+        Set up a recurring loan deduction for an employee
+      </p>
+    </div>
+
+    <!-- Form Container -->
+    <div class="bg-white rounded-lg shadow border border-gray-200 p-6">
+      <div id="deduction-form"></div>
+    </div>
+  </div>
+</MainLayout>
+
+<script define:vars={{ employees }}>
+  import { createApp } from 'vue';
+  import DeductionForm from '../../../components/forms/payroll/DeductionForm.vue';
+
+  const app = createApp(DeductionForm, {
+    employees: employees,
+    onSubmit: async (formData) => {
+      try {
+        const response = await fetch('/api/payroll/deductions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(formData),
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || 'Failed to create deduction');
+        }
+
+        const result = await response.json();
+
+        // Show success message
+        alert('Employee deduction created successfully!');
+
+        // Redirect to deductions list
+        window.location.href = '/payroll/deductions';
+      } catch (error) {
+        console.error('Error creating deduction:', error);
+        alert(error.message || 'Failed to create deduction. Please try again.');
+      }
+    },
+    onCancel: () => {
+      window.location.href = '/payroll/deductions';
+    },
+  });
+
+  app.mount('#deduction-form');
+</script>

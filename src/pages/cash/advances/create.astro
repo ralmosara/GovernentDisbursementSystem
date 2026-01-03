@@ -1,0 +1,444 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import { db } from '../../../lib/db/connection';
+import { fundClusters, users } from '../../../lib/db/schema';
+import { eq } from 'drizzle-orm';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+// Get all fund clusters
+const allFundClusters = await db.select().from(fundClusters);
+
+// Get all employees (users)
+const allEmployees = await db
+  .select({
+    id: users.id,
+    name: users.username,
+    firstName: users.firstName,
+    lastName: users.lastName,
+    position: users.position,
+  })
+  .from(users)
+  .where(eq(users.isActive, true));
+---
+
+<MainLayout title="Create Cash Advance" user={user}>
+  <div class="page-header">
+    <div>
+      <div class="breadcrumb">
+        <a href="/cash/advances">Cash Advances</a>
+        <i class="pi pi-angle-right"></i>
+        <span>Create</span>
+      </div>
+      <h1 class="page-title">Create Cash Advance</h1>
+      <p class="page-description">Create a new cash advance request for an employee</p>
+    </div>
+  </div>
+
+  <div class="form-container">
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Cash Advance Information</h3>
+      </div>
+      <div class="card-body">
+        <form id="cashAdvanceForm">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label required">Employee</label>
+              <select name="employeeId" class="form-control" required>
+                <option value="">Select Employee</option>
+                {allEmployees.map(emp => (
+                  <option value={emp.id}>
+                    {emp.firstName} {emp.lastName} {emp.position ? `(${emp.position})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label required">Fund Cluster</label>
+              <select name="fundClusterId" class="form-control" required>
+                <option value="">Select Fund Cluster</option>
+                {allFundClusters.map(fc => (
+                  <option value={fc.id}>
+                    {fc.code} - {fc.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label required">Amount</label>
+              <div class="input-group">
+                <span class="input-prefix">₱</span>
+                <input
+                  type="number"
+                  name="amount"
+                  class="form-control"
+                  step="0.01"
+                  min="0.01"
+                  placeholder="0.00"
+                  required
+                />
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label required">Date Issued</label>
+              <input
+                type="date"
+                name="dateIssued"
+                class="form-control"
+                required
+              />
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Due Date for Return/Liquidation</label>
+              <input
+                type="date"
+                name="dueDateReturn"
+                class="form-control"
+              />
+              <p class="form-help">Optional: Specify when the cash advance should be liquidated</p>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label required">Purpose</label>
+            <textarea
+              name="purpose"
+              class="form-control"
+              rows="4"
+              placeholder="Describe the purpose of this cash advance..."
+              required
+            ></textarea>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Remarks</label>
+            <textarea
+              name="remarks"
+              class="form-control"
+              rows="3"
+              placeholder="Additional notes or remarks (optional)..."
+            ></textarea>
+          </div>
+
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">
+              <i class="pi pi-save"></i>
+              Create Cash Advance
+            </button>
+            <a href="/cash/advances" class="btn btn-secondary">
+              <i class="pi pi-times"></i>
+              Cancel
+            </a>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Instructions -->
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Instructions</h3>
+      </div>
+      <div class="card-body">
+        <div class="instruction-list">
+          <div class="instruction-item">
+            <div class="instruction-number">1</div>
+            <div class="instruction-content">
+              <h4>Select Employee</h4>
+              <p>Choose the employee who will receive the cash advance.</p>
+            </div>
+          </div>
+          <div class="instruction-item">
+            <div class="instruction-number">2</div>
+            <div class="instruction-content">
+              <h4>Specify Amount & Purpose</h4>
+              <p>Enter the cash advance amount and clearly describe its purpose.</p>
+            </div>
+          </div>
+          <div class="instruction-item">
+            <div class="instruction-number">3</div>
+            <div class="instruction-content">
+              <h4>Set Due Date</h4>
+              <p>Optionally set a due date for liquidation to track timely settlement.</p>
+            </div>
+          </div>
+          <div class="instruction-item">
+            <div class="instruction-number">4</div>
+            <div class="instruction-content">
+              <h4>Approval Process</h4>
+              <p>After creation, the cash advance will go through approval before release.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</MainLayout>
+
+<script>
+  const form = document.getElementById('cashAdvanceForm') as HTMLFormElement;
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const formData = new FormData(form);
+    const data = {
+      employeeId: parseInt(formData.get('employeeId') as string),
+      fundClusterId: parseInt(formData.get('fundClusterId') as string),
+      amount: parseFloat(formData.get('amount') as string),
+      purpose: formData.get('purpose') as string,
+      dateIssued: formData.get('dateIssued') as string,
+      dueDateReturn: formData.get('dueDateReturn') as string || null,
+      remarks: formData.get('remarks') as string || null,
+    };
+
+    try {
+      const response = await fetch('/api/cash/advances', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to create cash advance');
+      }
+
+      alert(`Cash advance created successfully! CA No: ${result.caNo}`);
+      window.location.href = `/cash/advances/${result.id}`;
+    } catch (error: any) {
+      alert(error.message || 'An error occurred while creating the cash advance');
+    }
+  });
+</script>
+
+<style>
+  .page-header {
+    margin-bottom: 2rem;
+  }
+
+  .breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+    color: #6b7280;
+    margin-bottom: 0.5rem;
+  }
+
+  .breadcrumb a {
+    color: #3b82f6;
+    text-decoration: none;
+  }
+
+  .breadcrumb a:hover {
+    text-decoration: underline;
+  }
+
+  .page-title {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #1f2937;
+    margin-bottom: 0.5rem;
+  }
+
+  .page-description {
+    color: #6b7280;
+  }
+
+  .form-container {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 1.5rem;
+  }
+
+  .card {
+    background: white;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+  }
+
+  .card-header {
+    padding: 1.5rem;
+    border-bottom: 1px solid #e5e7eb;
+  }
+
+  .card-title {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: #1f2937;
+    margin: 0;
+  }
+
+  .card-body {
+    padding: 1.5rem;
+  }
+
+  .form-row {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 1.5rem;
+  }
+
+  .form-group {
+    margin-bottom: 1.5rem;
+  }
+
+  .form-label {
+    display: block;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #374151;
+    margin-bottom: 0.5rem;
+  }
+
+  .form-label.required::after {
+    content: '*';
+    color: #ef4444;
+    margin-left: 0.25rem;
+  }
+
+  .form-control {
+    width: 100%;
+    padding: 0.625rem 0.875rem;
+    border: 1px solid #d1d5db;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+
+  .form-control:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  }
+
+  .input-group {
+    position: relative;
+    display: flex;
+  }
+
+  .input-prefix {
+    position: absolute;
+    left: 0.875rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #6b7280;
+    font-size: 0.875rem;
+    pointer-events: none;
+  }
+
+  .input-group .form-control {
+    padding-left: 2rem;
+  }
+
+  .form-help {
+    font-size: 0.75rem;
+    color: #6b7280;
+    margin-top: 0.25rem;
+  }
+
+  .form-actions {
+    display: flex;
+    gap: 1rem;
+    margin-top: 2rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid #e5e7eb;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.625rem 1.25rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    border-radius: 0.375rem;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-decoration: none;
+  }
+
+  .btn-primary {
+    background-color: #3b82f6;
+    color: white;
+  }
+
+  .btn-primary:hover {
+    background-color: #2563eb;
+  }
+
+  .btn-secondary {
+    background-color: white;
+    color: #374151;
+    border-color: #d1d5db;
+  }
+
+  .btn-secondary:hover {
+    background-color: #f9fafb;
+  }
+
+  .instruction-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+
+  .instruction-item {
+    display: flex;
+    gap: 1rem;
+  }
+
+  .instruction-number {
+    width: 2rem;
+    height: 2rem;
+    border-radius: 50%;
+    background-color: #3b82f6;
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    flex-shrink: 0;
+  }
+
+  .instruction-content h4 {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: #1f2937;
+    margin: 0 0 0.25rem 0;
+  }
+
+  .instruction-content p {
+    font-size: 0.8125rem;
+    color: #6b7280;
+    margin: 0;
+  }
+
+  @media (max-width: 1024px) {
+    .form-container {
+      grid-template-columns: 1fr;
+    }
+
+    .form-row {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>

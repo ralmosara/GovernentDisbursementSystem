@@ -1,0 +1,135 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import { payrollService } from '../../../lib/services/payroll.service';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const filters: any = {};
+const yearParam = Astro.url.searchParams.get('year');
+const typeParam = Astro.url.searchParams.get('remittanceType');
+const statusParam = Astro.url.searchParams.get('paymentStatus');
+
+if (yearParam) filters.year = parseInt(yearParam);
+else filters.year = new Date().getFullYear();
+
+if (typeParam) filters.remittanceType = typeParam;
+if (statusParam) filters.paymentStatus = statusParam;
+
+const remittances = await payrollService.getRemittances(filters);
+
+const totalRemittances = remittances.length;
+const pendingRemittances = remittances.filter(r => r.paymentStatus === 'Pending').length;
+const totalUnpaid = remittances
+  .filter(r => r.paymentStatus === 'Pending')
+  .reduce((sum, r) => sum + parseFloat(r.totalAmount || '0'), 0);
+
+function formatCurrency(amount: number | string | null): string {
+  if (!amount) return '₱0.00';
+  const num = typeof amount === 'string' ? parseFloat(amount) : amount;
+  return '₱' + num.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function formatDate(date: Date | string | null): string {
+  if (!date) return '-';
+  const d = typeof date === 'string' ? new Date(date) : date;
+  return d.toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+const currentYear = new Date().getFullYear();
+const years = [];
+for (let i = currentYear - 5; i <= currentYear + 1; i++) {
+  years.push(i);
+}
+---
+
+<MainLayout title="Government Remittances">
+  <div class="container-fluid py-6">
+    <div class="mb-6">
+      <h1 class="text-3xl font-bold text-gray-900">Government Remittances</h1>
+      <p class="mt-1 text-sm text-gray-600">Track GSIS, PhilHealth, Pag-IBIG, and BIR remittances</p>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+        <p class="text-sm font-medium text-gray-600">Total Remittances</p>
+        <p class="text-2xl font-bold text-gray-900 mt-1">{totalRemittances}</p>
+      </div>
+      <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+        <p class="text-sm font-medium text-gray-600">Pending Payment</p>
+        <p class="text-2xl font-bold text-yellow-600 mt-1">{pendingRemittances}</p>
+      </div>
+      <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+        <p class="text-sm font-medium text-gray-600">Total Unpaid</p>
+        <p class="text-xl font-bold text-red-600 mt-1">{formatCurrency(totalUnpaid)}</p>
+      </div>
+    </div>
+
+    <div class="bg-gray-50 rounded-lg p-4 mb-6">
+      <form method="get" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div>
+          <label for="year" class="block text-sm font-medium text-gray-700 mb-1">Year</label>
+          <select name="year" id="year" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+            {years.map(y => <option value={y} selected={filters.year === y}>{y}</option>)}
+          </select>
+        </div>
+        <div>
+          <label for="remittanceType" class="block text-sm font-medium text-gray-700 mb-1">Type</label>
+          <select name="remittanceType" id="remittanceType" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+            <option value="">All Types</option>
+            <option value="GSIS" selected={filters.remittanceType === 'GSIS'}>GSIS</option>
+            <option value="PhilHealth" selected={filters.remittanceType === 'PhilHealth'}>PhilHealth</option>
+            <option value="Pag-IBIG" selected={filters.remittanceType === 'Pag-IBIG'}>Pag-IBIG</option>
+            <option value="BIR" selected={filters.remittanceType === 'BIR'}>BIR</option>
+          </select>
+        </div>
+        <div>
+          <label for="paymentStatus" class="block text-sm font-medium text-gray-700 mb-1">Status</label>
+          <select name="paymentStatus" id="paymentStatus" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+            <option value="">All Statuses</option>
+            <option value="Pending" selected={filters.paymentStatus === 'Pending'}>Pending</option>
+            <option value="Paid" selected={filters.paymentStatus === 'Paid'}>Paid</option>
+          </select>
+        </div>
+        <div class="flex items-end">
+          <button type="submit" class="w-full btn btn-primary"><i class="pi pi-filter mr-2"></i>Apply</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+      <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Remittance No</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Month/Year</th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Employee Share</th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Employer Share</th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total Amount</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Due Date</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+          </tr>
+        </thead>
+        <tbody class="bg-white divide-y divide-gray-200">
+          {remittances.map(rem => (
+            <tr class="hover:bg-gray-50">
+              <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-primary-600">{rem.remittanceNo}</td>
+              <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{rem.remittanceType}</td>
+              <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{rem.month}/{rem.year}</td>
+              <td class="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-900">{formatCurrency(rem.employeeShare)}</td>
+              <td class="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-900">{formatCurrency(rem.employerShare)}</td>
+              <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium text-gray-900">{formatCurrency(rem.totalAmount)}</td>
+              <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatDate(rem.dueDate)}</td>
+              <td class="px-6 py-4 whitespace-nowrap">
+                <span class={`badge ${rem.paymentStatus === 'Paid' ? 'badge-success' : 'badge-warning'}`}>
+                  {rem.paymentStatus}
+                </span>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</MainLayout>

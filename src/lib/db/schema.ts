@@ -672,60 +672,7 @@ export const physicalInventoryCount = mysqlTable('physical_inventory_count', {
 });
 
 // ============================================
-// 11. PAYROLL MANAGEMENT
-// ============================================
-
-export const employees = mysqlTable('employees', {
-  id: int('id').primaryKey().autoincrement(),
-  employeeNo: varchar('employee_no', { length: 50 }).unique().notNull(),
-  userId: int('user_id'),
-  firstName: varchar('first_name', { length: 100 }).notNull(),
-  lastName: varchar('last_name', { length: 100 }).notNull(),
-  middleName: varchar('middle_name', { length: 100 }),
-  position: varchar('position', { length: 100 }),
-  salaryGrade: varchar('salary_grade', { length: 20 }),
-  monthlySalary: decimal('monthly_salary', { precision: 15, scale: 2 }).notNull(),
-  gsisNo: varchar('gsis_no', { length: 50 }),
-  philHealthNo: varchar('philhealth_no', { length: 50 }),
-  pagibigNo: varchar('pagibig_no', { length: 50 }),
-  tin: varchar('tin', { length: 50 }),
-  bankAccountNo: varchar('bank_account_no', { length: 50 }),
-  isActive: boolean('is_active').default(true),
-  createdAt: timestamp('created_at').defaultNow(),
-  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
-});
-
-export const payrollPeriods = mysqlTable('payroll_periods', {
-  id: int('id').primaryKey().autoincrement(),
-  periodCode: varchar('period_code', { length: 20 }).unique().notNull(),
-  periodMonth: int('period_month').notNull(),
-  periodYear: int('period_year').notNull(),
-  startDate: datetime('start_date').notNull(),
-  endDate: datetime('end_date').notNull(),
-  payDate: datetime('pay_date').notNull(),
-  status: mysqlEnum('status', ['draft', 'processing', 'completed']).default('draft'),
-  createdBy: int('created_by').notNull(),
-  createdAt: timestamp('created_at').defaultNow(),
-});
-
-export const payrollTransactions = mysqlTable('payroll_transactions', {
-  id: int('id').primaryKey().autoincrement(),
-  payrollPeriodId: int('payroll_period_id').notNull(),
-  employeeId: int('employee_id').notNull(),
-  basicSalary: decimal('basic_salary', { precision: 15, scale: 2 }).notNull(),
-  gsisContribution: decimal('gsis_contribution', { precision: 15, scale: 2 }).default('0'),
-  philHealthContribution: decimal('philhealth_contribution', { precision: 15, scale: 2 }).default('0'),
-  pagibigContribution: decimal('pagibig_contribution', { precision: 15, scale: 2 }).default('0'),
-  withholdingTax: decimal('withholding_tax', { precision: 15, scale: 2 }).default('0'),
-  otherDeductions: decimal('other_deductions', { precision: 15, scale: 2 }).default('0'),
-  totalDeductions: decimal('total_deductions', { precision: 15, scale: 2 }).notNull(),
-  netPay: decimal('net_pay', { precision: 15, scale: 2 }).notNull(),
-  dvId: int('dv_id'),
-  createdAt: timestamp('created_at').defaultNow(),
-});
-
-// ============================================
-// 12. SUPPORTING TABLES
+// 11. SUPPORTING TABLES
 // ============================================
 
 export const attachments = mysqlTable('attachments', {
@@ -771,6 +718,28 @@ export const systemSettings = mysqlTable('system_settings', {
 // ============================================
 // RELATIONS
 // ============================================
+
+// User Relations
+export const usersRelations = relations(users, ({ many }) => ({
+  userRoles: many(userRoles),
+}));
+
+// Role Relations
+export const rolesRelations = relations(roles, ({ many }) => ({
+  userRoles: many(userRoles),
+}));
+
+// User Roles Relations
+export const userRolesRelations = relations(userRoles, ({ one }) => ({
+  user: one(users, {
+    fields: [userRoles.userId],
+    references: [users.id],
+  }),
+  role: one(roles, {
+    fields: [userRoles.roleId],
+    references: [roles.id],
+  }),
+}));
 
 export const registryAppropriationsRelations = relations(registryAppropriations, ({ one, many }) => ({
   fundCluster: one(fundClusters, {

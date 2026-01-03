@@ -482,3 +482,71 @@ export async function generatePhysicalCountNumber(): Promise<string> {
 
   return `PCOUNT-${year}-${String(serial).padStart(4, '0')}`;
 }
+
+/**
+ * Generate Employee number in format: EMP-YYYY-NNNN
+ * Serial resets at the beginning of each year
+ *
+ * @returns Promise<string> - The generated employee number (e.g., "EMP-2026-0001")
+ */
+export async function generateEmployeeNumber(): Promise<string> {
+  const year = new Date().getFullYear();
+  const prefix = `EMP-${year}-`;
+
+  const latestEmployee = await db
+    .select({ employeeNo: employees.employeeNo })
+    .from(employees)
+    .where(sql`${employees.employeeNo} LIKE ${prefix + '%'}`)
+    .orderBy(desc(employees.id))
+    .limit(1);
+
+  let serial = 1;
+  if (latestEmployee.length > 0 && latestEmployee[0].employeeNo) {
+    const parts = latestEmployee[0].employeeNo.split('-');
+    if (parts.length === 3) {
+      serial = parseInt(parts[2], 10) + 1;
+    }
+  }
+
+  return `EMP-${year}-${String(serial).padStart(4, '0')}`;
+}
+
+/**
+ * Generate Payroll Period number in format: PAY-YYYY-MM
+ * Format uses year and month (no serial needed)
+ *
+ * @param year - The year (e.g., 2026)
+ * @param month - The month (1-12)
+ * @returns string - The generated period number (e.g., "PAY-2026-01")
+ */
+export function generatePayrollPeriodNumber(year: number, month: number): string {
+  return `PAY-${year}-${String(month).padStart(2, '0')}`;
+}
+
+/**
+ * Generate Remittance number in format: REM-YYYY-NNNN
+ * Serial resets at the beginning of each year
+ *
+ * @returns Promise<string> - The generated remittance number (e.g., "REM-2026-0001")
+ */
+export async function generateRemittanceNumber(): Promise<string> {
+  const year = new Date().getFullYear();
+  const prefix = `REM-${year}-`;
+
+  const latestRemittance = await db
+    .select({ remittanceNo: remittances.remittanceNo })
+    .from(remittances)
+    .where(sql`${remittances.remittanceNo} LIKE ${prefix + '%'}`)
+    .orderBy(desc(remittances.id))
+    .limit(1);
+
+  let serial = 1;
+  if (latestRemittance.length > 0 && latestRemittance[0].remittanceNo) {
+    const parts = latestRemittance[0].remittanceNo.split('-');
+    if (parts.length === 3) {
+      serial = parseInt(parts[2], 10) + 1;
+    }
+  }
+
+  return `REM-${year}-${String(serial).padStart(4, '0')}`;
+}

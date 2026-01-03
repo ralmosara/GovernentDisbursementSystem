@@ -1,0 +1,282 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import { payrollService } from '../../../lib/services/payroll.service';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+// Get filters from URL params
+const filters: any = {};
+const employeeIdParam = Astro.url.searchParams.get('employeeId');
+const deductionTypeParam = Astro.url.searchParams.get('deductionType');
+const isActiveParam = Astro.url.searchParams.get('isActive');
+
+if (employeeIdParam) filters.employeeId = parseInt(employeeIdParam);
+if (deductionTypeParam) filters.deductionType = deductionTypeParam;
+if (isActiveParam) filters.isActive = isActiveParam === 'true';
+
+// Fetch deductions with employee info
+const deductionsData = await payrollService.getAllDeductions(filters);
+
+// Get all employees for filter dropdown
+const employees = await payrollService.getEmployees({ isActive: true });
+
+// Calculate summary statistics
+const totalDeductions = deductionsData.length;
+const activeDeductions = deductionsData.filter(d => d.deduction.isActive).length;
+const totalBalance = deductionsData
+  .filter(d => d.deduction.isActive)
+  .reduce((sum, d) => sum + parseFloat(d.deduction.balance || '0'), 0);
+
+// Format currency
+function formatCurrency(amount: number | string | null): string {
+  if (!amount) return '₱0.00';
+  const num = typeof amount === 'string' ? parseFloat(amount) : amount;
+  return '₱' + num.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// Format date
+function formatDate(date: Date | string | null): string {
+  if (!date) return '-';
+  const d = typeof date === 'string' ? new Date(date) : date;
+  return d.toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+const deductionTypes = ['GSIS Loan', 'Pag-IBIG Loan', 'Salary Loan', 'Other'];
+---
+
+<MainLayout title="Employee Deductions">
+  <div class="container-fluid py-6">
+    <!-- Page Header -->
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
+      <div>
+        <h1 class="text-3xl font-bold text-gray-900">Employee Deductions</h1>
+        <p class="mt-1 text-sm text-gray-600">
+          Manage recurring employee loan deductions
+        </p>
+      </div>
+      <div class="mt-4 md:mt-0">
+        <a href="/payroll/deductions/create" class="btn btn-primary">
+          <i class="pi pi-plus mr-2"></i>
+          Create Deduction
+        </a>
+      </div>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <!-- Total Deductions -->
+      <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-sm font-medium text-gray-600">Total Deductions</p>
+            <p class="text-2xl font-bold text-gray-900 mt-1">{totalDeductions}</p>
+          </div>
+          <div class="p-3 bg-blue-100 rounded-full">
+            <i class="pi pi-list text-blue-600 text-xl"></i>
+          </div>
+        </div>
+      </div>
+
+      <!-- Active Deductions -->
+      <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-sm font-medium text-gray-600">Active Deductions</p>
+            <p class="text-2xl font-bold text-green-600 mt-1">{activeDeductions}</p>
+          </div>
+          <div class="p-3 bg-green-100 rounded-full">
+            <i class="pi pi-check-circle text-green-600 text-xl"></i>
+          </div>
+        </div>
+      </div>
+
+      <!-- Total Outstanding Balance -->
+      <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-sm font-medium text-gray-600">Total Balance</p>
+            <p class="text-xl font-bold text-gray-900 mt-1">{formatCurrency(totalBalance)}</p>
+          </div>
+          <div class="p-3 bg-yellow-100 rounded-full">
+            <i class="pi pi-money-bill text-yellow-600 text-xl"></i>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="bg-gray-50 rounded-lg p-4 mb-6">
+      <form method="get" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <!-- Employee Filter -->
+        <div>
+          <label for="employeeId" class="block text-sm font-medium text-gray-700 mb-1">
+            Employee
+          </label>
+          <select
+            name="employeeId"
+            id="employeeId"
+            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            <option value="">All Employees</option>
+            {employees.map(emp => (
+              <option value={emp.id} selected={filters.employeeId === emp.id}>
+                {emp.employeeNo} - {emp.firstName} {emp.lastName}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <!-- Deduction Type Filter -->
+        <div>
+          <label for="deductionType" class="block text-sm font-medium text-gray-700 mb-1">
+            Deduction Type
+          </label>
+          <select
+            name="deductionType"
+            id="deductionType"
+            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            <option value="">All Types</option>
+            {deductionTypes.map(type => (
+              <option value={type} selected={filters.deductionType === type}>
+                {type}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <!-- Status Filter -->
+        <div>
+          <label for="isActive" class="block text-sm font-medium text-gray-700 mb-1">
+            Status
+          </label>
+          <select
+            name="isActive"
+            id="isActive"
+            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            <option value="">All Statuses</option>
+            <option value="true" selected={filters.isActive === true}>Active</option>
+            <option value="false" selected={filters.isActive === false}>Inactive</option>
+          </select>
+        </div>
+
+        <!-- Submit Button -->
+        <div class="flex items-end">
+          <button type="submit" class="w-full btn btn-primary">
+            <i class="pi pi-filter mr-2"></i>
+            Apply Filters
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Deductions Table -->
+    <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-gray-200">
+          <thead class="bg-gray-50">
+            <tr>
+              <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Employee
+              </th>
+              <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Type
+              </th>
+              <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Deduction Name
+              </th>
+              <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Amount
+              </th>
+              <th scope="col" class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Installments
+              </th>
+              <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Balance
+              </th>
+              <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Start Date
+              </th>
+              <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Status
+              </th>
+            </tr>
+          </thead>
+          <tbody class="bg-white divide-y divide-gray-200">
+            {deductionsData.length === 0 ? (
+              <tr>
+                <td colspan="8" class="px-6 py-12 text-center">
+                  <div class="flex flex-col items-center justify-center">
+                    <i class="pi pi-inbox text-gray-300 text-5xl mb-4"></i>
+                    <p class="text-gray-500 text-lg mb-2">No deductions found</p>
+                    <p class="text-gray-400 text-sm mb-4">
+                      Create a new deduction to get started
+                    </p>
+                    <a href="/payroll/deductions/create" class="btn btn-primary">
+                      <i class="pi pi-plus mr-2"></i>
+                      Create Deduction
+                    </a>
+                  </div>
+                </td>
+              </tr>
+            ) : (
+              deductionsData.map(({ deduction, employee }) => (
+                <tr class="hover:bg-gray-50 transition-colors">
+                  <td class="px-6 py-4 whitespace-nowrap">
+                    <div class="flex flex-col">
+                      <div class="text-sm font-medium text-gray-900">
+                        {employee?.firstName} {employee?.lastName}
+                      </div>
+                      <div class="text-xs text-gray-500">{employee?.employeeNo}</div>
+                    </div>
+                  </td>
+                  <td class="px-6 py-4 whitespace-nowrap">
+                    <div class="text-sm text-gray-900">{deduction.deductionType}</div>
+                  </td>
+                  <td class="px-6 py-4">
+                    <div class="text-sm text-gray-900">{deduction.deductionName}</div>
+                  </td>
+                  <td class="px-6 py-4 whitespace-nowrap text-right">
+                    <div class="text-sm font-medium text-gray-900">
+                      {formatCurrency(deduction.amount)}
+                    </div>
+                  </td>
+                  <td class="px-6 py-4 whitespace-nowrap text-center">
+                    <div class="text-sm text-gray-900">
+                      {deduction.installmentsPaid || 0} / {deduction.installments}
+                    </div>
+                  </td>
+                  <td class="px-6 py-4 whitespace-nowrap text-right">
+                    <div class="text-sm font-medium text-gray-900">
+                      {formatCurrency(deduction.balance)}
+                    </div>
+                  </td>
+                  <td class="px-6 py-4 whitespace-nowrap">
+                    <div class="text-sm text-gray-900">{formatDate(deduction.startDate)}</div>
+                  </td>
+                  <td class="px-6 py-4 whitespace-nowrap">
+                    <span class={`badge ${deduction.isActive ? 'badge-success' : 'badge-secondary'}`}>
+                      {deduction.isActive ? 'Active' : 'Inactive'}
+                    </span>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Result Count -->
+    {deductionsData.length > 0 && (
+      <div class="mt-4 text-sm text-gray-600">
+        Showing {deductionsData.length} deduction{deductionsData.length !== 1 ? 's' : ''}
+      </div>
+    )}
+  </div>
+</MainLayout>

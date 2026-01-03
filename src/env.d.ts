@@ -3,7 +3,15 @@
 
 declare namespace App {
   interface Locals {
-    user: import('lucia').User | null;
+    user: {
+      id: number;
+      username: string;
+      email: string;
+      firstName: string;
+      lastName: string;
+      role: string | null;
+      isActive: boolean;
+    } | null;
     session: import('lucia').Session | null;
   }
 }

@@ -1,0 +1,259 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import { payrollService } from '../../../lib/services/payroll.service';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+// Get query parameters
+const url = new URL(Astro.request.url);
+const search = url.searchParams.get('search');
+const employmentStatus = url.searchParams.get('status');
+const position = url.searchParams.get('position');
+
+// Fetch employees
+let employees: any[] = [];
+try {
+  const filters: any = { isActive: true };
+  if (search) filters.search = search;
+  if (employmentStatus) filters.employmentStatus = employmentStatus;
+  if (position) filters.position = position;
+
+  employees = await payrollService.getEmployees(filters);
+} catch (error) {
+  console.error('Error loading employees:', error);
+}
+
+// Get unique positions for filter
+const positions = [...new Set(employees.map(e => e.position).filter(Boolean))];
+
+// Calculate statistics
+const activeCount = employees.filter(e => e.employmentStatus === 'Active').length;
+const totalBasicSalary = employees
+  .filter(e => e.employmentStatus === 'Active')
+  .reduce((sum, e) => sum + parseFloat(e.basicSalary), 0);
+
+function formatCurrency(value: number): string {
+  return value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+---
+
+<MainLayout title="Employee Management">
+  <div class="container mx-auto px-4 py-6">
+    <!-- Page Header -->
+    <div class="flex justify-between items-center mb-6">
+      <div>
+        <h1 class="text-3xl font-bold text-gray-900">Employee Management</h1>
+        <p class="mt-1 text-sm text-gray-600">
+          Manage employee records and payroll information
+        </p>
+      </div>
+      <a
+        href="/payroll/employees/create"
+        class="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700"
+      >
+        <i class="pi pi-plus mr-2"></i>
+        Add Employee
+      </a>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+      <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+        <div class="flex items-center">
+          <div class="p-3 bg-blue-100 rounded-full">
+            <i class="pi pi-users text-blue-600 text-xl"></i>
+          </div>
+          <div class="ml-4">
+            <p class="text-sm font-medium text-gray-500">Total Employees</p>
+            <p class="text-2xl font-bold text-gray-900">{employees.length}</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+        <div class="flex items-center">
+          <div class="p-3 bg-green-100 rounded-full">
+            <i class="pi pi-check-circle text-green-600 text-xl"></i>
+          </div>
+          <div class="ml-4">
+            <p class="text-sm font-medium text-gray-500">Active Employees</p>
+            <p class="text-2xl font-bold text-gray-900">{activeCount}</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+        <div class="flex items-center">
+          <div class="p-3 bg-purple-100 rounded-full">
+            <i class="pi pi-dollar text-purple-600 text-xl"></i>
+          </div>
+          <div class="ml-4">
+            <p class="text-sm font-medium text-gray-500">Total Monthly Salary</p>
+            <p class="text-2xl font-bold text-gray-900">₱{formatCurrency(totalBasicSalary)}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="bg-white rounded-lg shadow border border-gray-200 p-4 mb-6">
+      <form method="GET" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div>
+          <label for="search" class="block text-sm font-medium text-gray-700 mb-1">
+            Search
+          </label>
+          <input
+            type="text"
+            id="search"
+            name="search"
+            value={search || ''}
+            placeholder="Name or employee number..."
+            class="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500"
+          />
+        </div>
+
+        <div>
+          <label for="status" class="block text-sm font-medium text-gray-700 mb-1">
+            Employment Status
+          </label>
+          <select
+            id="status"
+            name="status"
+            class="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500"
+          >
+            <option value="">All Status</option>
+            <option value="Active" selected={employmentStatus === 'Active'}>Active</option>
+            <option value="Resigned" selected={employmentStatus === 'Resigned'}>Resigned</option>
+            <option value="Retired" selected={employmentStatus === 'Retired'}>Retired</option>
+            <option value="Terminated" selected={employmentStatus === 'Terminated'}>Terminated</option>
+            <option value="On Leave" selected={employmentStatus === 'On Leave'}>On Leave</option>
+          </select>
+        </div>
+
+        <div>
+          <label for="position" class="block text-sm font-medium text-gray-700 mb-1">
+            Position
+          </label>
+          <select
+            id="position"
+            name="position"
+            class="w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500"
+          >
+            <option value="">All Positions</option>
+            {positions.map((pos: string) => (
+              <option value={pos} selected={position === pos}>{pos}</option>
+            ))}
+          </select>
+        </div>
+
+        <div class="flex items-end">
+          <button
+            type="submit"
+            class="w-full px-4 py-2 bg-primary-600 text-white rounded-md hover:bg-primary-700 font-medium"
+          >
+            Apply Filters
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Employees Table -->
+    <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+      {employees.length > 0 ? (
+        <div class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+              <tr>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Employee No.
+                </th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Name
+                </th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Position
+                </th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Salary Grade
+                </th>
+                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Basic Salary
+                </th>
+                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Status
+                </th>
+                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody class="bg-white divide-y divide-gray-200">
+              {employees.map((employee: any) => (
+                <tr class="hover:bg-gray-50">
+                  <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    {employee.employeeNo}
+                  </td>
+                  <td class="px-6 py-4 whitespace-nowrap">
+                    <div class="text-sm font-medium text-gray-900">
+                      {employee.lastName}, {employee.firstName} {employee.middleName ? employee.middleName.charAt(0) + '.' : ''}
+                    </div>
+                    <div class="text-xs text-gray-500">{employee.email}</div>
+                  </td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {employee.position}
+                  </td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {employee.salaryGrade || '-'}
+                  </td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm text-right font-medium text-gray-900">
+                    ₱{formatCurrency(parseFloat(employee.basicSalary))}
+                  </td>
+                  <td class="px-6 py-4 whitespace-nowrap text-sm">
+                    <span class={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                      employee.employmentStatus === 'Active' ? 'bg-green-100 text-green-800' :
+                      employee.employmentStatus === 'Resigned' ? 'bg-gray-100 text-gray-800' :
+                      employee.employmentStatus === 'Retired' ? 'bg-blue-100 text-blue-800' :
+                      employee.employmentStatus === 'On Leave' ? 'bg-yellow-100 text-yellow-800' :
+                      'bg-red-100 text-red-800'
+                    }`}>
+                      {employee.employmentStatus}
+                    </span>
+                  </td>
+                  <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                    <a
+                      href={`/payroll/employees/${employee.id}`}
+                      class="text-primary-600 hover:text-primary-900"
+                    >
+                      View
+                    </a>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div class="px-6 py-12 text-center">
+          <i class="pi pi-users text-gray-400 text-4xl mb-4"></i>
+          <h3 class="text-lg font-medium text-gray-900 mb-2">No employees found</h3>
+          <p class="text-gray-500 mb-4">
+            {search || employmentStatus || position
+              ? 'No employees match your filter criteria.'
+              : 'Get started by adding your first employee.'}
+          </p>
+          <a
+            href="/payroll/employees/create"
+            class="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700"
+          >
+            <i class="pi pi-plus mr-2"></i>
+            Add Employee
+          </a>
+        </div>
+      )}
+    </div>
+  </div>
+</MainLayout>

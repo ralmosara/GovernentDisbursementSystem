@@ -8,6 +8,7 @@ import {
 import { eq, and, desc, like, gte, lte, or, sql } from 'drizzle-orm';
 import { generateDVNumber } from '../utils/serial-generator';
 import { approvalService } from './approval.service';
+import { logCreate, logUpdate, logDelete, sanitizeData } from '../middleware/audit-logger';
 
 export interface CreateDVData {
   fundClusterId: number;
@@ -77,6 +78,14 @@ export class DisbursementService {
       .update(disbursementVouchers)
       .set({ status: 'pending_budget' })
       .where(eq(disbursementVouchers.id, dvId));
+
+    // Log audit trail
+    await logCreate(
+      'disbursement_vouchers',
+      dvId,
+      sanitizeData({ ...data, dvNo, status: 'pending_budget' }),
+      data.createdBy
+    );
 
     return { id: dvId, dvNo };
   }
@@ -269,7 +278,7 @@ export class DisbursementService {
   /**
    * Update DV (only allowed for draft status)
    */
-  async updateDV(id: number, data: UpdateDVData) {
+  async updateDV(id: number, data: UpdateDVData, userId: number) {
     // Check if DV is in draft status
     const dv = await this.getDVById(id);
 
@@ -281,6 +290,19 @@ export class DisbursementService {
       throw new Error('Only draft DVs can be updated');
     }
 
+    // Log audit trail - capture old values
+    const oldValues = sanitizeData({
+      payeeName: dv.payeeName,
+      payeeTin: dv.payeeTin,
+      payeeAddress: dv.payeeAddress,
+      particulars: dv.particulars,
+      responsibilityCenter: dv.responsibilityCenter,
+      mfoPapId: dv.mfoPapId,
+      objectExpenditureId: dv.objectExpenditureId,
+      amount: dv.amount,
+      paymentMode: dv.paymentMode,
+    });
+
     await db
       .update(disbursementVouchers)
       .set({
@@ -288,6 +310,15 @@ export class DisbursementService {
         updatedAt: new Date(),
       })
       .where(eq(disbursementVouchers.id, id));
+
+    // Log audit trail
+    await logUpdate(
+      'disbursement_vouchers',
+      id,
+      oldValues,
+      sanitizeData(data),
+      userId
+    );
 
     return true;
   }
@@ -317,6 +348,10 @@ export class DisbursementService {
         updatedAt: new Date(),
       })
       .where(eq(disbursementVouchers.id, id));
+
+    // Log audit trail
+    const { logCancel } = await import('../middleware/audit-logger');
+    await logCancel('disbursement_vouchers', id, userId);
 
     return true;
   }
