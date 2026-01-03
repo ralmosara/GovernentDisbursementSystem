@@ -1,0 +1,91 @@
+---
+import MainLayout from '../../layouts/MainLayout.astro';
+import { canViewAuditLogs } from '../../lib/utils/permissions';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+// Check if user has permission to view audit logs
+const hasPermission = await canViewAuditLogs(user.id);
+
+if (!hasPermission) {
+  return Astro.redirect('/dashboard');
+}
+---
+
+<MainLayout title="User Activity Dashboard" user={user}>
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">User Activity Dashboard</h1>
+      <p class="page-description">Monitor user activities and system usage</p>
+    </div>
+    <div class="page-actions">
+      <a href="/audit" class="btn btn-secondary">
+        <i class="pi pi-list"></i>
+        Full Audit Logs
+      </a>
+    </div>
+  </div>
+
+  <div id="activityDashboard"></div>
+</MainLayout>
+
+<script>
+  import { createApp } from 'vue';
+  import ActivityDashboard from '../../components/admin/ActivityDashboard.vue';
+
+  const app = createApp(ActivityDashboard);
+  app.mount('#activityDashboard');
+</script>
+
+<style>
+  .page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+  }
+
+  .page-title {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #1f2937;
+    margin-bottom: 0.5rem;
+  }
+
+  .page-description {
+    color: #6b7280;
+  }
+
+  .page-actions {
+    display: flex;
+    gap: 1rem;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.625rem 1.25rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    border-radius: 0.375rem;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-decoration: none;
+  }
+
+  .btn-secondary {
+    background-color: white;
+    color: #374151;
+    border-color: #d1d5db;
+  }
+
+  .btn-secondary:hover {
+    background-color: #f9fafb;
+  }
+</style>

@@ -1,0 +1,83 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+---
+
+<MainLayout title="Create Payroll Period">
+  <div class="container mx-auto px-4 py-6">
+    <!-- Breadcrumb -->
+    <nav class="flex mb-4" aria-label="Breadcrumb">
+      <ol class="inline-flex items-center space-x-1 md:space-x-3">
+        <li class="inline-flex items-center">
+          <a href="/payroll/periods" class="text-gray-700 hover:text-primary-600">
+            Payroll Periods
+          </a>
+        </li>
+        <li>
+          <div class="flex items-center">
+            <i class="pi pi-chevron-right text-gray-400 text-sm"></i>
+            <span class="ml-1 text-gray-500 md:ml-2">Create Period</span>
+          </div>
+        </li>
+      </ol>
+    </nav>
+
+    <!-- Page Header -->
+    <div class="mb-6">
+      <h1 class="text-3xl font-bold text-gray-900">Create Payroll Period</h1>
+      <p class="mt-1 text-sm text-gray-600">
+        Set up a new payroll period for processing
+      </p>
+    </div>
+
+    <!-- Form Container -->
+    <div class="bg-white rounded-lg shadow border border-gray-200 p-6">
+      <div id="period-form"></div>
+    </div>
+  </div>
+</MainLayout>
+
+<script>
+  import { createApp } from 'vue';
+  import PayrollPeriodForm from '../../../components/forms/payroll/PayrollPeriodForm.vue';
+
+  const app = createApp(PayrollPeriodForm, {
+    onSubmit: async (formData: any) => {
+      try {
+        const response = await fetch('/api/payroll/periods', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(formData),
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || 'Failed to create payroll period');
+        }
+
+        const result = await response.json();
+
+        // Show success message
+        alert(`Payroll period ${result.periodNo} created successfully!`);
+
+        // Redirect to period detail page
+        window.location.href = `/payroll/periods/${result.id}`;
+      } catch (error: any) {
+        console.error('Error creating payroll period:', error);
+        alert(error.message || 'Failed to create payroll period. Please try again.');
+      }
+    },
+    onCancel: () => {
+      window.location.href = '/payroll/periods';
+    },
+  });
+
+  app.mount('#period-form');
+</script>

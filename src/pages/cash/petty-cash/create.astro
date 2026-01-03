@@ -1,0 +1,44 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import PettyCashFundForm from '../../../components/forms/cash/PettyCashFundForm.vue';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+---
+
+<MainLayout title="Create Petty Cash Fund" user={user}>
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Create Petty Cash Fund</h1>
+      <p class="page-description">Setup a new petty cash fund with custodian and threshold</p>
+    </div>
+  </div>
+
+  <div class="max-w-3xl">
+    <PettyCashFundForm client:load />
+  </div>
+</MainLayout>
+
+<style>
+  .page-header {
+    margin-bottom: 2rem;
+  }
+
+  .page-title {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #1f2937;
+    margin-bottom: 0.5rem;
+  }
+
+  .page-description {
+    color: #6b7280;
+  }
+
+  .max-w-3xl {
+    max-width: 48rem;
+  }
+</style>

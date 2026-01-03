@@ -1,0 +1,83 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+---
+
+<MainLayout title="Add Employee">
+  <div class="container mx-auto px-4 py-6">
+    <!-- Breadcrumb -->
+    <nav class="flex mb-4" aria-label="Breadcrumb">
+      <ol class="inline-flex items-center space-x-1 md:space-x-3">
+        <li class="inline-flex items-center">
+          <a href="/payroll/employees" class="text-gray-700 hover:text-primary-600">
+            Employees
+          </a>
+        </li>
+        <li>
+          <div class="flex items-center">
+            <i class="pi pi-chevron-right text-gray-400 text-sm"></i>
+            <span class="ml-1 text-gray-500 md:ml-2">Add Employee</span>
+          </div>
+        </li>
+      </ol>
+    </nav>
+
+    <!-- Page Header -->
+    <div class="mb-6">
+      <h1 class="text-3xl font-bold text-gray-900">Add Employee</h1>
+      <p class="mt-1 text-sm text-gray-600">
+        Enter employee information for payroll processing
+      </p>
+    </div>
+
+    <!-- Form Container -->
+    <div class="bg-white rounded-lg shadow border border-gray-200 p-6">
+      <div id="employee-form"></div>
+    </div>
+  </div>
+</MainLayout>
+
+<script>
+  import { createApp } from 'vue';
+  import EmployeeForm from '../../../components/forms/payroll/EmployeeForm.vue';
+
+  const app = createApp(EmployeeForm, {
+    onSubmit: async (formData: any) => {
+      try {
+        const response = await fetch('/api/payroll/employees', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(formData),
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || 'Failed to create employee');
+        }
+
+        const result = await response.json();
+
+        // Show success message
+        alert(`Employee ${result.employeeNo} created successfully!`);
+
+        // Redirect to employee detail page
+        window.location.href = `/payroll/employees/${result.id}`;
+      } catch (error: any) {
+        console.error('Error creating employee:', error);
+        alert(error.message || 'Failed to create employee. Please try again.');
+      }
+    },
+    onCancel: () => {
+      window.location.href = '/payroll/employees';
+    },
+  });
+
+  app.mount('#employee-form');
+</script>

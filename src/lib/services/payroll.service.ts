@@ -1,4 +1,4 @@
-import { db } from '../db';
+import { db } from '../db/connection';
 import {
   employees,
   payrollPeriods,
@@ -17,6 +17,7 @@ import {
   type PayrollCalculationInput,
 } from '../utils/payroll-calculator';
 import { type TaxExemptionCode } from '../utils/tax-calculator';
+import { logCreate, logUpdate, logDelete, logProcess, sanitizeData } from '../middleware/audit-logger';
 
 // ============================================
 // EMPLOYEE MANAGEMENT
@@ -456,6 +457,20 @@ export async function processPayroll(
     })
     .where(eq(payrollPeriods.id, periodId));
 
+  // Log audit trail
+  await logProcess(
+    'payroll_periods',
+    periodId,
+    userId,
+    {
+      totalEmployees,
+      totalGrossPay,
+      totalDeductions,
+      totalNetPay,
+      status: 'Completed',
+    }
+  );
+
   return {
     totalEmployees,
     totalNetPay,
@@ -517,6 +532,38 @@ export async function getEmployeeDeductions(employeeId: number) {
     .from(employeeDeductions)
     .where(eq(employeeDeductions.employeeId, employeeId))
     .orderBy(desc(employeeDeductions.createdAt));
+}
+
+export async function getAllDeductions(filters?: {
+  employeeId?: number;
+  deductionType?: string;
+  isActive?: boolean;
+}) {
+  const deductionsWithEmployees = await db
+    .select({
+      deduction: employeeDeductions,
+      employee: employees,
+    })
+    .from(employeeDeductions)
+    .leftJoin(employees, eq(employeeDeductions.employeeId, employees.id))
+    .orderBy(desc(employeeDeductions.createdAt));
+
+  let result = deductionsWithEmployees;
+
+  // Apply filters
+  if (filters?.employeeId) {
+    result = result.filter(d => d.deduction.employeeId === filters.employeeId);
+  }
+
+  if (filters?.deductionType) {
+    result = result.filter(d => d.deduction.deductionType === filters.deductionType);
+  }
+
+  if (filters?.isActive !== undefined) {
+    result = result.filter(d => d.deduction.isActive === filters.isActive);
+  }
+
+  return result;
 }
 
 // ============================================
@@ -808,6 +855,7 @@ export const payrollService = {
   // Deductions
   createEmployeeDeduction,
   getEmployeeDeductions,
+  getAllDeductions,
 
   // Adjustments
   createPayrollAdjustment,

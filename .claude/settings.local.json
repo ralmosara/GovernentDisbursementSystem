@@ -18,7 +18,14 @@
       "Bash(npx:*)",
       "Bash(dir /B /S \"c:\\\\Users\\\\pc\\\\Documents\\\\GitHub\\\\GovernentDisbursementSystem\\\\src\\\\components\")",
       "Bash(findstr:*)",
-      "Bash(dir /s /b \"c:\\\\Users\\\\pc\\\\Documents\\\\GitHub\\\\GovernentDisbursementSystem\\\\src\\\\pages\\\\cash\")"
+      "Bash(dir /s /b \"c:\\\\Users\\\\pc\\\\Documents\\\\GitHub\\\\GovernentDisbursementSystem\\\\src\\\\pages\\\\cash\")",
+      "Bash(dir /B \"c:\\\\Users\\\\pc\\\\Documents\\\\GitHub\\\\GovernentDisbursementSystem\\\\drizzle\")",
+      "Bash(dir \"c:\\\\Users\\\\pc\\\\Documents\\\\GitHub\\\\GovernentDisbursementSystem\" /B)",
+      "Bash(find:*)",
+      "Bash(dir /s /b \"c:\\\\Users\\\\pc\\\\Documents\\\\GitHub\\\\GovernentDisbursementSystem\\\\src\\\\lib\\\\auth\")",
+      "Bash(npm run test:unit:*)",
+      "Bash(dir /B \"c:\\\\Users\\\\pc\\\\Documents\\\\GitHub\\\\GovernentDisbursementSystem\\\\src\\\\pages\\\\admin\")",
+      "Bash(cat:*)"
     ]
   }
 }

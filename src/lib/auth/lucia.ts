@@ -1,7 +1,8 @@
 import { Lucia } from 'lucia';
 import { DrizzleMySQLAdapter } from '@lucia-auth/adapter-drizzle';
 import { db } from '../db/connection';
-import { sessions, users } from '../db/schema';
+import { sessions, users, userRoles, roles } from '../db/schema';
+import { eq } from 'drizzle-orm';
 
 // Initialize Drizzle adapter for Lucia
 const adapter = new DrizzleMySQLAdapter(db, sessions, users);

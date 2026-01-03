@@ -1,0 +1,785 @@
+---
+import MainLayout from '../../layouts/MainLayout.astro';
+import { canViewAuditLogs } from '../../lib/utils/permissions';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+// Check if user is admin (only admins can access settings)
+if (user.role !== 'administrator') {
+  return Astro.redirect('/dashboard');
+}
+---
+
+<MainLayout title="System Settings" user={user}>
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">System Settings</h1>
+      <p class="page-description">Configure system-wide settings and preferences</p>
+    </div>
+  </div>
+
+  <div class="settings-container">
+    <!-- Navigation Tabs -->
+    <div class="settings-tabs">
+      <button class="tab-button active" data-tab="general">
+        <i class="pi pi-cog"></i>
+        General
+      </button>
+      <button class="tab-button" data-tab="users">
+        <i class="pi pi-users"></i>
+        User Management
+      </button>
+      <button class="tab-button" data-tab="coa">
+        <i class="pi pi-book"></i>
+        Chart of Accounts
+      </button>
+      <button class="tab-button" data-tab="funds">
+        <i class="pi pi-wallet"></i>
+        Fund Sources
+      </button>
+      <button class="tab-button" data-tab="security">
+        <i class="pi pi-shield"></i>
+        Security
+      </button>
+      <button class="tab-button" data-tab="email">
+        <i class="pi pi-envelope"></i>
+        Email
+      </button>
+    </div>
+
+    <!-- Tab Content -->
+    <div class="settings-content">
+      <!-- General Settings Tab -->
+      <div id="general-tab" class="tab-content active">
+        <div class="settings-section">
+          <h2 class="section-title">Agency Information</h2>
+
+          <form id="generalForm" class="settings-form">
+            <div class="form-group">
+              <label for="agencyName">Agency Name</label>
+              <input type="text" id="agencyName" name="agencyName" class="form-control"
+                     value="Department of Budget and Management" required>
+            </div>
+
+            <div class="form-group">
+              <label for="agencyCode">Agency Code</label>
+              <input type="text" id="agencyCode" name="agencyCode" class="form-control"
+                     value="DBM" required>
+            </div>
+
+            <div class="form-group">
+              <label for="agencyAddress">Address</label>
+              <textarea id="agencyAddress" name="agencyAddress" class="form-control" rows="3" required
+              >General Solano St., San Miguel, Manila</textarea>
+            </div>
+
+            <div class="form-group">
+              <label for="contactEmail">Contact Email</label>
+              <input type="email" id="contactEmail" name="contactEmail" class="form-control"
+                     value="info@dbm.gov.ph" required>
+            </div>
+
+            <div class="form-group">
+              <label for="contactPhone">Contact Phone</label>
+              <input type="tel" id="contactPhone" name="contactPhone" class="form-control"
+                     value="(02) 8123-4567" required>
+            </div>
+
+            <h3 class="subsection-title">Fiscal Year Settings</h3>
+
+            <div class="form-group">
+              <label for="currentFiscalYear">Current Fiscal Year</label>
+              <input type="number" id="currentFiscalYear" name="currentFiscalYear" class="form-control"
+                     value="2026" required>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="fiscalYearStart">Fiscal Year Start</label>
+                <input type="date" id="fiscalYearStart" name="fiscalYearStart" class="form-control"
+                       value="2026-01-01" required>
+              </div>
+              <div class="form-group">
+                <label for="fiscalYearEnd">Fiscal Year End</label>
+                <input type="date" id="fiscalYearEnd" name="fiscalYearEnd" class="form-control"
+                       value="2026-12-31" required>
+              </div>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary">
+                <i class="pi pi-check"></i>
+                Save Changes
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Users Tab -->
+      <div id="users-tab" class="tab-content">
+        <div class="settings-section">
+          <div class="section-header">
+            <h2 class="section-title">User Management</h2>
+            <a href="/admin/users/create" class="btn btn-primary">
+              <i class="pi pi-plus"></i>
+              Add New User
+            </a>
+          </div>
+
+          <p class="text-muted">Manage user accounts, roles, and permissions.</p>
+
+          <div class="action-cards">
+            <a href="/admin/users" class="action-card">
+              <i class="pi pi-users"></i>
+              <h3>All Users</h3>
+              <p>View and manage all user accounts</p>
+            </a>
+
+            <a href="/admin/users?status=active" class="action-card">
+              <i class="pi pi-user-check"></i>
+              <h3>Active Users</h3>
+              <p>View currently active user accounts</p>
+            </a>
+
+            <a href="/admin/users?status=inactive" class="action-card">
+              <i class="pi pi-user-minus"></i>
+              <h3>Inactive Users</h3>
+              <p>View deactivated user accounts</p>
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <!-- COA Tab -->
+      <div id="coa-tab" class="tab-content">
+        <div class="settings-section">
+          <div class="section-header">
+            <h2 class="section-title">Chart of Accounts</h2>
+            <button class="btn btn-primary" id="addCoaBtn">
+              <i class="pi pi-plus"></i>
+              Add Object Code
+            </button>
+          </div>
+
+          <p class="text-muted">Configure the Chart of Accounts (COA) for financial tracking.</p>
+
+          <div class="coa-actions">
+            <button class="btn btn-secondary" id="importCoaBtn">
+              <i class="pi pi-upload"></i>
+              Import from Excel
+            </button>
+            <button class="btn btn-secondary" id="exportCoaBtn">
+              <i class="pi pi-download"></i>
+              Export COA
+            </button>
+          </div>
+
+          <div id="coaList" class="mt-4">
+            <p class="text-center text-muted">Loading Chart of Accounts...</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Fund Sources Tab -->
+      <div id="funds-tab" class="tab-content">
+        <div class="settings-section">
+          <div class="section-header">
+            <h2 class="section-title">Fund Sources</h2>
+            <button class="btn btn-primary" id="addFundBtn">
+              <i class="pi pi-plus"></i>
+              Add Fund Source
+            </button>
+          </div>
+
+          <p class="text-muted">Manage fund sources, appropriations, and allotments.</p>
+
+          <div class="fund-hierarchy">
+            <div class="hierarchy-level">
+              <h3>Fund Sources</h3>
+              <p>Top-level funding sources (e.g., General Fund, Special Fund)</p>
+            </div>
+            <div class="hierarchy-arrow">↓</div>
+            <div class="hierarchy-level">
+              <h3>Appropriations</h3>
+              <p>Budget authorizations from Congress (e.g., GAA 2026)</p>
+            </div>
+            <div class="hierarchy-arrow">↓</div>
+            <div class="hierarchy-level">
+              <h3>Allotments</h3>
+              <p>Budget releases to departments (e.g., Q1 2026)</p>
+            </div>
+          </div>
+
+          <div id="fundList" class="mt-4">
+            <p class="text-center text-muted">Loading fund sources...</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Security Tab -->
+      <div id="security-tab" class="tab-content">
+        <div class="settings-section">
+          <h2 class="section-title">Security Settings</h2>
+
+          <form id="securityForm" class="settings-form">
+            <h3 class="subsection-title">Password Policy</h3>
+
+            <div class="form-group">
+              <label for="minPasswordLength">Minimum Password Length</label>
+              <input type="number" id="minPasswordLength" name="minPasswordLength"
+                     class="form-control" value="8" min="6" max="20" required>
+            </div>
+
+            <div class="form-group">
+              <label class="checkbox-label">
+                <input type="checkbox" name="requireUppercase" checked>
+                Require uppercase letters
+              </label>
+            </div>
+
+            <div class="form-group">
+              <label class="checkbox-label">
+                <input type="checkbox" name="requireLowercase" checked>
+                Require lowercase letters
+              </label>
+            </div>
+
+            <div class="form-group">
+              <label class="checkbox-label">
+                <input type="checkbox" name="requireNumbers" checked>
+                Require numbers
+              </label>
+            </div>
+
+            <div class="form-group">
+              <label class="checkbox-label">
+                <input type="checkbox" name="requireSpecialChars" checked>
+                Require special characters
+              </label>
+            </div>
+
+            <div class="form-group">
+              <label for="passwordExpiry">Password Expiry (days)</label>
+              <input type="number" id="passwordExpiry" name="passwordExpiry"
+                     class="form-control" value="90" min="0" max="365">
+              <small class="form-text">Set to 0 for no expiry</small>
+            </div>
+
+            <h3 class="subsection-title">Session Settings</h3>
+
+            <div class="form-group">
+              <label for="sessionTimeout">Session Timeout (minutes)</label>
+              <input type="number" id="sessionTimeout" name="sessionTimeout"
+                     class="form-control" value="30" min="5" max="120" required>
+            </div>
+
+            <div class="form-group">
+              <label class="checkbox-label">
+                <input type="checkbox" name="allowConcurrentSessions">
+                Allow concurrent sessions
+              </label>
+            </div>
+
+            <h3 class="subsection-title">Login Security</h3>
+
+            <div class="form-group">
+              <label for="maxFailedAttempts">Max Failed Login Attempts</label>
+              <input type="number" id="maxFailedAttempts" name="maxFailedAttempts"
+                     class="form-control" value="5" min="3" max="10" required>
+            </div>
+
+            <div class="form-group">
+              <label for="lockoutDuration">Account Lockout Duration (minutes)</label>
+              <input type="number" id="lockoutDuration" name="lockoutDuration"
+                     class="form-control" value="15" min="5" max="60" required>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary">
+                <i class="pi pi-check"></i>
+                Save Security Settings
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <!-- Email Tab -->
+      <div id="email-tab" class="tab-content">
+        <div class="settings-section">
+          <h2 class="section-title">Email Configuration</h2>
+
+          <form id="emailForm" class="settings-form">
+            <h3 class="subsection-title">SMTP Settings</h3>
+
+            <div class="form-group">
+              <label for="smtpHost">SMTP Host</label>
+              <input type="text" id="smtpHost" name="smtpHost" class="form-control"
+                     placeholder="smtp.gmail.com" required>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="smtpPort">SMTP Port</label>
+                <input type="number" id="smtpPort" name="smtpPort" class="form-control"
+                       value="587" required>
+              </div>
+              <div class="form-group">
+                <label for="smtpEncryption">Encryption</label>
+                <select id="smtpEncryption" name="smtpEncryption" class="form-control">
+                  <option value="tls">TLS</option>
+                  <option value="ssl">SSL</option>
+                  <option value="none">None</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="smtpUsername">SMTP Username</label>
+              <input type="text" id="smtpUsername" name="smtpUsername" class="form-control"
+                     placeholder="your-email@domain.com" required>
+            </div>
+
+            <div class="form-group">
+              <label for="smtpPassword">SMTP Password</label>
+              <input type="password" id="smtpPassword" name="smtpPassword" class="form-control"
+                     placeholder="••••••••">
+              <small class="form-text">Leave blank to keep existing password</small>
+            </div>
+
+            <h3 class="subsection-title">Email Sender</h3>
+
+            <div class="form-group">
+              <label for="fromName">From Name</label>
+              <input type="text" id="fromName" name="fromName" class="form-control"
+                     value="Government Disbursement System" required>
+            </div>
+
+            <div class="form-group">
+              <label for="fromEmail">From Email</label>
+              <input type="email" id="fromEmail" name="fromEmail" class="form-control"
+                     placeholder="noreply@agency.gov.ph" required>
+            </div>
+
+            <div class="form-actions">
+              <button type="button" class="btn btn-secondary" id="testEmailBtn">
+                <i class="pi pi-send"></i>
+                Send Test Email
+              </button>
+              <button type="submit" class="btn btn-primary">
+                <i class="pi pi-check"></i>
+                Save Email Settings
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+</MainLayout>
+
+<script>
+  // Tab switching functionality
+  document.addEventListener('DOMContentLoaded', () => {
+    const tabButtons = document.querySelectorAll('.tab-button');
+    const tabContents = document.querySelectorAll('.tab-content');
+
+    tabButtons.forEach(button => {
+      button.addEventListener('click', () => {
+        const tabName = button.dataset.tab;
+
+        // Remove active class from all buttons and contents
+        tabButtons.forEach(btn => btn.classList.remove('active'));
+        tabContents.forEach(content => content.classList.remove('active'));
+
+        // Add active class to clicked button and corresponding content
+        button.classList.add('active');
+        document.getElementById(`${tabName}-tab`)?.classList.add('active');
+      });
+    });
+
+    // Form submission handlers
+    const generalForm = document.getElementById('generalForm');
+    generalForm?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const formData = new FormData(generalForm);
+
+      try {
+        const response = await fetch('/api/admin/settings/general', {
+          method: 'POST',
+          body: formData
+        });
+
+        if (response.ok) {
+          alert('Settings saved successfully!');
+        } else {
+          alert('Failed to save settings. Please try again.');
+        }
+      } catch (error) {
+        console.error('Error saving settings:', error);
+        alert('An error occurred. Please try again.');
+      }
+    });
+
+    // Security form handler
+    const securityForm = document.getElementById('securityForm');
+    securityForm?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      alert('Security settings saved! (Demo mode)');
+    });
+
+    // Email form handler
+    const emailForm = document.getElementById('emailForm');
+    emailForm?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      alert('Email settings saved! (Demo mode)');
+    });
+
+    // Test email button
+    const testEmailBtn = document.getElementById('testEmailBtn');
+    testEmailBtn?.addEventListener('click', async () => {
+      const email = prompt('Enter email address to send test email:');
+      if (email) {
+        alert(`Test email sent to ${email}! (Demo mode)`);
+      }
+    });
+  });
+</script>
+
+<style>
+  .page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+  }
+
+  .page-title {
+    font-size: 2rem;
+    font-weight: 600;
+    color: #1a202c;
+    margin: 0;
+  }
+
+  .page-description {
+    color: #718096;
+    margin: 0.5rem 0 0 0;
+  }
+
+  .settings-container {
+    display: grid;
+    grid-template-columns: 250px 1fr;
+    gap: 2rem;
+    min-height: 600px;
+  }
+
+  .settings-tabs {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    background: white;
+    border-radius: 8px;
+    padding: 1rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    height: fit-content;
+  }
+
+  .tab-button {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    color: #4a5568;
+    transition: all 0.2s;
+    text-align: left;
+  }
+
+  .tab-button:hover {
+    background: #f7fafc;
+    color: #2d3748;
+  }
+
+  .tab-button.active {
+    background: #3182ce;
+    color: white;
+  }
+
+  .tab-button i {
+    font-size: 1.1rem;
+  }
+
+  .settings-content {
+    background: white;
+    border-radius: 8px;
+    padding: 2rem;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+
+  .tab-content {
+    display: none;
+  }
+
+  .tab-content.active {
+    display: block;
+  }
+
+  .settings-section {
+    max-width: 800px;
+  }
+
+  .section-title {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: #1a202c;
+    margin: 0 0 1.5rem 0;
+  }
+
+  .section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+  }
+
+  .subsection-title {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: #2d3748;
+    margin: 2rem 0 1rem 0;
+    padding-top: 2rem;
+    border-top: 1px solid #e2e8f0;
+  }
+
+  .subsection-title:first-child {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+  }
+
+  .settings-form {
+    margin-top: 1.5rem;
+  }
+
+  .form-group {
+    margin-bottom: 1.5rem;
+  }
+
+  .form-group label {
+    display: block;
+    font-weight: 500;
+    color: #2d3748;
+    margin-bottom: 0.5rem;
+  }
+
+  .form-control {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid #cbd5e0;
+    border-radius: 6px;
+    font-size: 0.95rem;
+    transition: border-color 0.2s;
+  }
+
+  .form-control:focus {
+    outline: none;
+    border-color: #3182ce;
+    box-shadow: 0 0 0 3px rgba(49, 130, 206, 0.1);
+  }
+
+  .form-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+  }
+
+  .form-text {
+    display: block;
+    margin-top: 0.25rem;
+    font-size: 0.85rem;
+    color: #718096;
+  }
+
+  .checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    font-weight: 400;
+  }
+
+  .checkbox-label input[type="checkbox"] {
+    width: auto;
+    cursor: pointer;
+  }
+
+  .form-actions {
+    display: flex;
+    gap: 1rem;
+    margin-top: 2rem;
+    padding-top: 2rem;
+    border-top: 1px solid #e2e8f0;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1.5rem;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.95rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    text-decoration: none;
+  }
+
+  .btn-primary {
+    background: #3182ce;
+    color: white;
+  }
+
+  .btn-primary:hover {
+    background: #2c5aa0;
+  }
+
+  .btn-secondary {
+    background: #718096;
+    color: white;
+  }
+
+  .btn-secondary:hover {
+    background: #4a5568;
+  }
+
+  .action-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-top: 1.5rem;
+  }
+
+  .action-card {
+    padding: 1.5rem;
+    background: #f7fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    text-decoration: none;
+    color: inherit;
+    transition: all 0.2s;
+  }
+
+  .action-card:hover {
+    background: #edf2f7;
+    border-color: #cbd5e0;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+  }
+
+  .action-card i {
+    font-size: 2rem;
+    color: #3182ce;
+    margin-bottom: 0.75rem;
+  }
+
+  .action-card h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    margin: 0 0 0.5rem 0;
+  }
+
+  .action-card p {
+    font-size: 0.85rem;
+    color: #718096;
+    margin: 0;
+  }
+
+  .coa-actions, .fund-hierarchy {
+    margin: 1.5rem 0;
+  }
+
+  .coa-actions {
+    display: flex;
+    gap: 1rem;
+  }
+
+  .fund-hierarchy {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1.5rem;
+    background: #f7fafc;
+    border-radius: 8px;
+  }
+
+  .hierarchy-level {
+    flex: 1;
+    padding: 1rem;
+    background: white;
+    border: 2px solid #e2e8f0;
+    border-radius: 6px;
+  }
+
+  .hierarchy-level h3 {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin: 0 0 0.5rem 0;
+  }
+
+  .hierarchy-level p {
+    font-size: 0.85rem;
+    color: #718096;
+    margin: 0;
+  }
+
+  .hierarchy-arrow {
+    font-size: 1.5rem;
+    color: #cbd5e0;
+    font-weight: bold;
+  }
+
+  .text-muted {
+    color: #718096;
+  }
+
+  .text-center {
+    text-align: center;
+  }
+
+  .mt-4 {
+    margin-top: 2rem;
+  }
+
+  @media (max-width: 768px) {
+    .settings-container {
+      grid-template-columns: 1fr;
+    }
+
+    .settings-tabs {
+      flex-direction: row;
+      overflow-x: auto;
+    }
+
+    .form-row {
+      grid-template-columns: 1fr;
+    }
+
+    .fund-hierarchy {
+      flex-direction: column;
+    }
+
+    .hierarchy-arrow {
+      transform: rotate(90deg);
+    }
+  }
+</style>

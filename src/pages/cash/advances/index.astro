@@ -1,0 +1,873 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import { cashService } from '../../../lib/services/cash.service';
+import { db } from '../../../lib/db/connection';
+import { cashAdvances, fundClusters, users } from '../../../lib/db/schema';
+import { eq, and, desc, sql } from 'drizzle-orm';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+// Get query parameters
+const status = Astro.url.searchParams.get('status') || 'all';
+const fundClusterId = Astro.url.searchParams.get('fundClusterId');
+const view = Astro.url.searchParams.get('view') || 'list'; // list, outstanding, aging
+
+// Get all fund clusters for filter
+const allFundClusters = await db.select().from(fundClusters);
+
+// Build conditions
+const conditions = [];
+
+if (status !== 'all') {
+  conditions.push(eq(cashAdvances.status, status as any));
+}
+
+if (fundClusterId) {
+  conditions.push(eq(cashAdvances.fundClusterId, parseInt(fundClusterId)));
+}
+
+// Get cash advances with employee info
+let cashAdvancesList = await db
+  .select({
+    id: cashAdvances.id,
+    caNo: cashAdvances.caNo,
+    employeeId: cashAdvances.employeeId,
+    employeeName: sql<string>`CONCAT(${users.firstName}, ' ', ${users.lastName})`,
+    amount: cashAdvances.amount,
+    purpose: cashAdvances.purpose,
+    dateIssued: cashAdvances.dateIssued,
+    dueDateReturn: cashAdvances.dueDateReturn,
+    dateLiquidated: cashAdvances.dateLiquidated,
+    status: cashAdvances.status,
+    fundCluster: {
+      id: fundClusters.id,
+      code: fundClusters.code,
+      name: fundClusters.name,
+    },
+    createdAt: cashAdvances.createdAt,
+  })
+  .from(cashAdvances)
+  .leftJoin(fundClusters, eq(cashAdvances.fundClusterId, fundClusters.id))
+  .leftJoin(users, eq(cashAdvances.employeeId, users.id))
+  .where(conditions.length > 0 ? and(...conditions) : undefined)
+  .orderBy(desc(cashAdvances.dateIssued));
+
+// Filter for outstanding view
+if (view === 'outstanding') {
+  cashAdvancesList = cashAdvancesList.filter(ca =>
+    ca.status === 'released' || ca.status === 'approved'
+  );
+}
+
+// Calculate aging for each cash advance
+const cashAdvancesWithAging = cashAdvancesList.map(ca => {
+  const today = new Date();
+  const issuedDate = new Date(ca.dateIssued);
+  const daysOutstanding = Math.floor((today.getTime() - issuedDate.getTime()) / (1000 * 60 * 60 * 24));
+
+  let agingBucket = '0-30 days';
+  if (daysOutstanding > 90) {
+    agingBucket = '90+ days';
+  } else if (daysOutstanding > 60) {
+    agingBucket = '61-90 days';
+  } else if (daysOutstanding > 30) {
+    agingBucket = '31-60 days';
+  }
+
+  return {
+    ...ca,
+    daysOutstanding,
+    agingBucket,
+  };
+});
+
+// Calculate aging summary
+const agingSummary = {
+  '0-30 days': { count: 0, amount: 0 },
+  '31-60 days': { count: 0, amount: 0 },
+  '61-90 days': { count: 0, amount: 0 },
+  '90+ days': { count: 0, amount: 0 },
+};
+
+cashAdvancesWithAging
+  .filter(ca => ca.status === 'released' || ca.status === 'approved')
+  .forEach(ca => {
+    agingSummary[ca.agingBucket].count++;
+    agingSummary[ca.agingBucket].amount += Number(ca.amount);
+  });
+
+// Calculate totals
+const totalOutstanding = cashAdvancesWithAging
+  .filter(ca => ca.status === 'released' || ca.status === 'approved')
+  .reduce((sum, ca) => sum + Number(ca.amount), 0);
+
+const totalLiquidated = cashAdvancesWithAging
+  .filter(ca => ca.status === 'liquidated')
+  .reduce((sum, ca) => sum + Number(ca.amount), 0);
+
+const totalCount = cashAdvancesWithAging.length;
+const outstandingCount = cashAdvancesWithAging.filter(ca =>
+  ca.status === 'released' || ca.status === 'approved'
+).length;
+---
+
+<MainLayout title="Cash Advances" user={user}>
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Cash Advances</h1>
+      <p class="page-description">Monitor outstanding cash advances and liquidation tracking</p>
+    </div>
+    <div class="page-actions">
+      <a href="/cash/advances/create" class="btn btn-primary">
+        <i class="pi pi-plus"></i>
+        New Cash Advance
+      </a>
+    </div>
+  </div>
+
+  <!-- Summary Cards -->
+  <div class="summary-grid">
+    <div class="summary-card">
+      <div class="summary-icon bg-blue-100 text-blue-600">
+        <i class="pi pi-briefcase"></i>
+      </div>
+      <div class="summary-content">
+        <p class="summary-label">Total Cash Advances</p>
+        <p class="summary-value">{totalCount}</p>
+      </div>
+    </div>
+    <div class="summary-card">
+      <div class="summary-icon bg-orange-100 text-orange-600">
+        <i class="pi pi-clock"></i>
+      </div>
+      <div class="summary-content">
+        <p class="summary-label">Outstanding</p>
+        <p class="summary-value">{outstandingCount}</p>
+        <p class="summary-sub">₱{totalOutstanding.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+      </div>
+    </div>
+    <div class="summary-card">
+      <div class="summary-icon bg-green-100 text-green-600">
+        <i class="pi pi-check-circle"></i>
+      </div>
+      <div class="summary-content">
+        <p class="summary-label">Liquidated</p>
+        <p class="summary-value">{cashAdvancesWithAging.filter(ca => ca.status === 'liquidated').length}</p>
+        <p class="summary-sub">₱{totalLiquidated.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+      </div>
+    </div>
+    <div class="summary-card">
+      <div class="summary-icon bg-red-100 text-red-600">
+        <i class="pi pi-exclamation-triangle"></i>
+      </div>
+      <div class="summary-content">
+        <p class="summary-label">Overdue (90+ days)</p>
+        <p class="summary-value">{agingSummary['90+ days'].count}</p>
+        <p class="summary-sub">₱{agingSummary['90+ days'].amount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- View Tabs -->
+  <div class="view-tabs">
+    <a href={`/cash/advances?view=list&status=${status}${fundClusterId ? `&fundClusterId=${fundClusterId}` : ''}`}
+       class={`tab ${view === 'list' ? 'active' : ''}`}>
+      <i class="pi pi-list"></i>
+      All Cash Advances
+    </a>
+    <a href={`/cash/advances?view=outstanding&status=${status}${fundClusterId ? `&fundClusterId=${fundClusterId}` : ''}`}
+       class={`tab ${view === 'outstanding' ? 'active' : ''}`}>
+      <i class="pi pi-clock"></i>
+      Outstanding Report
+    </a>
+    <a href={`/cash/advances?view=aging&status=${status}${fundClusterId ? `&fundClusterId=${fundClusterId}` : ''}`}
+       class={`tab ${view === 'aging' ? 'active' : ''}`}>
+      <i class="pi pi-chart-bar"></i>
+      Aging Analysis
+    </a>
+  </div>
+
+  <!-- Filters -->
+  <div class="card filters-card">
+    <form method="GET" class="filters-form">
+      <input type="hidden" name="view" value={view} />
+
+      <div class="form-group">
+        <label class="form-label">Status</label>
+        <select name="status" class="form-control">
+          <option value="all" selected={status === 'all'}>All Status</option>
+          <option value="draft" selected={status === 'draft'}>Draft</option>
+          <option value="approved" selected={status === 'approved'}>Approved</option>
+          <option value="released" selected={status === 'released'}>Released</option>
+          <option value="liquidated" selected={status === 'liquidated'}>Liquidated</option>
+          <option value="returned" selected={status === 'returned'}>Returned</option>
+        </select>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Fund Cluster</label>
+        <select name="fundClusterId" class="form-control">
+          <option value="">All Fund Clusters</option>
+          {allFundClusters.map(fc => (
+            <option value={fc.id} selected={fundClusterId === fc.id.toString()}>
+              {fc.code} - {fc.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div class="form-actions">
+        <button type="submit" class="btn btn-primary">
+          <i class="pi pi-filter"></i>
+          Apply Filters
+        </button>
+        <a href={`/cash/advances?view=${view}`} class="btn btn-secondary">
+          <i class="pi pi-times"></i>
+          Clear
+        </a>
+      </div>
+    </form>
+  </div>
+
+  {view === 'list' && (
+    <!-- Cash Advances List -->
+    <div class="card">
+      <div class="table-container">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>CA No.</th>
+              <th>Employee</th>
+              <th>Amount</th>
+              <th>Purpose</th>
+              <th>Date Issued</th>
+              <th>Due Date</th>
+              <th>Days Out</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {cashAdvancesWithAging.length === 0 ? (
+              <tr>
+                <td colspan="9" class="no-data">No cash advances found</td>
+              </tr>
+            ) : (
+              cashAdvancesWithAging.map(ca => (
+                <tr>
+                  <td class="font-mono">{ca.caNo}</td>
+                  <td>{ca.employeeName}</td>
+                  <td class="text-right font-mono">₱{Number(ca.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                  <td class="max-w-xs truncate">{ca.purpose}</td>
+                  <td>{new Date(ca.dateIssued).toLocaleDateString('en-PH')}</td>
+                  <td>{ca.dueDateReturn ? new Date(ca.dueDateReturn).toLocaleDateString('en-PH') : '—'}</td>
+                  <td class="text-center">
+                    {ca.status === 'liquidated' ? '—' : (
+                      <span class={`badge ${ca.daysOutstanding > 90 ? 'badge-danger' : ca.daysOutstanding > 60 ? 'badge-warning' : 'badge-info'}`}>
+                        {ca.daysOutstanding} days
+                      </span>
+                    )}
+                  </td>
+                  <td>
+                    <span class={`status-badge status-${ca.status}`}>
+                      {ca.status}
+                    </span>
+                  </td>
+                  <td>
+                    <div class="action-buttons">
+                      <a href={`/cash/advances/${ca.id}`} class="btn-icon" title="View Details">
+                        <i class="pi pi-eye"></i>
+                      </a>
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )}
+
+  {view === 'outstanding' && (
+    <!-- Outstanding Cash Advances Report -->
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Outstanding Cash Advances Report</h3>
+        <button onclick="window.print()" class="btn btn-secondary">
+          <i class="pi pi-print"></i>
+          Print Report
+        </button>
+      </div>
+      <div class="table-container">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>CA No.</th>
+              <th>Employee</th>
+              <th>Fund Cluster</th>
+              <th>Amount</th>
+              <th>Date Issued</th>
+              <th>Due Date</th>
+              <th>Days Outstanding</th>
+              <th>Aging</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {cashAdvancesWithAging.filter(ca => ca.status === 'released' || ca.status === 'approved').length === 0 ? (
+              <tr>
+                <td colspan="9" class="no-data">No outstanding cash advances</td>
+              </tr>
+            ) : (
+              cashAdvancesWithAging
+                .filter(ca => ca.status === 'released' || ca.status === 'approved')
+                .map(ca => (
+                  <tr>
+                    <td class="font-mono">{ca.caNo}</td>
+                    <td>{ca.employeeName}</td>
+                    <td>{ca.fundCluster?.code}</td>
+                    <td class="text-right font-mono">₱{Number(ca.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                    <td>{new Date(ca.dateIssued).toLocaleDateString('en-PH')}</td>
+                    <td>{ca.dueDateReturn ? new Date(ca.dueDateReturn).toLocaleDateString('en-PH') : '—'}</td>
+                    <td class="text-center">{ca.daysOutstanding}</td>
+                    <td>
+                      <span class={`badge ${
+                        ca.agingBucket === '90+ days' ? 'badge-danger' :
+                        ca.agingBucket === '61-90 days' ? 'badge-warning' :
+                        ca.agingBucket === '31-60 days' ? 'badge-info' :
+                        'badge-success'
+                      }`}>
+                        {ca.agingBucket}
+                      </span>
+                    </td>
+                    <td>
+                      <span class={`status-badge status-${ca.status}`}>
+                        {ca.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+            )}
+          </tbody>
+          <tfoot>
+            <tr class="font-semibold">
+              <td colspan="3">Total Outstanding</td>
+              <td class="text-right font-mono">₱{totalOutstanding.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+              <td colspan="5"></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  )}
+
+  {view === 'aging' && (
+    <!-- Aging Analysis -->
+    <div class="aging-container">
+      <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">Aging of Cash Advances</h3>
+          <button onclick="window.print()" class="btn btn-secondary">
+            <i class="pi pi-print"></i>
+            Print Report
+          </button>
+        </div>
+        <div class="table-container">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Aging Bracket</th>
+                <th class="text-center">Count</th>
+                <th class="text-right">Total Amount</th>
+                <th class="text-right">Percentage</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(agingSummary).map(([bucket, data]) => (
+                <tr>
+                  <td>
+                    <span class={`badge ${
+                      bucket === '90+ days' ? 'badge-danger' :
+                      bucket === '61-90 days' ? 'badge-warning' :
+                      bucket === '31-60 days' ? 'badge-info' :
+                      'badge-success'
+                    }`}>
+                      {bucket}
+                    </span>
+                  </td>
+                  <td class="text-center font-mono">{data.count}</td>
+                  <td class="text-right font-mono">₱{data.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                  <td class="text-right font-mono">
+                    {totalOutstanding > 0 ? ((data.amount / totalOutstanding) * 100).toFixed(1) : '0.0'}%
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr class="font-semibold">
+                <td>Total</td>
+                <td class="text-center font-mono">{outstandingCount}</td>
+                <td class="text-right font-mono">₱{totalOutstanding.toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                <td class="text-right font-mono">100.0%</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+
+      <!-- Detailed Listing by Aging Bracket -->
+      {Object.entries(agingSummary).map(([bucket, data]) => (
+        data.count > 0 && (
+          <div class="card mt-4">
+            <div class="card-header">
+              <h4 class="text-lg font-semibold">{bucket} Details</h4>
+            </div>
+            <div class="table-container">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>CA No.</th>
+                    <th>Employee</th>
+                    <th>Amount</th>
+                    <th>Date Issued</th>
+                    <th>Days Outstanding</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cashAdvancesWithAging
+                    .filter(ca => ca.agingBucket === bucket && (ca.status === 'released' || ca.status === 'approved'))
+                    .map(ca => (
+                      <tr>
+                        <td class="font-mono">{ca.caNo}</td>
+                        <td>{ca.employeeName}</td>
+                        <td class="text-right font-mono">₱{Number(ca.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}</td>
+                        <td>{new Date(ca.dateIssued).toLocaleDateString('en-PH')}</td>
+                        <td class="text-center">{ca.daysOutstanding} days</td>
+                      </tr>
+                    ))
+                  }
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )
+      ))}
+    </div>
+  )}
+</MainLayout>
+
+<style>
+  .page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 2rem;
+  }
+
+  .page-title {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #1f2937;
+    margin-bottom: 0.5rem;
+  }
+
+  .page-description {
+    color: #6b7280;
+  }
+
+  .page-actions {
+    display: flex;
+    gap: 1rem;
+  }
+
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+  }
+
+  .summary-card {
+    background: white;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+    padding: 1.5rem;
+    display: flex;
+    gap: 1rem;
+  }
+
+  .summary-icon {
+    width: 3rem;
+    height: 3rem;
+    border-radius: 0.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+  }
+
+  .summary-content {
+    flex: 1;
+  }
+
+  .summary-label {
+    font-size: 0.875rem;
+    color: #6b7280;
+    margin-bottom: 0.25rem;
+  }
+
+  .summary-value {
+    font-size: 1.875rem;
+    font-weight: 700;
+    color: #1f2937;
+  }
+
+  .summary-sub {
+    font-size: 0.875rem;
+    color: #6b7280;
+    margin-top: 0.25rem;
+  }
+
+  .view-tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+    border-bottom: 2px solid #e5e7eb;
+  }
+
+  .tab {
+    padding: 0.75rem 1.5rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #6b7280;
+    border-bottom: 2px solid transparent;
+    margin-bottom: -2px;
+    transition: all 0.15s;
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .tab:hover {
+    color: #3b82f6;
+  }
+
+  .tab.active {
+    color: #3b82f6;
+    border-bottom-color: #3b82f6;
+  }
+
+  .card {
+    background: white;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+    margin-bottom: 1.5rem;
+  }
+
+  .card-header {
+    padding: 1.5rem;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .card-title {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: #1f2937;
+  }
+
+  .filters-card {
+    padding: 1.5rem;
+  }
+
+  .filters-form {
+    display: flex;
+    gap: 1rem;
+    align-items: flex-end;
+  }
+
+  .form-group {
+    flex: 1;
+  }
+
+  .form-label {
+    display: block;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #374151;
+    margin-bottom: 0.5rem;
+  }
+
+  .form-control {
+    width: 100%;
+    padding: 0.625rem 0.875rem;
+    border: 1px solid #d1d5db;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+
+  .form-control:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  }
+
+  .form-actions {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.625rem 1.25rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    border-radius: 0.375rem;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-decoration: none;
+  }
+
+  .btn-primary {
+    background-color: #3b82f6;
+    color: white;
+  }
+
+  .btn-primary:hover {
+    background-color: #2563eb;
+  }
+
+  .btn-secondary {
+    background-color: white;
+    color: #374151;
+    border-color: #d1d5db;
+  }
+
+  .btn-secondary:hover {
+    background-color: #f9fafb;
+  }
+
+  .table-container {
+    overflow-x: auto;
+  }
+
+  .data-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .data-table thead {
+    background-color: #f9fafb;
+  }
+
+  .data-table th {
+    padding: 0.75rem 1rem;
+    text-align: left;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #6b7280;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  .data-table td {
+    padding: 1rem;
+    border-top: 1px solid #e5e7eb;
+    font-size: 0.875rem;
+    color: #1f2937;
+  }
+
+  .data-table tbody tr:hover {
+    background-color: #f9fafb;
+  }
+
+  .data-table tfoot td {
+    padding: 1rem;
+    border-top: 2px solid #d1d5db;
+    font-weight: 600;
+  }
+
+  .no-data {
+    text-align: center;
+    padding: 3rem 1rem;
+    color: #6b7280;
+  }
+
+  .badge {
+    display: inline-block;
+    padding: 0.25rem 0.625rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    border-radius: 0.25rem;
+  }
+
+  .badge-success {
+    background-color: #d1fae5;
+    color: #065f46;
+  }
+
+  .badge-info {
+    background-color: #dbeafe;
+    color: #1e40af;
+  }
+
+  .badge-warning {
+    background-color: #fef3c7;
+    color: #92400e;
+  }
+
+  .badge-danger {
+    background-color: #fee2e2;
+    color: #991b1b;
+  }
+
+  .status-badge {
+    display: inline-block;
+    padding: 0.25rem 0.625rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    border-radius: 0.25rem;
+    text-transform: capitalize;
+  }
+
+  .status-draft {
+    background-color: #e5e7eb;
+    color: #374151;
+  }
+
+  .status-approved {
+    background-color: #dbeafe;
+    color: #1e40af;
+  }
+
+  .status-released {
+    background-color: #fef3c7;
+    color: #92400e;
+  }
+
+  .status-liquidated {
+    background-color: #d1fae5;
+    color: #065f46;
+  }
+
+  .status-returned {
+    background-color: #e0e7ff;
+    color: #3730a3;
+  }
+
+  .action-buttons {
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .btn-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 0.375rem;
+    color: #6b7280;
+    transition: all 0.15s;
+  }
+
+  .btn-icon:hover {
+    background-color: #f3f4f6;
+    color: #3b82f6;
+  }
+
+  .text-right {
+    text-align: right;
+  }
+
+  .text-center {
+    text-align: center;
+  }
+
+  .font-mono {
+    font-family: 'Courier New', monospace;
+  }
+
+  .font-semibold {
+    font-weight: 600;
+  }
+
+  .max-w-xs {
+    max-width: 20rem;
+  }
+
+  .truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .mt-4 {
+    margin-top: 1rem;
+  }
+
+  .aging-container {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+  }
+
+  .bg-blue-100 {
+    background-color: #dbeafe;
+  }
+
+  .text-blue-600 {
+    color: #2563eb;
+  }
+
+  .bg-orange-100 {
+    background-color: #ffedd5;
+  }
+
+  .text-orange-600 {
+    color: #ea580c;
+  }
+
+  .bg-green-100 {
+    background-color: #d1fae5;
+  }
+
+  .text-green-600 {
+    color: #059669;
+  }
+
+  .bg-red-100 {
+    background-color: #fee2e2;
+  }
+
+  .text-red-600 {
+    color: #dc2626;
+  }
+
+  @media print {
+    .page-header,
+    .view-tabs,
+    .filters-card,
+    .btn,
+    .action-buttons {
+      display: none;
+    }
+
+    .card {
+      box-shadow: none;
+      page-break-inside: avoid;
+    }
+  }
+</style>

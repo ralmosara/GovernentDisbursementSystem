@@ -1,0 +1,133 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import { payrollService } from '../../../lib/services/payroll.service';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const year = parseInt(Astro.url.searchParams.get('year') || new Date().getFullYear().toString());
+const records = await payrollService.get13thMonthPayRecords(year);
+
+const totalEmployees = records.length;
+const totalAmount = records.reduce((sum, r) => sum + parseFloat(r.thirteenthMonthAmount || '0'), 0);
+const totalTax = records.reduce((sum, r) => sum + parseFloat(r.withholdingTax || '0'), 0);
+const totalNet = records.reduce((sum, r) => sum + parseFloat(r.netAmount || '0'), 0);
+
+function formatCurrency(amount: number | string | null): string {
+  if (!amount) return '₱0.00';
+  const num = typeof amount === 'string' ? parseFloat(amount) : amount;
+  return '₱' + num.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function formatDate(date: Date | string | null): string {
+  if (!date) return '-';
+  const d = typeof date === 'string' ? new Date(date) : date;
+  return d.toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+const currentYear = new Date().getFullYear();
+const years = [];
+for (let i = currentYear - 5; i <= currentYear; i++) {
+  years.push(i);
+}
+---
+
+<MainLayout title="13th Month Pay">
+  <div class="container-fluid py-6">
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
+      <div>
+        <h1 class="text-3xl font-bold text-gray-900">13th Month Pay</h1>
+        <p class="mt-1 text-sm text-gray-600">Year-end bonus for employees</p>
+      </div>
+      <div class="mt-4 md:mt-0">
+        {records.length === 0 && (
+          <a href="/payroll/thirteenth-month/generate" class="btn btn-primary">
+            <i class="pi pi-plus mr-2"></i>
+            Generate 13th Month Pay
+          </a>
+        )}
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+      <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+        <p class="text-sm font-medium text-gray-600">Total Employees</p>
+        <p class="text-2xl font-bold text-gray-900 mt-1">{totalEmployees}</p>
+      </div>
+      <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+        <p class="text-sm font-medium text-gray-600">Total 13th Month</p>
+        <p class="text-xl font-bold text-gray-900 mt-1">{formatCurrency(totalAmount)}</p>
+      </div>
+      <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+        <p class="text-sm font-medium text-gray-600">Total Tax</p>
+        <p class="text-xl font-bold text-red-600 mt-1">{formatCurrency(totalTax)}</p>
+      </div>
+      <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+        <p class="text-sm font-medium text-gray-600">Total Net Amount</p>
+        <p class="text-xl font-bold text-green-600 mt-1">{formatCurrency(totalNet)}</p>
+      </div>
+    </div>
+
+    <div class="bg-gray-50 rounded-lg p-4 mb-6">
+      <form method="get" class="flex gap-4">
+        <div class="flex-1">
+          <label for="year" class="block text-sm font-medium text-gray-700 mb-1">Year</label>
+          <select name="year" id="year" class="w-full px-3 py-2 border border-gray-300 rounded-md">
+            {years.map(y => <option value={y} selected={year === y}>{y}</option>)}
+          </select>
+        </div>
+        <div class="flex items-end">
+          <button type="submit" class="btn btn-primary"><i class="pi pi-filter mr-2"></i>Filter</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+      <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Employee No</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Employee Name</th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Total Basic Salary</th>
+            <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase">Months Worked</th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">13th Month Amount</th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">W/Tax</th>
+            <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Net Amount</th>
+            <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+          </tr>
+        </thead>
+        <tbody class="bg-white divide-y divide-gray-200">
+          {records.length === 0 ? (
+            <tr>
+              <td colspan="8" class="px-6 py-12 text-center">
+                <i class="pi pi-inbox text-gray-300 text-5xl mb-4"></i>
+                <p class="text-gray-500 text-lg mb-2">No 13th month pay records for {year}</p>
+                <a href="/payroll/thirteenth-month/generate" class="btn btn-primary mt-4">
+                  <i class="pi pi-plus mr-2"></i>
+                  Generate 13th Month Pay
+                </a>
+              </td>
+            </tr>
+          ) : (
+            records.map((record: any) => (
+              <tr class="hover:bg-gray-50">
+                <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">EMP-{record.employeeId}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">Employee #{record.employeeId}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-900">{formatCurrency(record.totalBasicSalary)}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-center text-sm text-gray-900">{record.monthsWorked}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium text-gray-900">{formatCurrency(record.thirteenthMonthAmount)}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-right text-sm text-red-600">{formatCurrency(record.withholdingTax)}</td>
+                <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-bold text-green-600">{formatCurrency(record.netAmount)}</td>
+                <td class="px-6 py-4 whitespace-nowrap">
+                  <span class={`badge ${record.paymentStatus === 'Paid' ? 'badge-success' : 'badge-warning'}`}>
+                    {record.paymentStatus}
+                  </span>
+                </td>
+              </tr>
+            ))
+          )}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</MainLayout>

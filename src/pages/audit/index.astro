@@ -1,0 +1,59 @@
+---
+import MainLayout from '../../layouts/MainLayout.astro';
+import AuditLogViewer from '../../components/audit/AuditLogViewer.vue';
+import { db } from '../../lib/db/connection';
+import { userRoles, roles } from '../../lib/db/schema';
+import { eq } from 'drizzle-orm';
+
+const user = Astro.locals.user;
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+// Get user's roles
+const userRoleRecords = await db
+  .select({
+    role: roles,
+  })
+  .from(userRoles)
+  .leftJoin(roles, eq(userRoles.roleId, roles.id))
+  .where(eq(userRoles.userId, user.id));
+
+const userRoleNames = userRoleRecords.map(r => r.role?.name || '');
+
+// Only Admin and Accounting can view audit logs
+const canViewAuditLogs = userRoleNames.some(role =>
+  role === 'administrator' || role === 'accountant' || role === 'budget_officer'
+);
+
+if (!canViewAuditLogs) {
+  return Astro.redirect('/dashboard');
+}
+---
+
+<MainLayout title="Audit Logs" user={user}>
+  <div class="page-header">
+    <h1>Audit Logs</h1>
+    <p>Complete system activity trail and change history</p>
+  </div>
+
+  <AuditLogViewer client:load />
+</MainLayout>
+
+<style>
+  .page-header {
+    margin-bottom: 2rem;
+  }
+
+  .page-header h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #1f2937;
+    margin-bottom: 0.5rem;
+  }
+
+  .page-header p {
+    color: #6b7280;
+    font-size: 1rem;
+  }
+</style>

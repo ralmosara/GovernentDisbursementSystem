@@ -1,0 +1,365 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import { payrollService } from '../../../lib/services/payroll.service';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+// Get filters from URL params
+const filters: any = {};
+const yearParam = Astro.url.searchParams.get('year');
+const monthParam = Astro.url.searchParams.get('month');
+const statusParam = Astro.url.searchParams.get('status');
+
+if (yearParam) filters.year = parseInt(yearParam);
+if (monthParam) filters.month = parseInt(monthParam);
+if (statusParam) filters.status = statusParam;
+
+// Default to current year if no filter
+if (!filters.year) {
+  filters.year = new Date().getFullYear();
+}
+
+// Fetch payroll periods
+const periods = await payrollService.getPayrollPeriods(filters);
+
+// Calculate summary statistics
+const totalPeriods = periods.length;
+const draftPeriods = periods.filter(p => p.status === 'Draft').length;
+const completedPeriods = periods.filter(p => p.status === 'Completed' || p.status === 'Posted').length;
+
+// Get current month period if exists
+const currentMonth = new Date().getMonth() + 1;
+const currentYear = new Date().getFullYear();
+const currentPeriod = periods.find(
+  p => p.month === currentMonth && p.year === currentYear
+);
+
+// Format currency
+function formatCurrency(amount: number | string | null): string {
+  if (!amount) return '₱0.00';
+  const num = typeof amount === 'string' ? parseFloat(amount) : amount;
+  return '₱' + num.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+// Format date
+function formatDate(date: Date | string | null): string {
+  if (!date) return '-';
+  const d = typeof date === 'string' ? new Date(date) : date;
+  return d.toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
+}
+
+// Get status badge class
+function getStatusBadge(status: string): string {
+  const badges: Record<string, string> = {
+    'Draft': 'badge-primary',
+    'Processing': 'badge-warning',
+    'Completed': 'badge-success',
+    'Posted': 'badge-info',
+    'Cancelled': 'badge-danger',
+  };
+  return badges[status] || 'badge-secondary';
+}
+
+const months = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'
+];
+
+const years = [];
+for (let i = currentYear - 5; i <= currentYear + 1; i++) {
+  years.push(i);
+}
+---
+
+<MainLayout title="Payroll Periods">
+  <div class="container-fluid py-6">
+    <!-- Page Header -->
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
+      <div>
+        <h1 class="text-3xl font-bold text-gray-900">Payroll Periods</h1>
+        <p class="mt-1 text-sm text-gray-600">
+          Manage monthly payroll periods and processing
+        </p>
+      </div>
+      <div class="mt-4 md:mt-0">
+        <a href="/payroll/periods/create" class="btn btn-primary">
+          <i class="pi pi-plus mr-2"></i>
+          Create Period
+        </a>
+      </div>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+      <!-- Total Periods -->
+      <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-sm font-medium text-gray-600">Total Periods</p>
+            <p class="text-2xl font-bold text-gray-900 mt-1">{totalPeriods}</p>
+          </div>
+          <div class="p-3 bg-blue-100 rounded-full">
+            <i class="pi pi-calendar text-blue-600 text-xl"></i>
+          </div>
+        </div>
+      </div>
+
+      <!-- Current Period -->
+      <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-sm font-medium text-gray-600">Current Period</p>
+            <p class="text-lg font-bold text-gray-900 mt-1">
+              {currentPeriod ? currentPeriod.periodNo : 'Not Created'}
+            </p>
+          </div>
+          <div class="p-3 bg-green-100 rounded-full">
+            <i class="pi pi-check-circle text-green-600 text-xl"></i>
+          </div>
+        </div>
+      </div>
+
+      <!-- Pending Processing -->
+      <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-sm font-medium text-gray-600">Pending Processing</p>
+            <p class="text-2xl font-bold text-gray-900 mt-1">{draftPeriods}</p>
+          </div>
+          <div class="p-3 bg-yellow-100 rounded-full">
+            <i class="pi pi-clock text-yellow-600 text-xl"></i>
+          </div>
+        </div>
+      </div>
+
+      <!-- Completed -->
+      <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <p class="text-sm font-medium text-gray-600">Completed</p>
+            <p class="text-2xl font-bold text-gray-900 mt-1">{completedPeriods}</p>
+          </div>
+          <div class="p-3 bg-purple-100 rounded-full">
+            <i class="pi pi-verified text-purple-600 text-xl"></i>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="bg-gray-50 rounded-lg p-4 mb-6">
+      <form method="get" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <!-- Year Filter -->
+        <div>
+          <label for="year" class="block text-sm font-medium text-gray-700 mb-1">
+            Year
+          </label>
+          <select
+            name="year"
+            id="year"
+            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            {years.map(y => (
+              <option value={y} selected={filters.year === y}>{y}</option>
+            ))}
+          </select>
+        </div>
+
+        <!-- Month Filter -->
+        <div>
+          <label for="month" class="block text-sm font-medium text-gray-700 mb-1">
+            Month
+          </label>
+          <select
+            name="month"
+            id="month"
+            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            <option value="">All Months</option>
+            {months.map((month, index) => (
+              <option value={index + 1} selected={filters.month === index + 1}>
+                {month}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <!-- Status Filter -->
+        <div>
+          <label for="status" class="block text-sm font-medium text-gray-700 mb-1">
+            Status
+          </label>
+          <select
+            name="status"
+            id="status"
+            class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+          >
+            <option value="">All Statuses</option>
+            <option value="Draft" selected={filters.status === 'Draft'}>Draft</option>
+            <option value="Processing" selected={filters.status === 'Processing'}>Processing</option>
+            <option value="Completed" selected={filters.status === 'Completed'}>Completed</option>
+            <option value="Posted" selected={filters.status === 'Posted'}>Posted</option>
+            <option value="Cancelled" selected={filters.status === 'Cancelled'}>Cancelled</option>
+          </select>
+        </div>
+
+        <!-- Submit Button -->
+        <div class="flex items-end">
+          <button type="submit" class="w-full btn btn-primary">
+            <i class="pi pi-filter mr-2"></i>
+            Apply Filters
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Periods Table -->
+    <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-gray-200">
+          <thead class="bg-gray-50">
+            <tr>
+              <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Period No
+              </th>
+              <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Period Name
+              </th>
+              <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Type
+              </th>
+              <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Pay Date
+              </th>
+              <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Employees
+              </th>
+              <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Total Net Pay
+              </th>
+              <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Status
+              </th>
+              <th scope="col" class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Actions
+              </th>
+            </tr>
+          </thead>
+          <tbody class="bg-white divide-y divide-gray-200">
+            {periods.length === 0 ? (
+              <tr>
+                <td colspan="8" class="px-6 py-12 text-center">
+                  <div class="flex flex-col items-center justify-center">
+                    <i class="pi pi-calendar text-gray-300 text-5xl mb-4"></i>
+                    <p class="text-gray-500 text-lg mb-2">No payroll periods found</p>
+                    <p class="text-gray-400 text-sm mb-4">
+                      Create a new payroll period to get started
+                    </p>
+                    <a href="/payroll/periods/create" class="btn btn-primary">
+                      <i class="pi pi-plus mr-2"></i>
+                      Create Period
+                    </a>
+                  </div>
+                </td>
+              </tr>
+            ) : (
+              periods.map(period => (
+                <tr class="hover:bg-gray-50 transition-colors">
+                  <td class="px-6 py-4 whitespace-nowrap">
+                    <div class="text-sm font-medium text-primary-600">
+                      {period.periodNo}
+                    </div>
+                  </td>
+                  <td class="px-6 py-4">
+                    <div class="text-sm text-gray-900">{period.periodName || '-'}</div>
+                  </td>
+                  <td class="px-6 py-4 whitespace-nowrap">
+                    <div class="text-sm text-gray-900">{period.periodType}</div>
+                  </td>
+                  <td class="px-6 py-4 whitespace-nowrap">
+                    <div class="text-sm text-gray-900">{formatDate(period.payDate)}</div>
+                  </td>
+                  <td class="px-6 py-4 whitespace-nowrap text-right">
+                    <div class="text-sm text-gray-900">{period.totalEmployees || 0}</div>
+                  </td>
+                  <td class="px-6 py-4 whitespace-nowrap text-right">
+                    <div class="text-sm font-medium text-gray-900">
+                      {formatCurrency(period.totalNetPay)}
+                    </div>
+                  </td>
+                  <td class="px-6 py-4 whitespace-nowrap">
+                    <span class={`badge ${getStatusBadge(period.status)}`}>
+                      {period.status}
+                    </span>
+                  </td>
+                  <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                    <div class="flex items-center justify-end gap-2">
+                      <a
+                        href={`/payroll/periods/${period.id}`}
+                        class="text-primary-600 hover:text-primary-900"
+                        title="View Details"
+                      >
+                        <i class="pi pi-eye"></i>
+                      </a>
+                      {period.status === 'Draft' && (
+                        <>
+                          <a
+                            href={`/payroll/periods/${period.id}`}
+                            class="text-green-600 hover:text-green-900"
+                            title="Process Payroll"
+                          >
+                            <i class="pi pi-play"></i>
+                          </a>
+                          <button
+                            type="button"
+                            class="text-red-600 hover:text-red-900"
+                            title="Delete Period"
+                            onclick={`if(confirm('Are you sure you want to delete this period?')) { deletePeriod(${period.id}); }`}
+                          >
+                            <i class="pi pi-trash"></i>
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Result Count -->
+    {periods.length > 0 && (
+      <div class="mt-4 text-sm text-gray-600">
+        Showing {periods.length} period{periods.length !== 1 ? 's' : ''}
+      </div>
+    )}
+  </div>
+</MainLayout>
+
+<script>
+  async function deletePeriod(id: number) {
+    try {
+      const response = await fetch(`/api/payroll/periods/${id}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to delete period');
+      }
+
+      alert('Period deleted successfully');
+      window.location.reload();
+    } catch (error: any) {
+      console.error('Error deleting period:', error);
+      alert(error.message || 'Failed to delete period. Please try again.');
+    }
+  }
+</script>

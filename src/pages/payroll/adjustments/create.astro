@@ -1,0 +1,58 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import { payrollService } from '../../../lib/services/payroll.service';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const employees = await payrollService.getEmployees({ isActive: true });
+---
+
+<MainLayout title="Create Payroll Adjustment">
+  <div class="container mx-auto px-4 py-6">
+    <nav class="flex mb-4">
+      <ol class="inline-flex items-center space-x-1 md:space-x-3">
+        <li><a href="/payroll/adjustments" class="text-gray-700 hover:text-primary-600">Adjustments</a></li>
+        <li><i class="pi pi-chevron-right text-gray-400 text-sm"></i><span class="ml-1 text-gray-500">Create</span></li>
+      </ol>
+    </nav>
+
+    <div class="mb-6">
+      <h1 class="text-3xl font-bold text-gray-900">Create Payroll Adjustment</h1>
+      <p class="mt-1 text-sm text-gray-600">Create a one-time adjustment to employee payroll</p>
+    </div>
+
+    <div class="bg-white rounded-lg shadow border border-gray-200 p-6">
+      <div id="adjustment-form"></div>
+    </div>
+  </div>
+</MainLayout>
+
+<script define:vars={{ employees }}>
+  import { createApp } from 'vue';
+  import AdjustmentForm from '../../../components/forms/payroll/AdjustmentForm.vue';
+
+  createApp(AdjustmentForm, {
+    employees,
+    onSubmit: async (formData) => {
+      try {
+        const response = await fetch('/api/payroll/adjustments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(formData),
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.error || 'Failed to create adjustment');
+        }
+
+        alert('Payroll adjustment created successfully!');
+        window.location.href = '/payroll/adjustments';
+      } catch (error) {
+        alert(error.message || 'Failed to create adjustment');
+      }
+    },
+    onCancel: () => { window.location.href = '/payroll/adjustments'; },
+  }).mount('#adjustment-form');
+</script>

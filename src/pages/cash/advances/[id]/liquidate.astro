@@ -1,0 +1,626 @@
+---
+import MainLayout from '../../../../layouts/MainLayout.astro';
+import { db } from '../../../../lib/db/connection';
+import { cashAdvances, fundClusters, users } from '../../../../lib/db/schema';
+import { eq, sql } from 'drizzle-orm';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+const id = parseInt(Astro.params.id || '0');
+
+// Get cash advance details
+const cashAdvanceData = await db
+  .select({
+    id: cashAdvances.id,
+    caNo: cashAdvances.caNo,
+    employeeId: cashAdvances.employeeId,
+    employeeName: sql<string>`CONCAT(${users.firstName}, ' ', ${users.lastName})`,
+    amount: cashAdvances.amount,
+    purpose: cashAdvances.purpose,
+    dateIssued: cashAdvances.dateIssued,
+    dueDateReturn: cashAdvances.dueDateReturn,
+    status: cashAdvances.status,
+    fundCluster: {
+      id: fundClusters.id,
+      code: fundClusters.code,
+      name: fundClusters.name,
+    },
+  })
+  .from(cashAdvances)
+  .leftJoin(fundClusters, eq(cashAdvances.fundClusterId, fundClusters.id))
+  .leftJoin(users, eq(cashAdvances.employeeId, users.id))
+  .where(eq(cashAdvances.id, id))
+  .limit(1);
+
+if (!cashAdvanceData || cashAdvanceData.length === 0) {
+  return Astro.redirect('/cash/advances');
+}
+
+const cashAdvance = cashAdvanceData[0];
+
+// Check if already liquidated
+if (cashAdvance.status === 'liquidated') {
+  return Astro.redirect(`/cash/advances/${id}`);
+}
+
+// Check if status is released
+if (cashAdvance.status !== 'released') {
+  return Astro.redirect(`/cash/advances/${id}`);
+}
+---
+
+<MainLayout title={`Liquidate Cash Advance - ${cashAdvance.caNo}`} user={user}>
+  <div class="page-header">
+    <div>
+      <div class="breadcrumb">
+        <a href="/cash/advances">Cash Advances</a>
+        <i class="pi pi-angle-right"></i>
+        <a href={`/cash/advances/${id}`}>{cashAdvance.caNo}</a>
+        <i class="pi pi-angle-right"></i>
+        <span>Liquidate</span>
+      </div>
+      <h1 class="page-title">Process Cash Advance Liquidation</h1>
+      <p class="page-description">Record the liquidation of cash advance {cashAdvance.caNo}</p>
+    </div>
+  </div>
+
+  <div class="form-container">
+    <!-- Cash Advance Summary -->
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Cash Advance Summary</h3>
+      </div>
+      <div class="card-body">
+        <div class="summary-row">
+          <span class="summary-label">CA Number:</span>
+          <span class="summary-value font-mono">{cashAdvance.caNo}</span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-label">Employee:</span>
+          <span class="summary-value">{cashAdvance.employeeName}</span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-label">Fund Cluster:</span>
+          <span class="summary-value">
+            {cashAdvance.fundCluster?.code} - {cashAdvance.fundCluster?.name}
+          </span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-label">Amount Received:</span>
+          <span class="summary-value amount">
+            ₱{Number(cashAdvance.amount).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </span>
+        </div>
+        <div class="summary-row">
+          <span class="summary-label">Date Issued:</span>
+          <span class="summary-value">
+            {new Date(cashAdvance.dateIssued).toLocaleDateString('en-PH', {
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric'
+            })}
+          </span>
+        </div>
+        {cashAdvance.dueDateReturn && (
+          <div class="summary-row">
+            <span class="summary-label">Due Date:</span>
+            <span class="summary-value">
+              {new Date(cashAdvance.dueDateReturn).toLocaleDateString('en-PH', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+              })}
+            </span>
+          </div>
+        )}
+        <div class="summary-row">
+          <span class="summary-label">Purpose:</span>
+          <span class="summary-value">{cashAdvance.purpose}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Liquidation Form -->
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Liquidation Details</h3>
+      </div>
+      <div class="card-body">
+        <form id="liquidationForm">
+          <div class="form-group">
+            <label class="form-label required">Liquidation Date</label>
+            <input
+              type="date"
+              name="dateLiquidated"
+              class="form-control"
+              required
+              max={new Date().toISOString().split('T')[0]}
+            />
+          </div>
+
+          <div class="form-group">
+            <label class="form-label required">Liquidation Type</label>
+            <select name="liquidationType" id="liquidationType" class="form-control" required>
+              <option value="">Select Type</option>
+              <option value="full">Full Liquidation (Exact Amount)</option>
+              <option value="excess">Liquidation with Excess (Return to Employee)</option>
+              <option value="shortage">Liquidation with Shortage (Employee Owes)</option>
+            </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label required">Total Expenses Incurred</label>
+            <div class="input-group">
+              <span class="input-prefix">₱</span>
+              <input
+                type="number"
+                name="totalExpenses"
+                id="totalExpenses"
+                class="form-control"
+                step="0.01"
+                min="0"
+                placeholder="0.00"
+                required
+              />
+            </div>
+            <p class="form-help">Total amount of expenses covered by this cash advance</p>
+          </div>
+
+          <div id="balanceSection" class="balance-display" style="display: none;">
+            <div class="balance-item">
+              <span class="balance-label">Amount Received:</span>
+              <span class="balance-value" id="amountReceived">
+                ₱{Number(cashAdvance.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+              </span>
+            </div>
+            <div class="balance-item">
+              <span class="balance-label">Total Expenses:</span>
+              <span class="balance-value" id="totalExpensesDisplay">₱0.00</span>
+            </div>
+            <div class="balance-item balance-result">
+              <span class="balance-label" id="balanceLabel">Balance:</span>
+              <span class="balance-value" id="balanceAmount">₱0.00</span>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label required">Supporting Documents</label>
+            <textarea
+              name="supportingDocs"
+              class="form-control"
+              rows="4"
+              placeholder="List all supporting documents (receipts, invoices, etc.)&#10;Example:&#10;- Official Receipt No. 12345 - ₱1,500.00&#10;- Invoice No. ABC-001 - ₱2,300.00"
+              required
+            ></textarea>
+            <p class="form-help">Itemize all supporting documents and their amounts</p>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Remarks</label>
+            <textarea
+              name="remarks"
+              class="form-control"
+              rows="3"
+              placeholder="Additional notes or remarks about this liquidation..."
+            ></textarea>
+          </div>
+
+          <div class="form-actions">
+            <button type="submit" class="btn btn-success">
+              <i class="pi pi-check"></i>
+              Process Liquidation
+            </button>
+            <a href={`/cash/advances/${id}`} class="btn btn-secondary">
+              <i class="pi pi-times"></i>
+              Cancel
+            </a>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Instructions -->
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Liquidation Instructions</h3>
+      </div>
+      <div class="card-body">
+        <div class="instruction-list">
+          <div class="instruction-item">
+            <i class="pi pi-info-circle"></i>
+            <div>
+              <strong>Full Liquidation:</strong> Employee spent exactly the amount received
+            </div>
+          </div>
+          <div class="instruction-item">
+            <i class="pi pi-info-circle"></i>
+            <div>
+              <strong>With Excess:</strong> Expenses less than received; employee returns excess
+            </div>
+          </div>
+          <div class="instruction-item">
+            <i class="pi pi-info-circle"></i>
+            <div>
+              <strong>With Shortage:</strong> Expenses more than received; employee paid from own funds
+            </div>
+          </div>
+          <div class="instruction-item">
+            <i class="pi pi-exclamation-triangle"></i>
+            <div>
+              <strong>Note:</strong> All supporting documents must be attached and verified before processing
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</MainLayout>
+
+<script define:vars={{ caAmount: Number(cashAdvance.amount), caId: id }}>
+  const form = document.getElementById('liquidationForm');
+  const liquidationType = document.getElementById('liquidationType');
+  const totalExpenses = document.getElementById('totalExpenses');
+  const balanceSection = document.getElementById('balanceSection');
+  const totalExpensesDisplay = document.getElementById('totalExpensesDisplay');
+  const balanceAmount = document.getElementById('balanceAmount');
+  const balanceLabel = document.getElementById('balanceLabel');
+
+  function updateBalance() {
+    const expenses = parseFloat(totalExpenses.value) || 0;
+
+    if (expenses > 0) {
+      balanceSection.style.display = 'block';
+      totalExpensesDisplay.textContent = `₱${expenses.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
+
+      const balance = caAmount - expenses;
+      balanceAmount.textContent = `₱${Math.abs(balance).toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
+
+      if (balance > 0) {
+        balanceLabel.textContent = 'Excess (To be Returned):';
+        balanceAmount.style.color = '#10b981';
+        liquidationType.value = 'excess';
+      } else if (balance < 0) {
+        balanceLabel.textContent = 'Shortage (Employee Paid):';
+        balanceAmount.style.color = '#ef4444';
+        liquidationType.value = 'shortage';
+      } else {
+        balanceLabel.textContent = 'Balance:';
+        balanceAmount.style.color = '#3b82f6';
+        liquidationType.value = 'full';
+      }
+    } else {
+      balanceSection.style.display = 'none';
+    }
+  }
+
+  totalExpenses.addEventListener('input', updateBalance);
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+
+    const formData = new FormData(form);
+    const expenses = parseFloat(formData.get('totalExpenses'));
+    const balance = caAmount - expenses;
+
+    const data = {
+      dateLiquidated: formData.get('dateLiquidated'),
+      liquidationType: formData.get('liquidationType'),
+      totalExpenses: expenses,
+      excessAmount: balance > 0 ? balance : 0,
+      shortageAmount: balance < 0 ? Math.abs(balance) : 0,
+      supportingDocs: formData.get('supportingDocs'),
+      remarks: formData.get('remarks') || null,
+    };
+
+    if (!data.liquidationType) {
+      alert('Please select a liquidation type');
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/cash/advances/${caId}/liquidate`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.error || 'Failed to process liquidation');
+      }
+
+      alert('Liquidation processed successfully!');
+      window.location.href = `/cash/advances/${caId}`;
+    } catch (error) {
+      alert(error.message || 'An error occurred while processing liquidation');
+    }
+  });
+</script>
+
+<style>
+  .page-header {
+    margin-bottom: 2rem;
+  }
+
+  .breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+    color: #6b7280;
+    margin-bottom: 0.5rem;
+  }
+
+  .breadcrumb a {
+    color: #3b82f6;
+    text-decoration: none;
+  }
+
+  .breadcrumb a:hover {
+    text-decoration: underline;
+  }
+
+  .page-title {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #1f2937;
+    margin-bottom: 0.5rem;
+  }
+
+  .page-description {
+    color: #6b7280;
+  }
+
+  .form-container {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+  }
+
+  .form-container > .card:first-child {
+    grid-column: 1 / 2;
+  }
+
+  .form-container > .card:nth-child(2) {
+    grid-column: 2 / 3;
+    grid-row: 1 / 3;
+  }
+
+  .card {
+    background: white;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+  }
+
+  .card-header {
+    padding: 1.5rem;
+    border-bottom: 1px solid #e5e7eb;
+  }
+
+  .card-title {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: #1f2937;
+    margin: 0;
+  }
+
+  .card-body {
+    padding: 1.5rem;
+  }
+
+  .summary-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid #f3f4f6;
+  }
+
+  .summary-row:last-child {
+    border-bottom: none;
+  }
+
+  .summary-label {
+    font-size: 0.875rem;
+    color: #6b7280;
+    font-weight: 500;
+  }
+
+  .summary-value {
+    font-size: 0.875rem;
+    color: #1f2937;
+    text-align: right;
+  }
+
+  .summary-value.amount {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #3b82f6;
+  }
+
+  .form-group {
+    margin-bottom: 1.5rem;
+  }
+
+  .form-label {
+    display: block;
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #374151;
+    margin-bottom: 0.5rem;
+  }
+
+  .form-label.required::after {
+    content: '*';
+    color: #ef4444;
+    margin-left: 0.25rem;
+  }
+
+  .form-control {
+    width: 100%;
+    padding: 0.625rem 0.875rem;
+    border: 1px solid #d1d5db;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+
+  .form-control:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  }
+
+  .input-group {
+    position: relative;
+    display: flex;
+  }
+
+  .input-prefix {
+    position: absolute;
+    left: 0.875rem;
+    top: 50%;
+    transform: translateY(-50%);
+    color: #6b7280;
+    font-size: 0.875rem;
+    pointer-events: none;
+  }
+
+  .input-group .form-control {
+    padding-left: 2rem;
+  }
+
+  .form-help {
+    font-size: 0.75rem;
+    color: #6b7280;
+    margin-top: 0.25rem;
+  }
+
+  .balance-display {
+    background-color: #f9fafb;
+    border: 2px solid #e5e7eb;
+    border-radius: 0.5rem;
+    padding: 1rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .balance-item {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.5rem 0;
+  }
+
+  .balance-result {
+    border-top: 2px solid #d1d5db;
+    margin-top: 0.5rem;
+    padding-top: 0.75rem;
+  }
+
+  .balance-label {
+    font-size: 0.875rem;
+    color: #6b7280;
+    font-weight: 500;
+  }
+
+  .balance-result .balance-label {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #1f2937;
+  }
+
+  .balance-value {
+    font-size: 0.875rem;
+    color: #1f2937;
+    font-weight: 600;
+    font-family: 'Courier New', monospace;
+  }
+
+  .balance-result .balance-value {
+    font-size: 1.25rem;
+  }
+
+  .form-actions {
+    display: flex;
+    gap: 1rem;
+    margin-top: 2rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid #e5e7eb;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.625rem 1.25rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    border-radius: 0.375rem;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-decoration: none;
+  }
+
+  .btn-success {
+    background-color: #10b981;
+    color: white;
+  }
+
+  .btn-success:hover {
+    background-color: #059669;
+  }
+
+  .btn-secondary {
+    background-color: white;
+    color: #374151;
+    border-color: #d1d5db;
+  }
+
+  .btn-secondary:hover {
+    background-color: #f9fafb;
+  }
+
+  .instruction-list {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .instruction-item {
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-start;
+  }
+
+  .instruction-item i {
+    color: #3b82f6;
+    margin-top: 0.125rem;
+  }
+
+  .instruction-item strong {
+    display: block;
+    margin-bottom: 0.125rem;
+  }
+
+  .font-mono {
+    font-family: 'Courier New', monospace;
+  }
+
+  @media (max-width: 1024px) {
+    .form-container {
+      grid-template-columns: 1fr;
+    }
+
+    .form-container > .card:first-child,
+    .form-container > .card:nth-child(2) {
+      grid-column: 1 / 2;
+      grid-row: auto;
+    }
+  }
+</style>

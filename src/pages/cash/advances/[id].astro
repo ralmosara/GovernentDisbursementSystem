@@ -1,0 +1,699 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import { db } from '../../../lib/db/connection';
+import { cashAdvances, fundClusters, users, disbursementVouchers } from '../../../lib/db/schema';
+import { eq } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+const id = parseInt(Astro.params.id || '0');
+
+// Get cash advance details
+const cashAdvanceData = await db
+  .select({
+    id: cashAdvances.id,
+    caNo: cashAdvances.caNo,
+    employeeId: cashAdvances.employeeId,
+    employeeName: sql<string>`CONCAT(${users.firstName}, ' ', ${users.lastName})`,
+    employeePosition: users.position,
+    amount: cashAdvances.amount,
+    purpose: cashAdvances.purpose,
+    dateIssued: cashAdvances.dateIssued,
+    dueDateReturn: cashAdvances.dueDateReturn,
+    dateLiquidated: cashAdvances.dateLiquidated,
+    status: cashAdvances.status,
+    dvId: cashAdvances.dvId,
+    liquidationDvId: cashAdvances.liquidationDvId,
+    remarks: cashAdvances.remarks,
+    fundCluster: {
+      id: fundClusters.id,
+      code: fundClusters.code,
+      name: fundClusters.name,
+    },
+    createdBy: sql<string>`CONCAT(creator.firstName, ' ', creator.lastName)`,
+    createdAt: cashAdvances.createdAt,
+    updatedAt: cashAdvances.updatedAt,
+  })
+  .from(cashAdvances)
+  .leftJoin(fundClusters, eq(cashAdvances.fundClusterId, fundClusters.id))
+  .leftJoin(users, eq(cashAdvances.employeeId, users.id))
+  .leftJoin(sql`users AS creator`, sql`${cashAdvances.createdBy} = creator.id`)
+  .where(eq(cashAdvances.id, id))
+  .limit(1);
+
+if (!cashAdvanceData || cashAdvanceData.length === 0) {
+  return Astro.redirect('/cash/advances');
+}
+
+const cashAdvance = cashAdvanceData[0];
+
+// Get related DV if exists
+let relatedDV = null;
+if (cashAdvance.dvId) {
+  const dvData = await db
+    .select({
+      id: disbursementVouchers.id,
+      dvNo: disbursementVouchers.dvNo,
+      dvDate: disbursementVouchers.dvDate,
+      amount: disbursementVouchers.amount,
+      status: disbursementVouchers.status,
+    })
+    .from(disbursementVouchers)
+    .where(eq(disbursementVouchers.id, cashAdvance.dvId))
+    .limit(1);
+
+  if (dvData.length > 0) {
+    relatedDV = dvData[0];
+  }
+}
+
+// Get liquidation DV if exists
+let liquidationDV = null;
+if (cashAdvance.liquidationDvId) {
+  const liquidationDvData = await db
+    .select({
+      id: disbursementVouchers.id,
+      dvNo: disbursementVouchers.dvNo,
+      dvDate: disbursementVouchers.dvDate,
+      amount: disbursementVouchers.amount,
+      status: disbursementVouchers.status,
+    })
+    .from(disbursementVouchers)
+    .where(eq(disbursementVouchers.id, cashAdvance.liquidationDvId))
+    .limit(1);
+
+  if (liquidationDvData.length > 0) {
+    liquidationDV = liquidationDvData[0];
+  }
+}
+
+// Calculate days outstanding
+const today = new Date();
+const issuedDate = new Date(cashAdvance.dateIssued);
+const daysOutstanding = Math.floor((today.getTime() - issuedDate.getTime()) / (1000 * 60 * 60 * 24));
+
+// Calculate days overdue if there's a due date
+let daysOverdue = 0;
+if (cashAdvance.dueDateReturn && cashAdvance.status !== 'liquidated') {
+  const dueDate = new Date(cashAdvance.dueDateReturn);
+  daysOverdue = Math.floor((today.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
+}
+---
+
+<MainLayout title={`Cash Advance - ${cashAdvance.caNo}`} user={user}>
+  <div class="page-header">
+    <div>
+      <div class="breadcrumb">
+        <a href="/cash/advances">Cash Advances</a>
+        <i class="pi pi-angle-right"></i>
+        <span>{cashAdvance.caNo}</span>
+      </div>
+      <h1 class="page-title">Cash Advance Details</h1>
+    </div>
+    <div class="page-actions">
+      {cashAdvance.status === 'draft' && (
+        <button class="btn btn-primary" onclick={`updateStatus(${id}, 'approved')`}>
+          <i class="pi pi-check"></i>
+          Approve
+        </button>
+      )}
+      {cashAdvance.status === 'approved' && (
+        <button class="btn btn-primary" onclick={`updateStatus(${id}, 'released')`}>
+          <i class="pi pi-send"></i>
+          Release
+        </button>
+      )}
+      {cashAdvance.status === 'released' && (
+        <a href={`/cash/advances/${id}/liquidate`} class="btn btn-success">
+          <i class="pi pi-file-edit"></i>
+          Process Liquidation
+        </a>
+      )}
+      <a href="/cash/advances" class="btn btn-secondary">
+        <i class="pi pi-arrow-left"></i>
+        Back to List
+      </a>
+    </div>
+  </div>
+
+  <!-- Status Alert -->
+  {daysOverdue > 0 && cashAdvance.status !== 'liquidated' && (
+    <div class="alert alert-danger">
+      <i class="pi pi-exclamation-triangle"></i>
+      <div>
+        <strong>Overdue Cash Advance</strong>
+        <p>This cash advance is {daysOverdue} day{daysOverdue !== 1 ? 's' : ''} overdue. Please follow up with the employee for liquidation.</p>
+      </div>
+    </div>
+  )}
+
+  <div class="details-grid">
+    <!-- Cash Advance Information -->
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Cash Advance Information</h3>
+        <span class={`status-badge status-${cashAdvance.status}`}>
+          {cashAdvance.status}
+        </span>
+      </div>
+      <div class="card-body">
+        <div class="detail-row">
+          <span class="detail-label">CA Number:</span>
+          <span class="detail-value font-mono">{cashAdvance.caNo}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Employee:</span>
+          <span class="detail-value">{cashAdvance.employeeName}</span>
+        </div>
+        {cashAdvance.employeePosition && (
+          <div class="detail-row">
+            <span class="detail-label">Position:</span>
+            <span class="detail-value">{cashAdvance.employeePosition}</span>
+          </div>
+        )}
+        <div class="detail-row">
+          <span class="detail-label">Fund Cluster:</span>
+          <span class="detail-value">
+            {cashAdvance.fundCluster?.code} - {cashAdvance.fundCluster?.name}
+          </span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Amount:</span>
+          <span class="detail-value amount">
+            ₱{Number(cashAdvance.amount).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+          </span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Purpose:</span>
+          <span class="detail-value">{cashAdvance.purpose}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Timeline & Tracking -->
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Timeline & Tracking</h3>
+      </div>
+      <div class="card-body">
+        <div class="detail-row">
+          <span class="detail-label">Date Issued:</span>
+          <span class="detail-value">
+            {new Date(cashAdvance.dateIssued).toLocaleDateString('en-PH', {
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric'
+            })}
+          </span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Due Date for Return:</span>
+          <span class="detail-value">
+            {cashAdvance.dueDateReturn
+              ? new Date(cashAdvance.dueDateReturn).toLocaleDateString('en-PH', {
+                  year: 'numeric',
+                  month: 'long',
+                  day: 'numeric'
+                })
+              : 'Not specified'}
+          </span>
+        </div>
+        {cashAdvance.status !== 'liquidated' && (
+          <div class="detail-row">
+            <span class="detail-label">Days Outstanding:</span>
+            <span class="detail-value">
+              <span class={`badge ${
+                daysOutstanding > 90 ? 'badge-danger' :
+                daysOutstanding > 60 ? 'badge-warning' :
+                daysOutstanding > 30 ? 'badge-info' :
+                'badge-success'
+              }`}>
+                {daysOutstanding} days
+              </span>
+            </span>
+          </div>
+        )}
+        {cashAdvance.dateLiquidated && (
+          <div class="detail-row">
+            <span class="detail-label">Date Liquidated:</span>
+            <span class="detail-value">
+              {new Date(cashAdvance.dateLiquidated).toLocaleDateString('en-PH', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+              })}
+            </span>
+          </div>
+        )}
+        <div class="detail-row">
+          <span class="detail-label">Created By:</span>
+          <span class="detail-value">{cashAdvance.createdBy}</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">Created At:</span>
+          <span class="detail-value">
+            {new Date(cashAdvance.createdAt).toLocaleDateString('en-PH', {
+              year: 'numeric',
+              month: 'long',
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit'
+            })}
+          </span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Related Documents -->
+  <div class="card">
+    <div class="card-header">
+      <h3 class="card-title">Related Disbursement Vouchers</h3>
+    </div>
+    <div class="card-body">
+      {relatedDV ? (
+        <div class="document-item">
+          <div class="document-icon">
+            <i class="pi pi-file-edit"></i>
+          </div>
+          <div class="document-info">
+            <h4 class="document-title">Disbursement Voucher (Cash Advance Release)</h4>
+            <p class="document-meta">
+              DV No: <span class="font-mono">{relatedDV.dvNo}</span> •
+              Date: {new Date(relatedDV.dvDate).toLocaleDateString('en-PH')} •
+              Amount: ₱{Number(relatedDV.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })} •
+              <span class={`status-badge status-${relatedDV.status}`}>
+                {relatedDV.status}
+              </span>
+            </p>
+          </div>
+          <a href={`/disbursements/${relatedDV.id}`} class="btn btn-sm btn-secondary">
+            <i class="pi pi-eye"></i>
+            View DV
+          </a>
+        </div>
+      ) : (
+        <p class="no-data">No disbursement voucher has been created for this cash advance yet.</p>
+      )}
+
+      {liquidationDV ? (
+        <div class="document-item">
+          <div class="document-icon bg-green-100 text-green-600">
+            <i class="pi pi-check-circle"></i>
+          </div>
+          <div class="document-info">
+            <h4 class="document-title">Liquidation Report</h4>
+            <p class="document-meta">
+              DV No: <span class="font-mono">{liquidationDV.dvNo}</span> •
+              Date: {new Date(liquidationDV.dvDate).toLocaleDateString('en-PH')} •
+              Amount: ₱{Number(liquidationDV.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })} •
+              <span class={`status-badge status-${liquidationDV.status}`}>
+                {liquidationDV.status}
+              </span>
+            </p>
+          </div>
+          <a href={`/disbursements/${liquidationDV.id}`} class="btn btn-sm btn-secondary">
+            <i class="pi pi-eye"></i>
+            View Liquidation
+          </a>
+        </div>
+      ) : cashAdvance.status === 'released' ? (
+        <div class="alert alert-warning">
+          <i class="pi pi-exclamation-circle"></i>
+          <div>
+            <strong>Pending Liquidation</strong>
+            <p>This cash advance has been released but not yet liquidated.</p>
+          </div>
+        </div>
+      ) : null}
+    </div>
+  </div>
+
+  {cashAdvance.remarks && (
+    <div class="card">
+      <div class="card-header">
+        <h3 class="card-title">Remarks</h3>
+      </div>
+      <div class="card-body">
+        <p>{cashAdvance.remarks}</p>
+      </div>
+    </div>
+  )}
+</MainLayout>
+
+<script>
+  async function updateStatus(id: number, newStatus: string) {
+    if (!confirm(`Are you sure you want to ${newStatus === 'approved' ? 'approve' : 'release'} this cash advance?`)) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/cash/advances/${id}/status`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ status: newStatus }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to update status');
+      }
+
+      alert(`Cash advance ${newStatus === 'approved' ? 'approved' : 'released'} successfully!`);
+      window.location.reload();
+    } catch (error: any) {
+      alert(error.message || 'An error occurred while updating the status');
+    }
+  }
+
+  // Make function available globally
+  (window as any).updateStatus = updateStatus;
+</script>
+
+<style>
+  .page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 2rem;
+  }
+
+  .breadcrumb {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.875rem;
+    color: #6b7280;
+    margin-bottom: 0.5rem;
+  }
+
+  .breadcrumb a {
+    color: #3b82f6;
+    text-decoration: none;
+  }
+
+  .breadcrumb a:hover {
+    text-decoration: underline;
+  }
+
+  .page-title {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #1f2937;
+  }
+
+  .page-actions {
+    display: flex;
+    gap: 0.75rem;
+  }
+
+  .alert {
+    padding: 1rem 1.5rem;
+    border-radius: 0.5rem;
+    margin-bottom: 1.5rem;
+    display: flex;
+    gap: 1rem;
+    align-items: flex-start;
+  }
+
+  .alert i {
+    font-size: 1.25rem;
+    margin-top: 0.125rem;
+  }
+
+  .alert-danger {
+    background-color: #fee2e2;
+    color: #991b1b;
+    border: 1px solid #fecaca;
+  }
+
+  .alert-warning {
+    background-color: #fef3c7;
+    color: #92400e;
+    border: 1px solid #fde68a;
+  }
+
+  .alert strong {
+    display: block;
+    margin-bottom: 0.25rem;
+  }
+
+  .alert p {
+    margin: 0;
+  }
+
+  .details-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .card {
+    background: white;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+  }
+
+  .card-header {
+    padding: 1.5rem;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+
+  .card-title {
+    font-size: 1.125rem;
+    font-weight: 600;
+    color: #1f2937;
+    margin: 0;
+  }
+
+  .card-body {
+    padding: 1.5rem;
+  }
+
+  .detail-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 0.75rem 0;
+    border-bottom: 1px solid #f3f4f6;
+  }
+
+  .detail-row:last-child {
+    border-bottom: none;
+  }
+
+  .detail-label {
+    font-size: 0.875rem;
+    color: #6b7280;
+    font-weight: 500;
+  }
+
+  .detail-value {
+    font-size: 0.875rem;
+    color: #1f2937;
+    text-align: right;
+  }
+
+  .detail-value.amount {
+    font-size: 1.125rem;
+    font-weight: 700;
+    color: #3b82f6;
+  }
+
+  .document-item {
+    display: flex;
+    gap: 1rem;
+    padding: 1rem;
+    border-radius: 0.5rem;
+    background-color: #f9fafb;
+    margin-bottom: 1rem;
+  }
+
+  .document-item:last-child {
+    margin-bottom: 0;
+  }
+
+  .document-icon {
+    width: 3rem;
+    height: 3rem;
+    border-radius: 0.5rem;
+    background-color: #dbeafe;
+    color: #2563eb;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5rem;
+    flex-shrink: 0;
+  }
+
+  .document-info {
+    flex: 1;
+  }
+
+  .document-title {
+    font-size: 0.9375rem;
+    font-weight: 600;
+    color: #1f2937;
+    margin: 0 0 0.25rem 0;
+  }
+
+  .document-meta {
+    font-size: 0.8125rem;
+    color: #6b7280;
+    margin: 0;
+  }
+
+  .no-data {
+    text-align: center;
+    padding: 2rem 1rem;
+    color: #6b7280;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.625rem 1.25rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    border-radius: 0.375rem;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-decoration: none;
+  }
+
+  .btn-primary {
+    background-color: #3b82f6;
+    color: white;
+  }
+
+  .btn-primary:hover {
+    background-color: #2563eb;
+  }
+
+  .btn-success {
+    background-color: #10b981;
+    color: white;
+  }
+
+  .btn-success:hover {
+    background-color: #059669;
+  }
+
+  .btn-secondary {
+    background-color: white;
+    color: #374151;
+    border-color: #d1d5db;
+  }
+
+  .btn-secondary:hover {
+    background-color: #f9fafb;
+  }
+
+  .btn-sm {
+    padding: 0.5rem 1rem;
+    font-size: 0.8125rem;
+  }
+
+  .badge {
+    display: inline-block;
+    padding: 0.25rem 0.625rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    border-radius: 0.25rem;
+  }
+
+  .badge-success {
+    background-color: #d1fae5;
+    color: #065f46;
+  }
+
+  .badge-info {
+    background-color: #dbeafe;
+    color: #1e40af;
+  }
+
+  .badge-warning {
+    background-color: #fef3c7;
+    color: #92400e;
+  }
+
+  .badge-danger {
+    background-color: #fee2e2;
+    color: #991b1b;
+  }
+
+  .status-badge {
+    display: inline-block;
+    padding: 0.25rem 0.625rem;
+    font-size: 0.75rem;
+    font-weight: 500;
+    border-radius: 0.25rem;
+    text-transform: capitalize;
+  }
+
+  .status-draft {
+    background-color: #e5e7eb;
+    color: #374151;
+  }
+
+  .status-approved {
+    background-color: #dbeafe;
+    color: #1e40af;
+  }
+
+  .status-released {
+    background-color: #fef3c7;
+    color: #92400e;
+  }
+
+  .status-liquidated {
+    background-color: #d1fae5;
+    color: #065f46;
+  }
+
+  .status-returned {
+    background-color: #e0e7ff;
+    color: #3730a3;
+  }
+
+  .font-mono {
+    font-family: 'Courier New', monospace;
+  }
+
+  .bg-green-100 {
+    background-color: #d1fae5;
+  }
+
+  .text-green-600 {
+    color: #059669;
+  }
+
+  @media (max-width: 768px) {
+    .details-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .page-header {
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .page-actions {
+      width: 100%;
+      flex-direction: column;
+    }
+  }
+</style>

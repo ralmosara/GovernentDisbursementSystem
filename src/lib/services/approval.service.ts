@@ -1,6 +1,7 @@
 import { db } from '../db/connection';
-import { approvalWorkflows, disbursementVouchers, userRoles, roles, users, auditLogs } from '../db/schema';
-import { eq, and, desc } from 'drizzle-orm';
+import { approvalWorkflows, disbursementVouchers, userRoles, roles, users } from '../db/schema';
+import { eq, and } from 'drizzle-orm';
+import { logApprove, logReject } from '../middleware/audit-logger';
 
 /**
  * Approval workflow stages in order
@@ -147,18 +148,17 @@ export class ApprovalService {
       .where(eq(approvalWorkflows.id, currentStage.id!));
 
     // Log approval action for audit
-    await db.insert(auditLogs).values({
+    await logApprove(
+      'disbursement_vouchers',
+      dvId,
       userId,
-      action: 'approve_dv_stage',
-      tableName: 'disbursement_vouchers',
-      recordId: dvId,
-      newValues: {
+      {
         stage: currentStage.stage,
         status: 'approved',
         comments,
         workflowId: currentStage.id,
-      },
-    });
+      }
+    );
 
     // Get next stage
     const nextStageData = await db
@@ -253,18 +253,12 @@ export class ApprovalService {
       .where(eq(approvalWorkflows.id, currentStage.id!));
 
     // Log rejection action for audit
-    await db.insert(auditLogs).values({
+    await logReject(
+      'disbursement_vouchers',
+      dvId,
       userId,
-      action: 'reject_dv_stage',
-      tableName: 'disbursement_vouchers',
-      recordId: dvId,
-      newValues: {
-        stage: currentStage.stage,
-        status: 'rejected',
-        comments,
-        workflowId: currentStage.id,
-      },
-    });
+      `${currentStage.stage}: ${comments}`
+    );
 
     // Update DV status to rejected
     await db

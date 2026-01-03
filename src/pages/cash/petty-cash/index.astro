@@ -1,0 +1,352 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import { cashService } from '../../../lib/services/cash.service';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+// Get filter parameters from URL
+const url = new URL(Astro.request.url);
+const fundClusterId = url.searchParams.get('fundClusterId');
+const status = url.searchParams.get('status');
+
+// Fetch petty cash funds
+let pettyCashFunds = await cashService.getPettyCashFunds(
+  fundClusterId ? parseInt(fundClusterId) : undefined
+);
+
+// Filter by status if provided
+if (status) {
+  pettyCashFunds = pettyCashFunds.filter(fund =>
+    status === 'active' ? fund.isActive : !fund.isActive
+  );
+}
+---
+
+<MainLayout title="Petty Cash Management" user={user}>
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Petty Cash Management</h1>
+      <p class="page-description">Manage petty cash funds, replenishments, and liquidations</p>
+    </div>
+    <div class="page-actions">
+      <a href="/cash/petty-cash/create" class="btn btn-primary">
+        <i class="pi pi-plus"></i>
+        Create Petty Cash Fund
+      </a>
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <div class="card mb-6">
+    <form method="get" class="filters-form">
+      <div class="form-grid">
+        <div class="form-group">
+          <label for="status">Status</label>
+          <select id="status" name="status" class="form-control">
+            <option value="">All Status</option>
+            <option value="active" selected={status === 'active'}>Active</option>
+            <option value="closed" selected={status === 'closed'}>Closed</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label>&nbsp;</label>
+          <div class="flex gap-2">
+            <button type="submit" class="btn btn-primary">
+              <i class="pi pi-filter"></i>
+              Apply Filters
+            </button>
+            <a href="/cash/petty-cash" class="btn btn-secondary">
+              <i class="pi pi-times"></i>
+              Clear
+            </a>
+          </div>
+        </div>
+      </div>
+    </form>
+  </div>
+
+  <!-- Petty Cash Funds List -->
+  <div class="card">
+    {pettyCashFunds.length === 0 ? (
+      <div class="empty-state">
+        <i class="pi pi-wallet text-6xl text-gray-300 mb-4"></i>
+        <h3 class="text-lg font-semibold text-gray-600 mb-2">No Petty Cash Funds</h3>
+        <p class="text-gray-500 mb-4">Create a new petty cash fund to get started</p>
+        <a href="/cash/petty-cash/create" class="btn btn-primary">
+          <i class="pi pi-plus"></i>
+          Create Petty Cash Fund
+        </a>
+      </div>
+    ) : (
+      <div class="table-responsive">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Fund No</th>
+              <th>Custodian</th>
+              <th>Fund Cluster</th>
+              <th>Amount</th>
+              <th>Current Balance</th>
+              <th>Status</th>
+              <th>Created</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {pettyCashFunds.map((fund) => (
+              <tr>
+                <td>
+                  <a href={`/cash/petty-cash/${fund.id}`} class="text-primary-600 hover:text-primary-800 font-medium">
+                    {fund.fundCode}
+                  </a>
+                </td>
+                <td>{fund.custodian}</td>
+                <td>{fund.fundCluster?.code || '-'}</td>
+                <td class="text-right font-mono">
+                  ₱{parseFloat(fund.fundAmount).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </td>
+                <td class="text-right font-mono">
+                  ₱{parseFloat(fund.currentBalance).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </td>
+                <td>
+                  <span class={`badge ${fund.isActive ? 'badge-success' : 'badge-secondary'}`}>
+                    {fund.isActive ? 'Active' : 'Inactive'}
+                  </span>
+                </td>
+                <td>{new Date(fund.createdAt).toLocaleDateString('en-PH')}</td>
+                <td>
+                  <div class="flex gap-2">
+                    <a href={`/cash/petty-cash/${fund.id}`} class="btn-icon" title="View Details">
+                      <i class="pi pi-eye"></i>
+                    </a>
+                    {fund.isActive && (
+                      <a href={`/cash/petty-cash/${fund.id}/replenish`} class="btn-icon" title="Replenish">
+                        <i class="pi pi-plus-circle"></i>
+                      </a>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    )}
+  </div>
+</MainLayout>
+
+<style>
+  .page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 2rem;
+  }
+
+  .page-title {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #1f2937;
+    margin-bottom: 0.5rem;
+  }
+
+  .page-description {
+    color: #6b7280;
+  }
+
+  .page-actions {
+    display: flex;
+    gap: 0.75rem;
+  }
+
+  .card {
+    background: white;
+    border-radius: 0.5rem;
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
+    padding: 1.5rem;
+  }
+
+  .mb-6 {
+    margin-bottom: 1.5rem;
+  }
+
+  .filters-form {
+    width: 100%;
+  }
+
+  .form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+  }
+
+  .form-group {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .form-group label {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: #374151;
+    margin-bottom: 0.5rem;
+  }
+
+  .form-control {
+    padding: 0.5rem 0.75rem;
+    border: 1px solid #d1d5db;
+    border-radius: 0.375rem;
+    font-size: 0.875rem;
+  }
+
+  .form-control:focus {
+    outline: none;
+    border-color: #3b82f6;
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  }
+
+  .flex {
+    display: flex;
+  }
+
+  .gap-2 {
+    gap: 0.5rem;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.625rem 1rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    border-radius: 0.375rem;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-decoration: none;
+  }
+
+  .btn-primary {
+    background-color: #3b82f6;
+    color: white;
+  }
+
+  .btn-primary:hover {
+    background-color: #2563eb;
+  }
+
+  .btn-secondary {
+    background-color: white;
+    color: #374151;
+    border-color: #d1d5db;
+  }
+
+  .btn-secondary:hover {
+    background-color: #f9fafb;
+  }
+
+  .btn-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 0.375rem;
+    color: #3b82f6;
+    transition: background-color 0.15s;
+    text-decoration: none;
+  }
+
+  .btn-icon:hover {
+    background-color: #dbeafe;
+  }
+
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 4rem 2rem;
+    text-align: center;
+  }
+
+  .table-responsive {
+    overflow-x: auto;
+  }
+
+  .table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .table thead {
+    background-color: #f9fafb;
+    border-bottom: 1px solid #e5e7eb;
+  }
+
+  .table th {
+    padding: 0.75rem 1rem;
+    text-align: left;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #6b7280;
+  }
+
+  .table td {
+    padding: 1rem;
+    border-bottom: 1px solid #e5e7eb;
+    font-size: 0.875rem;
+    color: #1f2937;
+  }
+
+  .table tbody tr:hover {
+    background-color: #f9fafb;
+  }
+
+  .text-right {
+    text-align: right;
+  }
+
+  .font-mono {
+    font-family: ui-monospace, monospace;
+  }
+
+  .badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border-radius: 9999px;
+    text-transform: capitalize;
+  }
+
+  .badge-success {
+    background-color: #d1fae5;
+    color: #065f46;
+  }
+
+  .badge-secondary {
+    background-color: #f3f4f6;
+    color: #4b5563;
+  }
+
+  .text-primary-600 {
+    color: #2563eb;
+  }
+
+  .text-primary-600:hover {
+    color: #1d4ed8;
+  }
+
+  .font-medium {
+    font-weight: 500;
+  }
+</style>
