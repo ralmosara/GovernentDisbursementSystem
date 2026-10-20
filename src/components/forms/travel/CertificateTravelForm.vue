@@ -410,7 +410,7 @@ onMounted(() => {
 }
 
 .travel-info-card {
-  @apply bg-gradient-to-r from-blue-50 to-indigo-50 p-4 rounded-lg border border-blue-200;
+  @apply bg-blue-50 p-4 rounded-lg border border-blue-200;
 }
 
 .section-title {

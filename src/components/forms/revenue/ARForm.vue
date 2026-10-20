@@ -430,6 +430,6 @@ button:disabled {
 }
 
 input:read-only {
-  background-color: #f9fafb;
+  background-color: var(--ds-surface-sunken);
 }
 </style>

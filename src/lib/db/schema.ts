@@ -165,6 +165,13 @@ export const disbursementVouchers = mysqlTable('disbursement_vouchers', {
   // Payment Mode
   paymentMode: mysqlEnum('payment_mode', ['mds_check', 'commercial_check', 'ada', 'other']).notNull(),
 
+  // Taxes withheld (see dvTaxWithholdings) and the amount actually paid to the payee.
+  // netAmount is null on DVs created before withholding was recorded; it then equals amount.
+  taxTreatment: varchar('tax_treatment', { length: 30 }),
+  payeeType: varchar('payee_type', { length: 20 }),
+  totalTaxWithheld: decimal('total_tax_withheld', { precision: 15, scale: 2 }).notNull().default('0'),
+  netAmount: decimal('net_amount', { precision: 15, scale: 2 }),
+
   // Approval Workflow Status
   status: mysqlEnum('status', [
     'draft',
@@ -520,6 +527,8 @@ export const revenueSources = mysqlTable('revenue_sources', {
   name: varchar('name', { length: 255 }).notNull(),
   category: varchar('category', { length: 100 }).notNull(),
   description: text('description'),
+  /** RCA revenue account collections from this source post to (defaults to Miscellaneous Income) */
+  accountCode: varchar('account_code', { length: 20 }),
   isActive: boolean('is_active').default(true),
   createdAt: timestamp('created_at').defaultNow(),
 });
@@ -563,6 +572,9 @@ export const collections = mysqlTable('collections', {
   collectionDate: datetime('collection_date').notNull(),
   amount: decimal('amount', { precision: 15, scale: 2 }).notNull(),
   paymentMode: mysqlEnum('payment_mode', ['cash', 'check', 'online']).notNull(),
+  checkNo: varchar('check_no', { length: 50 }),
+  checkDate: datetime('check_date'),
+  checkBank: varchar('check_bank', { length: 100 }),
   remarks: text('remarks'),
   createdBy: int('created_by').notNull(),
   createdAt: timestamp('created_at').defaultNow(),
@@ -1212,3 +1224,76 @@ export const thirteenthMonthPayRelations = relations(thirteenthMonthPay, ({ one 
     references: [users.id],
   }),
 }));
+
+
+// ============================================
+// GOVERNMENT ACCOUNTING (GAM for NGAs)
+// Migration: migrations/add_government_accounting.sql
+// ============================================
+
+/** Revised Chart of Accounts (UACS). Expense accounts mirror object_of_expenditure codes. */
+export const chartOfAccounts = mysqlTable('chart_of_accounts', {
+  id: int('id').primaryKey().autoincrement(),
+  code: varchar('code', { length: 20 }).unique().notNull(),
+  title: varchar('title', { length: 255 }).notNull(),
+  accountType: mysqlEnum('account_type', ['asset', 'liability', 'equity', 'revenue', 'expense']).notNull(),
+  normalBalance: mysqlEnum('normal_balance', ['debit', 'credit']).notNull(),
+  isActive: boolean('is_active').notNull().default(true),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+/** Journal Entry Voucher (JEV). One entry per source event, enforced by (sourceType, sourceId). */
+export const journalEntries = mysqlTable('journal_entries', {
+  id: int('id').primaryKey().autoincrement(),
+  jevNo: varchar('jev_no', { length: 30 }).unique().notNull(),
+  jevDate: datetime('jev_date').notNull(),
+  fiscalYear: int('fiscal_year').notNull(),
+  fundClusterId: int('fund_cluster_id').notNull(),
+  journalType: mysqlEnum('journal_type', ['general', 'cash_receipts', 'cash_disbursements', 'check_disbursements']).notNull(),
+  particulars: text('particulars').notNull(),
+  sourceType: varchar('source_type', { length: 40 }).notNull(),
+  sourceId: int('source_id'),
+  status: mysqlEnum('status', ['posted', 'reversed']).notNull().default('posted'),
+  reversesId: int('reverses_id'),
+  createdBy: int('created_by').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const journalEntryLines = mysqlTable('journal_entry_lines', {
+  id: int('id').primaryKey().autoincrement(),
+  journalEntryId: int('journal_entry_id').notNull(),
+  lineNo: int('line_no').notNull(),
+  accountCode: varchar('account_code', { length: 20 }).notNull(),
+  debit: decimal('debit', { precision: 15, scale: 2 }).notNull().default('0'),
+  credit: decimal('credit', { precision: 15, scale: 2 }).notNull().default('0'),
+  description: varchar('description', { length: 255 }),
+  subsidiary: varchar('subsidiary', { length: 255 }),
+  responsibilityCenter: varchar('responsibility_center', { length: 100 }),
+});
+
+/** Taxes withheld on a DV, computed server-side from its tax treatment */
+export const dvTaxWithholdings = mysqlTable('dv_tax_withholdings', {
+  id: int('id').primaryKey().autoincrement(),
+  dvId: int('dv_id').notNull(),
+  taxType: mysqlEnum('tax_type', ['ewt', 'final_vat', 'percentage_tax']).notNull(),
+  atc: varchar('atc', { length: 10 }),
+  description: varchar('description', { length: 255 }).notNull(),
+  taxBase: decimal('tax_base', { precision: 15, scale: 2 }).notNull(),
+  rate: decimal('rate', { precision: 6, scale: 4 }).notNull(),
+  amount: decimal('amount', { precision: 15, scale: 2 }).notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+/** Notices of Cash Allocation: the cash authority MDS checks and ADAs draw against */
+export const ncaRegistry = mysqlTable('nca_registry', {
+  id: int('id').primaryKey().autoincrement(),
+  ncaNo: varchar('nca_no', { length: 50 }).unique().notNull(),
+  ncaDate: datetime('nca_date').notNull(),
+  fiscalYear: int('fiscal_year').notNull(),
+  fundClusterId: int('fund_cluster_id').notNull(),
+  amount: decimal('amount', { precision: 15, scale: 2 }).notNull(),
+  mdsAccount: varchar('mds_account', { length: 100 }),
+  purpose: text('purpose'),
+  createdBy: int('created_by').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+});

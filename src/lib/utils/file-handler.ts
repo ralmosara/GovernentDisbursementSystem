@@ -20,7 +20,9 @@ export const UPLOAD_CONFIG = {
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
   ],
   allowedExtensions: ['.pdf', '.jpg', '.jpeg', '.png', '.xlsx', '.docx'],
-  uploadBaseDir: 'public/uploads',
+  // Stored outside the web root so files are only reachable through the
+  // authenticated /api/attachments/[id]/download endpoint
+  uploadBaseDir: process.env.UPLOAD_DIR || 'storage/uploads',
   categories: ['disbursements', 'travel', 'assets', 'payroll', 'temp'] as const,
 };
 
@@ -197,18 +199,22 @@ export function getMimeType(extension: string): string {
     '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   };
 
-  return mimeTypes[extension.toLowerCase()] || 'application/octet-stream';
+  const normalized = extension.toLowerCase();
+  const withDot = normalized.startsWith('.') ? normalized : `.${normalized}`;
+
+  return mimeTypes[withDot] || 'application/octet-stream';
 }
 
 /**
  * Format file size for display
+ * Bytes are shown as whole numbers; KB/MB/GB with 2 decimal places
  */
 export function formatFileSize(bytes: number): string {
-  if (bytes === 0) return '0 Bytes';
+  if (bytes < 1024) return `${bytes} B`;
 
   const k = 1024;
-  const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(k)), sizes.length - 1);
 
-  return Math.round((bytes / Math.pow(k, i)) * 100) / 100 + ' ' + sizes[i];
+  return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`;
 }

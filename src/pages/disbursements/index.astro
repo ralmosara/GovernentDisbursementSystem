@@ -1,6 +1,13 @@
 ---
 import MainLayout from '../../layouts/MainLayout.astro';
+import PageHeader from '../../components/ui/PageHeader.astro';
+import FilterBar from '../../components/ui/FilterBar.astro';
+import DataTable from '../../components/ui/DataTable.astro';
+import StatTile from '../../components/ui/StatTile.astro';
+import EmptyState from '../../components/ui/EmptyState.astro';
+import Lozenge from '../../components/ui/Lozenge.astro';
 import { disbursementService } from '../../lib/services/disbursement.service';
+import { statusLabel } from '../../lib/ui/status';
 
 const user = Astro.locals.user;
 
@@ -8,295 +15,149 @@ if (!user) {
   return Astro.redirect('/login');
 }
 
-// Get query parameters for filters
+const currentYear = new Date().getFullYear();
+
+// Filters. Fiscal year defaults to the current year; "all" shows every year.
 const status = Astro.url.searchParams.get('status') || undefined;
-const fiscalYear = Astro.url.searchParams.get('fiscalYear')
-  ? parseInt(Astro.url.searchParams.get('fiscalYear')!)
-  : new Date().getFullYear();
-const search = Astro.url.searchParams.get('search') || undefined;
+const yearParam = Astro.url.searchParams.get('fiscalYear');
+const fiscalYear = yearParam === 'all' ? undefined : yearParam ? parseInt(yearParam) || currentYear : currentYear;
+const search = Astro.url.searchParams.get('search')?.trim() || undefined;
 
-// Get DVs with filters
-const dvs = await disbursementService.getDVs({
-  status,
-  fiscalYear,
-  search,
-});
+const [dvs, stats] = await Promise.all([
+  disbursementService.getDVs({ status, fiscalYear, search }),
+  disbursementService.getDVStatistics(fiscalYear),
+]);
 
-// Get statistics
-const stats = await disbursementService.getDVStatistics(fiscalYear);
+const yearOptions = Array.from({ length: 6 }, (_, i) => currentYear + 1 - i);
+const STATUSES = ['draft', 'pending_budget', 'pending_accounting', 'pending_director', 'approved', 'paid', 'rejected', 'cancelled'];
+const activeFilters = [status, search, yearParam && yearParam !== String(currentYear) ? yearParam : undefined].filter(Boolean).length;
 
-// Status badge helper
-const getStatusBadge = (status: string) => {
-  switch (status) {
-    case 'draft':
-      return 'badge-secondary';
-    case 'pending_budget':
-      return 'badge-warning';
-    case 'pending_accounting':
-      return 'badge-warning';
-    case 'pending_director':
-      return 'badge-info';
-    case 'approved':
-      return 'badge-success';
-    case 'paid':
-      return 'badge-primary';
-    case 'rejected':
-      return 'badge-danger';
-    case 'cancelled':
-      return 'badge-dark';
-    default:
-      return 'badge-secondary';
-  }
+// Summary by stage of the journey, not raw status
+const totalFor = (statuses: string[]) => {
+  const rows = stats.filter(s => statuses.includes(s.status ?? ''));
+  return {
+    count: rows.reduce((sum, s) => sum + Number(s.count || 0), 0),
+    amount: rows.reduce((sum, s) => sum + Number(s.totalAmount || 0), 0),
+  };
 };
+const inApproval = totalFor(['draft', 'pending_budget', 'pending_accounting', 'pending_director']);
+const readyToPay = totalFor(['approved']);
+const paid = totalFor(['paid']);
+const stopped = totalFor(['rejected', 'cancelled']);
 
-const getStatusLabel = (status: string) => {
-  switch (status) {
-    case 'draft':
-      return 'Draft';
-    case 'pending_budget':
-      return 'Pending Budget';
-    case 'pending_accounting':
-      return 'Pending Accounting';
-    case 'pending_director':
-      return 'Pending Director';
-    case 'approved':
-      return 'Approved';
-    case 'paid':
-      return 'Paid';
-    case 'rejected':
-      return 'Rejected';
-    case 'cancelled':
-      return 'Cancelled';
-    default:
-      return status;
-  }
-};
+const peso = (value: number | string) =>
+  `₱${parseFloat(String(value || 0)).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-// Format date
-const formatDate = (date: Date | string | null) => {
-  if (!date) return 'N/A';
-  const d = typeof date === 'string' ? new Date(date) : date;
-  return d.toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
-};
+const formatDate = (date: Date | string | null) =>
+  date ? new Date(date).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' }) : '—';
+
+const yearLabel = fiscalYear ? `FY ${fiscalYear}` : 'all years';
+const filterHref = (params: Record<string, string>) => `/disbursements?${new URLSearchParams({ fiscalYear: String(fiscalYear ?? 'all'), ...params })}`;
 ---
 
-<MainLayout title="Disbursement Vouchers">
-  <div class="container-fluid py-6">
-    <!-- Page Header -->
-    <div class="page-header">
-      <div class="flex items-center justify-between">
-        <div>
-          <h1 class="page-title">Disbursement Vouchers</h1>
-          <p class="page-description">Manage disbursement vouchers and payment processing</p>
-        </div>
-        <a href="/disbursements/create" class="btn btn-primary btn-md">
-          <i class="pi pi-plus mr-2"></i>
-          New Disbursement Voucher
-        </a>
-      </div>
-    </div>
+<MainLayout title="Disbursement vouchers - Philippine Government FMS">
+  <PageHeader
+    title="Disbursement vouchers"
+    description={`Prepare, track and pay vouchers · ${yearLabel}`}
+    breadcrumbs={[{ label: 'Home', href: '/dashboard' }, { label: 'Disbursement vouchers' }]}
+  >
+    <Fragment slot="actions">
+      <a href="/approvals" class="btn btn-secondary">
+        <i class="pi pi-inbox" aria-hidden="true"></i>
+        My approvals
+      </a>
+      <a href="/disbursements/create" class="btn btn-primary">
+        <i class="pi pi-plus" aria-hidden="true"></i>
+        New voucher
+      </a>
+    </Fragment>
+  </PageHeader>
 
-    <!-- Statistics Cards -->
-    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6">
-      {stats.map(stat => (
-        <div class="card">
-          <div class="card-body">
-            <div class="flex items-center justify-between">
-              <div>
-                <p class="text-sm font-medium text-gray-600">{getStatusLabel(stat.status)}</p>
-                <p class="text-2xl font-bold text-gray-900 mt-1">{stat.count}</p>
-                <p class="text-sm text-gray-500 mt-1">
-                  ₱{(stat.totalAmount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-                </p>
-              </div>
-              <div class={`w-12 h-12 rounded-full flex items-center justify-center ${getStatusBadge(stat.status)} bg-opacity-10`}>
-                <i class="pi pi-file text-xl"></i>
-              </div>
-            </div>
-          </div>
-        </div>
-      ))}
-    </div>
-
-    <!-- Filters & Search -->
-    <div class="card mb-6">
-      <div class="card-body">
-        <form method="GET" action="/disbursements" class="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <!-- Search -->
-          <div class="md:col-span-2">
-            <label for="search" class="form-label">Search</label>
-            <input
-              type="text"
-              name="search"
-              id="search"
-              class="form-input"
-              placeholder="Search by DV No, Payee, Particulars, or ORS/BURS No..."
-              value={search || ''}
-            />
-          </div>
-
-          <!-- Fiscal Year -->
-          <div>
-            <label for="fiscalYear" class="form-label">Fiscal Year</label>
-            <select name="fiscalYear" id="fiscalYear" class="form-select">
-              <option value="">All Years</option>
-              {[2024, 2023, 2022, 2021, 2020].map(year => (
-                <option value={year} selected={fiscalYear === year}>{year}</option>
-              ))}
-            </select>
-          </div>
-
-          <!-- Status -->
-          <div>
-            <label for="status" class="form-label">Status</label>
-            <select name="status" id="status" class="form-select">
-              <option value="">All Status</option>
-              <option value="draft" selected={status === 'draft'}>Draft</option>
-              <option value="pending_budget" selected={status === 'pending_budget'}>Pending Budget</option>
-              <option value="pending_accounting" selected={status === 'pending_accounting'}>Pending Accounting</option>
-              <option value="pending_director" selected={status === 'pending_director'}>Pending Director</option>
-              <option value="approved" selected={status === 'approved'}>Approved</option>
-              <option value="paid" selected={status === 'paid'}>Paid</option>
-              <option value="rejected" selected={status === 'rejected'}>Rejected</option>
-              <option value="cancelled" selected={status === 'cancelled'}>Cancelled</option>
-            </select>
-          </div>
-
-          <!-- Actions -->
-          <div class="md:col-span-4 flex gap-3">
-            <button type="submit" class="btn btn-primary btn-sm">
-              <i class="pi pi-search mr-2"></i>
-              Apply Filters
-            </button>
-            <a href="/disbursements" class="btn btn-secondary btn-sm">
-              <i class="pi pi-times mr-2"></i>
-              Clear Filters
-            </a>
-          </div>
-        </form>
-      </div>
-    </div>
-
-    <!-- DV Table -->
-    <div class="card">
-      <div class="card-body p-0">
-        {dvs.length === 0 ? (
-          <div class="text-center py-12">
-            <i class="pi pi-inbox text-6xl text-gray-300 mb-4"></i>
-            <p class="text-gray-500 text-lg">No disbursement vouchers found</p>
-            <a href="/disbursements/create" class="btn btn-primary btn-md mt-4">
-              <i class="pi pi-plus mr-2"></i>
-              Create Your First DV
-            </a>
-          </div>
-        ) : (
-          <div class="overflow-x-auto">
-            <table class="min-w-full divide-y divide-gray-200">
-              <thead class="bg-gray-50">
-                <tr>
-                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    DV No.
-                  </th>
-                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Date
-                  </th>
-                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Payee
-                  </th>
-                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Particulars
-                  </th>
-                  <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Fund Cluster
-                  </th>
-                  <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Amount
-                  </th>
-                  <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Status
-                  </th>
-                  <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody class="bg-white divide-y divide-gray-200">
-                {dvs.map(dv => (
-                  <tr class="hover:bg-gray-50 transition-colors">
-                    <td class="px-6 py-4 whitespace-nowrap">
-                      <a href={`/disbursements/${dv.id}`} class="text-primary-600 hover:text-primary-800 font-semibold">
-                        {dv.dvNo}
-                      </a>
-                    </td>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {formatDate(dv.dvDate)}
-                    </td>
-                    <td class="px-6 py-4 text-sm text-gray-900">
-                      <div class="max-w-xs truncate" title={dv.payeeName}>
-                        {dv.payeeName}
-                      </div>
-                    </td>
-                    <td class="px-6 py-4 text-sm text-gray-500">
-                      <div class="max-w-md truncate" title={dv.particulars}>
-                        {dv.particulars}
-                      </div>
-                    </td>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
-                      {dv.fundCluster ? `${dv.fundCluster.code}` : 'N/A'}
-                    </td>
-                    <td class="px-6 py-4 whitespace-nowrap text-sm font-semibold text-gray-900 text-right">
-                      ₱{parseFloat(dv.amount.toString()).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-                    </td>
-                    <td class="px-6 py-4 whitespace-nowrap text-center">
-                      <span class={`badge ${getStatusBadge(dv.status)}`}>
-                        {getStatusLabel(dv.status)}
-                      </span>
-                    </td>
-                    <td class="px-6 py-4 whitespace-nowrap text-center text-sm">
-                      <div class="flex items-center justify-center gap-2">
-                        <a
-                          href={`/disbursements/${dv.id}`}
-                          class="text-primary-600 hover:text-primary-800"
-                          title="View Details"
-                        >
-                          <i class="pi pi-eye"></i>
-                        </a>
-                        {dv.status === 'approved' && (
-                          <>
-                            <button
-                              type="button"
-                              class="text-green-600 hover:text-green-800"
-                              title="Print DV"
-                              onclick={`window.open('/disbursements/${dv.id}/print', '_blank')`}
-                            >
-                              <i class="pi pi-print"></i>
-                            </button>
-                            <a
-                              href={`/api/disbursements/${dv.id}/excel`}
-                              class="text-success-600 hover:text-success-800"
-                              title="Download Excel"
-                            >
-                              <i class="pi pi-file-excel"></i>
-                            </a>
-                          </>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </div>
-
-    <!-- Showing results count -->
-    {dvs.length > 0 && (
-      <div class="mt-4 text-sm text-gray-600 text-center">
-        Showing {dvs.length} disbursement voucher{dvs.length !== 1 ? 's' : ''}
-        {fiscalYear && ` for fiscal year ${fiscalYear}`}
-      </div>
-    )}
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+    <StatTile label="In approval" value={inApproval.count} help={peso(inApproval.amount)} icon="pi-clock" />
+    <StatTile label="Ready to pay" value={readyToPay.count} help={peso(readyToPay.amount)} icon="pi-check-circle" href={filterHref({ status: 'approved' })} />
+    <StatTile label="Paid" value={paid.count} help={peso(paid.amount)} icon="pi-wallet" href={filterHref({ status: 'paid' })} />
+    <StatTile label="Rejected or cancelled" value={stopped.count} help={peso(stopped.amount)} icon="pi-times-circle" href={filterHref({ status: 'rejected' })} />
   </div>
+
+  <FilterBar action="/disbursements" resetHref="/disbursements" activeCount={activeFilters}>
+    <div class="form-group flex-1 min-w-[16rem]">
+      <label for="search" class="form-label">Search</label>
+      <input type="search" name="search" id="search" class="form-input" placeholder="DV no., payee, particulars or ORS/BURS no." value={search ?? ''} />
+    </div>
+    <div class="form-group">
+      <label for="fiscalYear" class="form-label">Fiscal year</label>
+      <select name="fiscalYear" id="fiscalYear" class="form-select">
+        {yearOptions.map(year => <option value={year} selected={fiscalYear === year}>{year}</option>)}
+        <option value="all" selected={!fiscalYear}>All years</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="status" class="form-label">Status</label>
+      <select name="status" id="status" class="form-select">
+        <option value="">Any status</option>
+        {STATUSES.map(s => <option value={s} selected={status === s}>{statusLabel(s)}</option>)}
+      </select>
+    </div>
+  </FilterBar>
+
+  {dvs.length === 0 ? (
+    <div class="card">
+      <EmptyState
+        icon="pi-file-edit"
+        title={activeFilters ? 'No vouchers match these filters' : `No vouchers for ${yearLabel} yet`}
+        description={activeFilters ? 'Try a different search or clear the filters.' : 'Vouchers you and your colleagues prepare will appear here.'}
+      >
+        {activeFilters ? (
+          <a href="/disbursements" class="btn btn-secondary">Clear filters</a>
+        ) : (
+          <a href="/disbursements/create" class="btn btn-primary">Create a voucher</a>
+        )}
+      </EmptyState>
+    </div>
+  ) : (
+    <DataTable title="Vouchers" count={dvs.length} quickFilter quickFilterLabel="Filter these results">
+      <table class="table">
+        <thead>
+          <tr>
+            <th scope="col">DV no.</th>
+            <th scope="col">Date</th>
+            <th scope="col">Payee</th>
+            <th scope="col" class="hidden xl:table-cell">Particulars</th>
+            <th scope="col" class="hidden md:table-cell">Fund</th>
+            <th scope="col" class="!text-right">Amount</th>
+            <th scope="col">Status</th>
+            <th scope="col" data-nosort><span class="sr-only">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {dvs.map(dv => (
+            <tr class="hover:bg-gray-50">
+              <td class="whitespace-nowrap">
+                <a href={`/disbursements/${dv.id}`} class="font-medium text-primary-600 hover:underline">{dv.dvNo}</a>
+              </td>
+              <td class="whitespace-nowrap text-gray-600" data-sort-value={dv.dvDate ? new Date(dv.dvDate).getTime() : 0}>{formatDate(dv.dvDate)}</td>
+              <td class="max-w-[14rem]"><p class="truncate" title={dv.payeeName}>{dv.payeeName}</p></td>
+              <td class="hidden xl:table-cell max-w-[20rem]"><p class="truncate text-gray-600" title={dv.particulars}>{dv.particulars}</p></td>
+              <td class="hidden md:table-cell text-gray-600">{dv.fundCluster?.code ?? '—'}</td>
+              <td class="text-right font-medium tabular-nums whitespace-nowrap" data-sort-value={dv.amount}>{peso(dv.amount)}</td>
+              <td class="whitespace-nowrap"><Lozenge status={dv.status} /></td>
+              <td class="text-right whitespace-nowrap">
+                {(dv.status === 'approved' || dv.status === 'paid') && (
+                  <>
+                    <a href={`/disbursements/${dv.id}/print`} target="_blank" class="btn btn-subtle btn-sm btn-icon" aria-label={`Print ${dv.dvNo}`} title="Print">
+                      <i class="pi pi-print" aria-hidden="true"></i>
+                    </a>
+                    <a href={`/api/disbursements/${dv.id}/excel`} class="btn btn-subtle btn-sm btn-icon" aria-label={`Download ${dv.dvNo} as Excel`} title="Excel">
+                      <i class="pi pi-file-excel" aria-hidden="true"></i>
+                    </a>
+                  </>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </DataTable>
+  )}
 </MainLayout>

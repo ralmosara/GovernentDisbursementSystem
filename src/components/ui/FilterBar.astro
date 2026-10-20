@@ -1,0 +1,24 @@
+---
+// A GET form of filter fields laid out in one row above a list.
+interface Props {
+  action?: string;
+  resetHref?: string;
+  /** Number of active filters, shown on the clear link */
+  activeCount?: number;
+}
+
+const { action = '', resetHref, activeCount = 0 } = Astro.props;
+---
+
+<form method="GET" action={action} class="filter-bar" role="search">
+  <slot />
+  <div class="flex items-end gap-2">
+    <button type="submit" class="btn btn-secondary">
+      <i class="pi pi-filter" aria-hidden="true"></i>
+      Apply
+    </button>
+    {resetHref && activeCount > 0 && (
+      <a href={resetHref} class="btn btn-subtle">Clear filters ({activeCount})</a>
+    )}
+  </div>
+</form>

@@ -29,10 +29,10 @@ try {
 }
 
 const transactionTypes = [
-  { value: 'receipt', label: 'Receipt', color: 'bg-green-100 text-green-800' },
-  { value: 'issue', label: 'Issue', color: 'bg-red-100 text-red-800' },
-  { value: 'adjustment', label: 'Adjustment', color: 'bg-orange-100 text-orange-800' },
-  { value: 'transfer', label: 'Transfer', color: 'bg-blue-100 text-blue-800' },
+  { value: 'receipt', label: 'Receipt', color: 'badge-success' },
+  { value: 'issue', label: 'Issue', color: 'badge-danger' },
+  { value: 'adjustment', label: 'Adjustment', color: 'badge-warning' },
+  { value: 'transfer', label: 'Transfer', color: 'badge-info' },
 ];
 
 const getTypeConfig = (type: string) => {
@@ -116,31 +116,31 @@ const getTypeConfig = (type: string) => {
           <table class="min-w-full divide-y divide-gray-200">
             <thead class="bg-gray-50">
               <tr>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">
                   Transaction No.
                 </th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">
                   Date
                 </th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">
                   Item
                 </th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">
                   Type
                 </th>
-                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-right text-xs font-semibold text-gray-600">
                   Quantity
                 </th>
-                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-right text-xs font-semibold text-gray-600">
                   Unit Cost
                 </th>
-                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-right text-xs font-semibold text-gray-600">
                   Total Value
                 </th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">
                   Reference
                 </th>
-                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-right text-xs font-semibold text-gray-600">
                   Actions
                 </th>
               </tr>
@@ -165,7 +165,7 @@ const getTypeConfig = (type: string) => {
                       ) : '-'}
                     </td>
                     <td class="px-6 py-4 whitespace-nowrap text-sm">
-                      <span class={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${typeConfig.color}`}>
+                      <span class={`badge ${typeConfig.color}`}>
                         {typeConfig.label}
                       </span>
                     </td>

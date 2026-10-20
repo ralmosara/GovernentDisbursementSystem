@@ -67,6 +67,12 @@ Populates fund clusters, roles, and default admin user:
 npm run seed
 ```
 
+**Upgrading an existing database?** Run the pending migration once (safe to re-run):
+
+```bash
+npm run db:migrate-collections   # adds check_no / check_date / check_bank to collections
+```
+
 ### 5. Start Development Server
 
 ```bash
@@ -139,17 +145,19 @@ After seeding:
 
 The system has comprehensive test coverage across multiple testing levels:
 
-**Unit Tests** (125+ test cases)
-- Serial number generation (DV, OR, CA, Deposit Slip)
-- Budget service (availability, obligations, utilization)
+**Unit Tests** (137 test cases, no database needed)
+- Serial number generation (DV, OR, CA, deposit slip, travel documents, JEV)
+- Budget service (availability, pending-obligation reservations, disbursement tracking, centavo precision)
+- Access policy (who may call each state-changing API, plus a guard that every rule matches a real route)
 - File handler (validation, security, MIME types)
+- Security utilities (CSRF, rate limiting, headers)
 
-**Integration Tests** (15+ test cases)
-- DV approval workflow (4-stage approval process)
-- Budget validation and tracking
-- Rejection handling
+**Integration Tests** (44 test cases, no database needed)
+- DV approval workflow: full 4-stage flow, rejection closes later stages, segregation of duties,
+  concurrent approvals, permissions
+- Security integration
 
-**E2E Tests** (30+ test cases)
+**E2E Tests** (Playwright; need a running app, a seeded database and installed browsers)
 - User authentication and session management
 - DV creation and complete lifecycle
 - Multi-user approval workflows
@@ -182,10 +190,8 @@ npm run test:ui
 - [PHASE-12-SUMMARY.md](docs/PHASE-12-SUMMARY.md) - Testing phase summary
 
 **Test Statistics:**
-- 170+ total test cases
-- 70%+ code coverage
-- 6 browser profiles configured
-- Multi-device testing support
+- 181 unit and integration test cases (run with `npm run test:unit` and `npm run test:integration`)
+- 6 Playwright browser profiles configured for E2E
 
 ## Documentation
 
@@ -200,13 +206,32 @@ npm run test:ui
 
 ## Security
 
-- ✅ SQL Injection Prevention (Drizzle ORM parameterized queries)
-- ✅ Authentication & Session Management (Lucia Auth)
-- ✅ Role-Based Access Control (Permission system)
-- ✅ File Upload Security (Type/size validation, 10MB limit)
-- ✅ Audit Logging (Sensitive data sanitization)
-- ⚠️ CSRF Protection (Pending implementation)
-- ⚠️ Rate Limiting (Pending implementation)
+- ✅ SQL injection prevention (Drizzle ORM parameterized queries)
+- ✅ Authentication with 8-hour sliding sessions (Lucia); deactivating a user ends their sessions immediately
+- ✅ Role-based access control for every state-changing API call, defined in one policy table:
+  [src/lib/security/access-policy.ts](src/lib/security/access-policy.ts) (administrators have full access)
+- ✅ Segregation of duties on disbursement vouchers: the preparer cannot approve their own DV and one person
+  cannot approve two stages. On by default; can be turned off for single-user test setups in
+  **Admin → Settings → Security**
+- ✅ CSRF protection: same-origin enforcement on all API writes, plus a token on the login form
+- ✅ Login rate limiting (5 attempts per username / 10 per IP per 15 minutes)
+- ✅ Configurable password policy (Admin → Settings → Security)
+- ✅ File uploads stored outside the web root (`UPLOAD_DIR`, default `storage/uploads`) and served only
+  through the authenticated `/api/attachments/{id}/download` endpoint
+- ✅ Audit logging, including role changes, password resets, settings changes and AR write-offs
+
+### Who can do what
+
+| Action | Roles |
+|--------|-------|
+| Record appropriations and allotments; certify or reject obligations | Budget Officer |
+| Prepare obligation requests | Budget Officer, Division Staff, Accountant |
+| Approve a DV stage | The role assigned to that stage (Division → Budget → Accounting → Director) |
+| Payments (checks / ADA), receipts, deposits, petty cash | Cashier, Accountant |
+| Bank reconciliations, payroll, fixed assets | Accountant |
+| Approve travel, write off receivables | Director |
+| Users, roles and system settings | Administrator |
+| Prepare DVs, request travel or cash advances, upload attachments | Any signed-in user |
 
 See [SECURITY-TESTING.md](docs/SECURITY-TESTING.md) for complete security documentation.
 

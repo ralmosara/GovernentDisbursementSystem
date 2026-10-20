@@ -1,15 +1,15 @@
 import { db } from '../db/connection';
-import { disbursementVouchers, payments, fundClusters, officialReceiptSeries, bankDeposits, cashAdvances, revenueEntries, accountsReceivable, collections, fixedAssets, inventoryItems, assetDisposals, inventoryTransactions, physicalInventoryCount, employees, payrollPeriods, remittances } from '../db/schema';
+import { disbursementVouchers, payments, fundClusters, officialReceiptSeries, bankDeposits, cashAdvances, revenueEntries, accountsReceivable, collections, fixedAssets, inventoryItems, assetDisposals, inventoryTransactions, physicalInventoryCount, employees, payrollPeriods, remittances, itineraryOfTravel, certificateTravelCompleted, liquidationReports } from '../db/schema';
 import { and, eq, like, desc, sql, isNotNull } from 'drizzle-orm';
 
 /**
  * Generate DV serial number in format: 0000-00-0000 (Serial-Month-Year)
  * Serial resets at the beginning of each fiscal year
  *
- * @param fiscalYear - The fiscal year for this DV
+ * @param fiscalYear - The fiscal year for this DV (defaults to the current year)
  * @returns Promise<string> - The generated DV number (e.g., "0001-01-2024")
  */
-export async function generateDVNumber(fiscalYear: number): Promise<string> {
+export async function generateDVNumber(fiscalYear: number = new Date().getFullYear()): Promise<string> {
   const now = new Date();
   const month = (now.getMonth() + 1).toString().padStart(2, '0');
   const year = fiscalYear.toString();
@@ -155,26 +155,94 @@ export async function generateJEVNumber(fiscalYear: number, month?: number): Pro
   const jevMonth = month || (now.getMonth() + 1);
   const year = fiscalYear.toString();
   const monthStr = jevMonth.toString().padStart(2, '0');
-  const serial = '0001'; // TODO: Implement auto-increment from journal entries table
+  const prefix = `${year}-${monthStr}-`;
 
-  return `${year}-${monthStr}-${serial}`;
+  // JEV numbers are recorded on disbursement vouchers; continue that month's sequence
+  const latestJEV = await db
+    .select({ jevNo: disbursementVouchers.jevNo })
+    .from(disbursementVouchers)
+    .where(like(disbursementVouchers.jevNo, `${prefix}%`))
+    .orderBy(desc(disbursementVouchers.jevNo))
+    .limit(1);
+
+  let serial = 1;
+  if (latestJEV.length > 0 && latestJEV[0].jevNo) {
+    const parts = latestJEV[0].jevNo.split('-');
+    serial = parseInt(parts[parts.length - 1], 10) + 1;
+  }
+
+  return `${prefix}${String(serial).padStart(4, '0')}`;
 }
+
+/**
+ * Generate travel document numbers in format: PREFIX-YYYY-NNNN
+ * IOT = Itinerary of Travel, CTC = Certificate of Travel Completed, LR = Liquidation Report
+ * Serial resets at the beginning of each year
+ *
+ * @param documentType - The travel document type
+ * @returns Promise<string> - The generated number (e.g., "IOT-2026-0001")
+ */
+export async function generateSerialNumber(documentType: 'IOT' | 'CTC' | 'LR'): Promise<string> {
+  const year = new Date().getFullYear();
+  const prefix = `${documentType}-${year}-`;
+
+  const column = {
+    IOT: itineraryOfTravel.iotNo,
+    CTC: certificateTravelCompleted.ctcNo,
+    LR: liquidationReports.lrNo,
+  }[documentType];
+  const table = {
+    IOT: itineraryOfTravel,
+    CTC: certificateTravelCompleted,
+    LR: liquidationReports,
+  }[documentType];
+
+  const latest = await db
+    .select({ docNo: column })
+    .from(table)
+    .where(like(column, `${prefix}%`))
+    .orderBy(desc(column))
+    .limit(1);
+
+  let serial = 1;
+  if (latest.length > 0 && latest[0].docNo) {
+    const parts = latest[0].docNo.split('-');
+    if (parts.length === 3) {
+      serial = parseInt(parts[2], 10) + 1;
+    }
+  }
+
+  return `${prefix}${String(serial).padStart(4, '0')}`;
+}
+
+type DbExecutor = typeof db | Parameters<Parameters<typeof db.transaction>[0]>[0];
 
 /**
  * Generate Official Receipt (OR) number from OR series
  * Format: SERIES-NNNNNN (e.g., "2024-000001")
  *
+ * ORs are accountable forms: numbers must never be duplicated or skipped. The series
+ * row is locked (SELECT ... FOR UPDATE) so concurrent cashiers are serialized. Pass the
+ * caller's transaction so the receipt insert and the counter update commit together;
+ * otherwise a transaction is opened just for the number.
+ *
  * @param orSeriesId - The OR series ID
+ * @param tx - Optional transaction to run in
  * @returns Promise<string> - The generated OR number
  * @throws Error if series not found, inactive, or exhausted
  */
-export async function generateORNumber(orSeriesId: number): Promise<string> {
-  // Get OR series record
-  const series = await db
+export async function generateORNumber(orSeriesId: number, tx?: DbExecutor): Promise<string> {
+  if (!tx) {
+    return db.transaction((innerTx) => generateORNumber(orSeriesId, innerTx));
+  }
+
+  // Get and lock OR series record
+  const series = await tx
     .select()
     .from(officialReceiptSeries)
     .where(eq(officialReceiptSeries.id, orSeriesId))
-    .limit(1);
+    .limit(1)
+    .for('update');
 
   if (!series[0]) {
     throw new Error('OR series not found');
@@ -187,7 +255,7 @@ export async function generateORNumber(orSeriesId: number): Promise<string> {
 
   // Check if series is exhausted
   if (series[0].currentNumber >= series[0].endNumber) {
-    throw new Error('OR series exhausted. Please create a new series.');
+    throw new Error('OR series is exhausted. Please create a new series.');
   }
 
   // Increment current number
@@ -197,7 +265,7 @@ export async function generateORNumber(orSeriesId: number): Promise<string> {
   const orNo = `${series[0].seriesCode}-${String(nextNumber).padStart(6, '0')}`;
 
   // Update series current number
-  await db
+  await tx
     .update(officialReceiptSeries)
     .set({ currentNumber: nextNumber })
     .where(eq(officialReceiptSeries.id, orSeriesId));

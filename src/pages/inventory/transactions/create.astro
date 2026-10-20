@@ -1,0 +1,81 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+// Pre-select the item when coming from an item page
+const itemId = parseInt(Astro.url.searchParams.get('itemId') || '0') || undefined;
+const backHref = itemId ? `/inventory/items/${itemId}` : '/inventory/transactions';
+---
+
+<MainLayout title="New Inventory Transaction">
+  <div class="container mx-auto px-4 py-6">
+    <!-- Breadcrumb -->
+    <nav class="flex mb-4" aria-label="Breadcrumb">
+      <ol class="inline-flex items-center space-x-1 md:space-x-3">
+        <li class="inline-flex items-center">
+          <a href="/inventory/transactions" class="text-gray-700 hover:text-primary-600">Transactions</a>
+        </li>
+        <li aria-current="page">
+          <div class="flex items-center">
+            <i class="pi pi-chevron-right text-gray-400 text-sm" aria-hidden="true"></i>
+            <span class="ml-1 text-gray-500 md:ml-2">New Transaction</span>
+          </div>
+        </li>
+      </ol>
+    </nav>
+
+    <div class="mb-6">
+      <h1 class="text-3xl font-bold text-gray-900">New Inventory Transaction</h1>
+      <p class="mt-1 text-sm text-gray-600">Record stock received, issued, transferred or adjusted after a count</p>
+    </div>
+
+    <div id="transaction-error" class="hidden mb-4 p-4 rounded-md bg-red-50 border border-red-200 text-sm text-red-800" role="alert"></div>
+
+    <div class="bg-white rounded-lg shadow border border-gray-200 p-6 max-w-3xl">
+      <div id="inventory-transaction-form" data-item-id={itemId ?? ''} data-back-href={backHref}></div>
+    </div>
+  </div>
+</MainLayout>
+
+<script>
+  import { createApp } from 'vue';
+  import InventoryTransactionForm from '../../../components/forms/inventory/InventoryTransactionForm.vue';
+
+  const mount = document.getElementById('inventory-transaction-form')!;
+  const errorBox = document.getElementById('transaction-error')!;
+  const itemId = Number(mount.dataset.itemId) || undefined;
+  const backHref = mount.dataset.backHref || '/inventory/transactions';
+
+  createApp(InventoryTransactionForm, {
+    itemId,
+    submit: async (formData: Record<string, unknown>) => {
+      errorBox.classList.add('hidden');
+      try {
+        const response = await fetch('/api/inventory/transactions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(formData),
+        });
+        const result = await response.json();
+
+        if (!response.ok) {
+          throw new Error(result.error || 'Failed to record the transaction');
+        }
+
+        window.location.href = `/inventory/transactions/${result.id}`;
+      } catch (error) {
+        errorBox.textContent = error instanceof Error ? error.message : 'Failed to record the transaction';
+        errorBox.classList.remove('hidden');
+        errorBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    },
+    onCancel: () => {
+      window.location.href = backHref;
+    },
+  }).mount(mount);
+</script>

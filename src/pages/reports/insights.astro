@@ -1,0 +1,177 @@
+---
+import MainLayout from '../../layouts/MainLayout.astro';
+import PageHeader from '../../components/ui/PageHeader.astro';
+import StatTile from '../../components/ui/StatTile.astro';
+import EmptyState from '../../components/ui/EmptyState.astro';
+import Banner from '../../components/ui/Banner.astro';
+import { insightsService } from '../../lib/services/insights.service';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+const RANGES = [30, 90, 180, 365];
+const requested = parseInt(Astro.url.searchParams.get('days') ?? '90');
+const days = RANGES.includes(requested) ? requested : 90;
+
+const [cycle, queueAges, overrides] = await Promise.all([
+  insightsService.getApprovalCycleTimes(days),
+  insightsService.getQueueAges(),
+  insightsService.getDuplicateOverrideCount(days),
+]);
+
+const formatHours = (hours: number) => {
+  if (hours < 1) return `${Math.round(hours * 60)} min`;
+  if (hours < 24) return `${hours.toFixed(1)} h`;
+  return `${(hours / 24).toFixed(1)} days`;
+};
+
+const slowest = cycle.stages.filter(s => s.count > 0).sort((a, b) => b.medianHours - a.medianHours)[0];
+const scaleMax = Math.max(1, ...cycle.stages.map(s => s.p90Hours));
+const totalOpen = queueAges.reduce((sum, s) => sum + s.open, 0);
+const stale = queueAges.reduce((sum, s) => sum + s.buckets[3], 0);
+const bucketLabels = ['Under 1 day', '1–3 days', '3–7 days', 'Over 7 days'];
+const bucketMax = Math.max(1, ...queueAges.flatMap(s => s.buckets));
+---
+
+<MainLayout title="Process insights - Philippine Government FMS">
+  <PageHeader
+    title="Process insights"
+    description="How long disbursement vouchers take to get through approval, and where they wait."
+    breadcrumbs={[{ label: 'Reports', href: '/reports' }, { label: 'Process insights' }]}
+  >
+    <nav slot="actions" class="flex gap-1" aria-label="Time range">
+      {RANGES.map(range => (
+        <a href={`/reports/insights?days=${range}`} class={`btn btn-sm ${range === days ? 'btn-secondary' : 'btn-subtle'}`} aria-current={range === days ? 'page' : undefined}>
+          {range === 365 ? '1 year' : `${range} days`}
+        </a>
+      ))}
+    </nav>
+  </PageHeader>
+
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+    <StatTile
+      label="Median time to full approval"
+      value={cycle.endToEnd.count ? formatHours(cycle.endToEnd.medianHours) : '—'}
+      help={`${cycle.endToEnd.count} voucher${cycle.endToEnd.count === 1 ? '' : 's'} fully approved`}
+      icon="pi-stopwatch"
+    />
+    <StatTile
+      label="Slowest stage"
+      value={slowest ? slowest.label : '—'}
+      help={slowest ? `Median ${formatHours(slowest.medianHours)}` : 'Not enough data yet'}
+      icon="pi-hourglass"
+    />
+    <StatTile label="Open in approval" value={totalOpen} help={`${stale} waiting over 7 days`} icon="pi-inbox" href="/approvals" />
+    <StatTile
+      label="Duplicate warnings overridden"
+      value={overrides}
+      help="Preparers confirmed a separate payment"
+      icon="pi-exclamation-triangle"
+      href="/audit"
+    />
+  </div>
+
+  <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+    <!-- Cycle time per stage: horizontal bars, median with a p90 whisker -->
+    <section class="card" aria-labelledby="cycle-heading">
+      <div class="card-header">
+        <h2 id="cycle-heading" class="card-title">Time spent at each stage</h2>
+        <span class="text-xs text-gray-500">Vouchers created in the last {days} days</span>
+      </div>
+      <div class="card-body">
+        {cycle.stages.every(s => s.count === 0) ? (
+          <EmptyState title="No approvals in this period" description="Stage times appear once vouchers start moving through approval." icon="pi-chart-bar" />
+        ) : (
+          <>
+            <ul class="space-y-5">
+              {cycle.stages.map(stage => (
+                <li>
+                  <div class="flex items-baseline justify-between gap-3 text-sm">
+                    <span class="font-medium text-gray-800">{stage.label}</span>
+                    <span class="text-gray-600 tabular-nums">
+                      {stage.count ? <>median <strong class="text-gray-800">{formatHours(stage.medianHours)}</strong> · 90% within {formatHours(stage.p90Hours)}</> : 'no data'}
+                    </span>
+                  </div>
+                  <div
+                    class="relative mt-1.5 h-3 rounded bg-gray-100"
+                    role="img"
+                    aria-label={stage.count ? `${stage.label}: median ${formatHours(stage.medianHours)}, 90th percentile ${formatHours(stage.p90Hours)}, ${stage.count} approvals` : `${stage.label}: no data`}
+                  >
+                    {stage.count > 0 && (
+                      <>
+                        <div class="absolute inset-y-0 left-0 rounded bg-primary-600" style={`width: ${Math.max(1, (stage.medianHours / scaleMax) * 100)}%`} title={`Median ${formatHours(stage.medianHours)}`}></div>
+                        <div class="absolute -top-0.5 -bottom-0.5 w-0.5 rounded bg-gray-800" style={`left: calc(${(stage.p90Hours / scaleMax) * 100}% - 1px)`} title={`90th percentile ${formatHours(stage.p90Hours)}`}></div>
+                      </>
+                    )}
+                  </div>
+                  <p class="mt-1 text-xs text-gray-500">{stage.count} approval{stage.count === 1 ? '' : 's'} measured</p>
+                </li>
+              ))}
+            </ul>
+            <div class="mt-5 flex flex-wrap gap-4 text-xs text-gray-600">
+              <span class="flex items-center gap-1.5"><span class="w-2.5 h-2.5 rounded-sm bg-primary-600" aria-hidden="true"></span>Median</span>
+              <span class="flex items-center gap-1.5"><span class="w-0.5 h-3 rounded bg-gray-800" aria-hidden="true"></span>90% of vouchers finish by</span>
+            </div>
+          </>
+        )}
+      </div>
+    </section>
+
+    <!-- Current backlog by age -->
+    <section class="card" aria-labelledby="backlog-heading">
+      <div class="card-header">
+        <h2 id="backlog-heading" class="card-title">Waiting now, by stage</h2>
+        <a href="/approvals" class="text-sm font-medium text-primary-600 hover:underline">Open approvals</a>
+      </div>
+      {totalOpen === 0 ? (
+        <EmptyState tone="success" title="Nothing is waiting" description="No vouchers are currently in approval." />
+      ) : (
+        <div class="relative overflow-x-auto">
+          <table class="table">
+            <caption class="sr-only">Open vouchers by stage and how long they have waited</caption>
+            <thead>
+              <tr>
+                <th scope="col">Stage</th>
+                {bucketLabels.map(label => <th scope="col" class="!text-right">{label}</th>)}
+                <th scope="col" class="!text-right">Oldest</th>
+              </tr>
+            </thead>
+            <tbody>
+              {queueAges.map(stage => (
+                <tr>
+                  <th scope="row" class="!text-sm !font-medium !text-gray-800">{stage.label}</th>
+                  {stage.buckets.map((count, i) => (
+                    <td class="text-right tabular-nums">
+                      <span
+                        class={`inline-flex min-w-[2rem] justify-center rounded px-1.5 py-0.5 ${count === 0 ? 'text-gray-400' : i === 3 ? 'font-semibold text-orange-800' : ''}`}
+                        style={count ? `background-color: rgb(var(--c-${i === 3 ? 'orange' : 'blue'}-${count / bucketMax > 0.66 ? 200 : count / bucketMax > 0.33 ? 100 : 50}))` : undefined}
+                      >
+                        {count}
+                      </span>
+                    </td>
+                  ))}
+                  <td class="text-right tabular-nums text-gray-600">{stage.open ? `${stage.oldestDays} d` : '—'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {stale > 0 && (
+        <div class="px-5 pb-5">
+          <Banner appearance="warning">
+            {stale} voucher{stale === 1 ? ' has' : 's have'} waited more than a week at one stage. Approvers see the oldest first in their queue.
+          </Banner>
+        </div>
+      )}
+    </section>
+  </div>
+
+  <p class="mt-6 text-xs text-gray-500 max-w-3xl">
+    A stage's time runs from when the previous stage was approved (or the voucher was created) to when this stage was approved.
+    Rejected vouchers are not timed past the rejection. All figures come from the approval workflow and audit log; nothing is sent outside the system.
+  </p>
+</MainLayout>

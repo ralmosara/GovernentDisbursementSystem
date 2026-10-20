@@ -1,5 +1,11 @@
 ---
 import MainLayout from '../../../layouts/MainLayout.astro';
+import PageHeader from '../../../components/ui/PageHeader.astro';
+import FilterBar from '../../../components/ui/FilterBar.astro';
+import DataTable from '../../../components/ui/DataTable.astro';
+import StatTile from '../../../components/ui/StatTile.astro';
+import EmptyState from '../../../components/ui/EmptyState.astro';
+import Lozenge from '../../../components/ui/Lozenge.astro';
 import { budgetService } from '../../../lib/services/budget.service';
 
 const user = Astro.locals.user;
@@ -8,251 +14,125 @@ if (!user) {
   return Astro.redirect('/login');
 }
 
-// Get query parameters
 const status = Astro.url.searchParams.get('status') || '';
+const allotmentFilter = parseInt(Astro.url.searchParams.get('allotment') || '0');
 
-// Get obligations
-const obligations = await budgetService.getObligations(status || undefined);
+// Summary counts cover every obligation (within the allotment filter), so they
+// still make sense while a status filter is applied
+const allObligations = await budgetService.getObligations();
+const inScope = allotmentFilter ? allObligations.filter(o => o.allotmentId === allotmentFilter) : allObligations;
+const obligations = status ? inScope.filter(o => o.status === status) : inScope;
 
-// Calculate totals
-const totalObligations = obligations.length;
-const pendingCount = obligations.filter(o => o.status === 'pending').length;
-const approvedCount = obligations.filter(o => o.status === 'approved').length;
-const rejectedCount = obligations.filter(o => o.status === 'rejected').length;
-const totalAmount = obligations.reduce((sum, obl) => sum + obl.amount, 0);
+const sumOf = (list: typeof inScope) => list.reduce((sum, o) => sum + o.amount, 0);
+const byStatus = (s: string) => inScope.filter(o => o.status === s);
+const pending = byStatus('pending');
+const approved = byStatus('approved');
+const rejected = byStatus('rejected');
+
+const canCertify = (user.roles ?? []).some(role => role === 'budget_officer' || role === 'administrator');
+const activeFilters = [status, allotmentFilter || ''].filter(Boolean).length;
+
+const peso = (value: number) =>
+  `₱${value.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const formatDate = (date: Date | string) =>
+  new Date(date).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
+const statusHref = (s: string) => `/budget/obligations?${new URLSearchParams({ status: s, ...(allotmentFilter ? { allotment: String(allotmentFilter) } : {}) })}`;
 ---
 
-<MainLayout title="Registry of Obligations">
-  <div class="container-fluid py-6">
-    <!-- Page Header -->
-    <div class="page-header flex items-center justify-between">
-      <div>
-        <h1 class="page-title">Registry of Obligations</h1>
-        <p class="page-description">Manage budget obligations and ORS/BURS tracking</p>
-      </div>
-      <a href="/budget/obligations/create" class="btn btn-primary btn-md">
-        <i class="pi pi-plus mr-2"></i>
-        New Obligation
-      </a>
-    </div>
+<MainLayout title="Obligations - Philippine Government FMS">
+  <PageHeader
+    title="Registry of obligations"
+    description="Commit funds against allotments and track ORS/BURS numbers."
+    breadcrumbs={[{ label: 'Budget', href: '/budget/allotments' }, { label: 'Obligations' }]}
+  >
+    <a slot="actions" href={`/budget/obligations/create${allotmentFilter ? `?allotment=${allotmentFilter}` : ''}`} class="btn btn-primary">
+      <i class="pi pi-plus" aria-hidden="true"></i>
+      New obligation
+    </a>
+  </PageHeader>
 
-    <!-- Summary Cards -->
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-      <div class="card">
-        <div class="card-body">
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-sm text-gray-600 mb-1">Total Obligations</p>
-              <p class="text-2xl font-bold text-gray-900">{totalObligations}</p>
-            </div>
-            <div class="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-              <i class="pi pi-file text-blue-600 text-xl"></i>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-body">
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-sm text-gray-600 mb-1">Pending</p>
-              <p class="text-2xl font-bold text-yellow-600">{pendingCount}</p>
-            </div>
-            <div class="w-12 h-12 bg-yellow-100 rounded-lg flex items-center justify-center">
-              <i class="pi pi-clock text-yellow-600 text-xl"></i>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-body">
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-sm text-gray-600 mb-1">Approved</p>
-              <p class="text-2xl font-bold text-green-600">{approvedCount}</p>
-            </div>
-            <div class="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
-              <i class="pi pi-check-circle text-green-600 text-xl"></i>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="card-body">
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-sm text-gray-600 mb-1">Total Amount</p>
-              <p class="text-xl font-bold text-primary-600">
-                ₱{totalAmount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-              </p>
-            </div>
-            <div class="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
-              <i class="pi pi-wallet text-purple-600 text-xl"></i>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Filters -->
-    <div class="card mb-6">
-      <div class="card-body">
-        <form method="GET" class="flex items-end gap-4">
-          <div class="form-group mb-0">
-            <label for="status" class="form-label">Status</label>
-            <select name="status" id="status" class="form-select w-48" onchange="this.form.submit()">
-              <option value="">All Status</option>
-              <option value="pending" selected={status === 'pending'}>Pending</option>
-              <option value="approved" selected={status === 'approved'}>Approved</option>
-              <option value="rejected" selected={status === 'rejected'}>Rejected</option>
-            </select>
-          </div>
-        </form>
-      </div>
-    </div>
-
-    <!-- Obligations Table -->
-    <div class="card">
-      <div class="card-body">
-        {obligations.length === 0 ? (
-          <div class="text-center py-12">
-            <i class="pi pi-inbox text-4xl text-gray-400 mb-4"></i>
-            <p class="text-gray-500 mb-4">No obligations found</p>
-            <a href="/budget/obligations/create" class="btn btn-primary btn-md">
-              <i class="pi pi-plus mr-2"></i>
-              Create First Obligation
-            </a>
-          </div>
-        ) : (
-          <div class="overflow-x-auto">
-            <table class="table table-hover">
-              <thead>
-                <tr>
-                  <th>ORS/BURS Number</th>
-                  <th>Payee</th>
-                  <th>Fund Cluster</th>
-                  <th>Object of Expenditure</th>
-                  <th class="text-right">Amount</th>
-                  <th>Date</th>
-                  <th>Status</th>
-                  <th class="text-center">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {obligations.map(obligation => (
-                  <tr>
-                    <td>
-                      <div class="text-sm">
-                        {obligation.orsNumber && (
-                          <div class="font-medium text-gray-900">
-                            ORS: {obligation.orsNumber}
-                          </div>
-                        )}
-                        {obligation.bursNumber && (
-                          <div class="text-xs text-gray-600">
-                            BURS: {obligation.bursNumber}
-                          </div>
-                        )}
-                        {!obligation.orsNumber && !obligation.bursNumber && (
-                          <span class="text-xs text-gray-400">Not assigned</span>
-                        )}
-                      </div>
-                    </td>
-                    <td>
-                      <div>
-                        <div class="font-medium text-gray-900">{obligation.payee}</div>
-                        <div class="text-xs text-gray-500 truncate max-w-xs">
-                          {obligation.particulars}
-                        </div>
-                      </div>
-                    </td>
-                    <td>
-                      <span class="text-sm">
-                        {obligation.allotment.appropriation.fundCluster.code}
-                      </span>
-                    </td>
-                    <td>
-                      <div class="text-sm">
-                        <div class="font-medium">{obligation.allotment.objectOfExpenditure.code}</div>
-                        <div class="text-xs text-gray-500">
-                          {obligation.allotment.objectOfExpenditure.name}
-                        </div>
-                      </div>
-                    </td>
-                    <td class="text-right font-medium">
-                      ₱{obligation.amount.toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-                    </td>
-                    <td class="text-sm text-gray-600">
-                      {new Date(obligation.obligationDate).toLocaleDateString('en-PH')}
-                    </td>
-                    <td>
-                      {obligation.status === 'pending' && (
-                        <span class="status-pending">Pending</span>
-                      )}
-                      {obligation.status === 'approved' && (
-                        <span class="status-approved">Approved</span>
-                      )}
-                      {obligation.status === 'rejected' && (
-                        <span class="status-rejected">Rejected</span>
-                      )}
-                    </td>
-                    <td class="text-center">
-                      <div class="flex items-center justify-center gap-2">
-                        <a
-                          href={`/budget/obligations/${obligation.id}`}
-                          class="text-blue-600 hover:text-blue-800"
-                          title="View Details"
-                        >
-                          <i class="pi pi-eye"></i>
-                        </a>
-                        {obligation.status === 'pending' && (
-                          <button
-                            class="text-green-600 hover:text-green-800"
-                            title="Approve"
-                            onclick={`approveObligation(${obligation.id})`}
-                          >
-                            <i class="pi pi-check"></i>
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    </div>
+  <div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+    <StatTile label="Awaiting certification" value={pending.length} help={peso(sumOf(pending))} icon="pi-clock" href={statusHref('pending')} />
+    <StatTile label="Approved" value={approved.length} help={peso(sumOf(approved))} icon="pi-check-circle" href={statusHref('approved')} />
+    <StatTile label="Rejected" value={rejected.length} help={peso(sumOf(rejected))} icon="pi-times-circle" href={statusHref('rejected')} />
+    <StatTile label="All obligations" value={inScope.length} help={peso(sumOf(inScope))} icon="pi-book" href={allotmentFilter ? `/budget/obligations?allotment=${allotmentFilter}` : '/budget/obligations'} />
   </div>
 
-  <script>
-    (window as any).approveObligation = async (id: number) => {
-      if (!confirm('Are you sure you want to approve this obligation?')) {
-        return;
-      }
+  <FilterBar action="/budget/obligations" resetHref="/budget/obligations" activeCount={activeFilters}>
+    {allotmentFilter ? <input type="hidden" name="allotment" value={allotmentFilter} /> : null}
+    <div class="form-group">
+      <label for="status" class="form-label">Status</label>
+      <select name="status" id="status" class="form-select">
+        <option value="">Any status</option>
+        <option value="pending" selected={status === 'pending'}>Pending</option>
+        <option value="approved" selected={status === 'approved'}>Approved</option>
+        <option value="rejected" selected={status === 'rejected'}>Rejected</option>
+      </select>
+    </div>
+  </FilterBar>
 
-      try {
-        const response = await fetch(`/api/budget/obligations/${id}/approve`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          }
-        });
-
-        if (response.ok) {
-          window.location.reload();
-        } else {
-          const error = await response.json();
-          alert('Error: ' + (error.message || 'Failed to approve obligation'));
-        }
-      } catch (error) {
-        console.error('Error:', error);
-        alert('An error occurred. Please try again.');
-      }
-    };
-  </script>
+  {obligations.length === 0 ? (
+    <div class="card">
+      <EmptyState
+        icon="pi-book"
+        title={activeFilters ? 'No obligations match these filters' : 'No obligations yet'}
+        description={activeFilters ? 'Try another status or clear the filters.' : 'Record an obligation to commit funds against an allotment.'}
+      >
+        {activeFilters ? (
+          <a href="/budget/obligations" class="btn btn-secondary">Clear filters</a>
+        ) : (
+          <a href="/budget/obligations/create" class="btn btn-primary">Create an obligation</a>
+        )}
+      </EmptyState>
+    </div>
+  ) : (
+    <DataTable title="Obligations" count={obligations.length} quickFilter quickFilterLabel="Filter by payee, ORS…">
+      <table class="table">
+        <thead>
+          <tr>
+            <th scope="col">ORS/BURS</th>
+            <th scope="col">Payee</th>
+            <th scope="col" class="hidden md:table-cell">Fund</th>
+            <th scope="col" class="hidden lg:table-cell">Object of expenditure</th>
+            <th scope="col">Date</th>
+            <th scope="col" class="!text-right">Amount</th>
+            <th scope="col">Status</th>
+            <th scope="col" data-nosort><span class="sr-only">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {obligations.map(obligation => (
+            <tr class="hover:bg-gray-50">
+              <td class="whitespace-nowrap">
+                <a href={`/budget/obligations/${obligation.id}`} class="font-medium text-primary-600 hover:underline">
+                  {obligation.orsNumber || obligation.bursNumber || `#${obligation.id}`}
+                </a>
+                {obligation.orsNumber && obligation.bursNumber && <p class="text-xs text-gray-500">BURS {obligation.bursNumber}</p>}
+              </td>
+              <td class="max-w-[16rem]">
+                <p class="truncate" title={obligation.payee}>{obligation.payee}</p>
+                <p class="text-xs text-gray-500 truncate" title={obligation.particulars}>{obligation.particulars}</p>
+              </td>
+              <td class="hidden md:table-cell text-gray-600">{obligation.allotment.appropriation.fundCluster.code}</td>
+              <td class="hidden lg:table-cell max-w-[14rem]">
+                <p class="truncate text-gray-600" title={obligation.allotment.objectOfExpenditure.name}>
+                  {obligation.allotment.objectOfExpenditure.code} · {obligation.allotment.objectOfExpenditure.name}
+                </p>
+              </td>
+              <td class="whitespace-nowrap text-gray-600" data-sort-value={new Date(obligation.obligationDate).getTime()}>{formatDate(obligation.obligationDate)}</td>
+              <td class="text-right font-medium tabular-nums whitespace-nowrap" data-sort-value={obligation.amount}>{peso(obligation.amount)}</td>
+              <td><Lozenge status={obligation.status} /></td>
+              <td class="text-right whitespace-nowrap">
+                {obligation.status === 'pending' && canCertify ? (
+                  <a href={`/budget/obligations/${obligation.id}`} class="btn btn-primary btn-sm">Review</a>
+                ) : obligation.status === 'approved' ? (
+                  <a href={`/budget/obligations/${obligation.id}`} class="btn btn-subtle btn-sm">Open</a>
+                ) : null}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </DataTable>
+  )}
 </MainLayout>

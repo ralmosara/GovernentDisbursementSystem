@@ -824,6 +824,25 @@ export class TravelService {
     }
   }
 
+  /**
+   * Count liquidation reports by review status
+   */
+  static async getLiquidationCounts() {
+    const rows = await db
+      .select({
+        pendingReview: sql<number>`SUM(CASE WHEN ${liquidationReports.status} = 'pending_review' THEN 1 ELSE 0 END)`,
+        approved: sql<number>`SUM(CASE WHEN ${liquidationReports.status} IN ('approved', 'settled') THEN 1 ELSE 0 END)`,
+        draft: sql<number>`SUM(CASE WHEN ${liquidationReports.status} = 'draft' THEN 1 ELSE 0 END)`,
+      })
+      .from(liquidationReports);
+
+    return {
+      pendingReview: Number(rows[0]?.pendingReview) || 0,
+      approved: Number(rows[0]?.approved) || 0,
+      draft: Number(rows[0]?.draft) || 0,
+    };
+  }
+
   // ============================================
   // UTILITY FUNCTIONS
   // ============================================

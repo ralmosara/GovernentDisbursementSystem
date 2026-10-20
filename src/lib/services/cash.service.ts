@@ -14,7 +14,7 @@ import {
   disbursementVouchers,
   users,
 } from '../db/schema';
-import { eq, and, or, desc, sum, sql, isNotNull, isNull, gte, lte } from 'drizzle-orm';
+import { eq, and, or, desc, sum, sql, isNotNull, isNull, gte, lte, inArray, notInArray } from 'drizzle-orm';
 import { generateORNumber, generateDepositSlipNumber, generateCANumber } from '../utils/serial-generator';
 
 // ============================================
@@ -96,30 +96,32 @@ export class CashService {
    */
   async createCashReceipt(data: CreateCashReceiptData, userId: number): Promise<{ id: number; orNo: string }> {
     try {
-      // Generate OR number
-      const orNo = await generateORNumber(data.orSeriesId);
+      // Issue the OR number and record the receipt atomically so a failed insert
+      // never consumes (and skips) an accountable-form number
+      return await db.transaction(async (tx) => {
+        const orNo = await generateORNumber(data.orSeriesId, tx);
 
-      // Insert cash receipt
-      const result = await db.insert(cashReceipts).values({
-        orNo,
-        orSeriesId: data.orSeriesId,
-        receiptDate: data.receiptDate,
-        payorName: data.payorName,
-        amount: data.amount.toString(),
-        paymentMode: data.paymentMode,
-        checkNo: data.checkNo,
-        checkDate: data.checkDate,
-        checkBank: data.checkBank,
-        particulars: data.particulars,
-        fundClusterId: data.fundClusterId,
-        revenueSourceId: data.revenueSourceId,
-        createdBy: userId,
+        const [result] = await tx.insert(cashReceipts).values({
+          orNo,
+          orSeriesId: data.orSeriesId,
+          receiptDate: data.receiptDate,
+          payorName: data.payorName,
+          amount: data.amount.toString(),
+          paymentMode: data.paymentMode,
+          checkNo: data.checkNo,
+          checkDate: data.checkDate,
+          checkBank: data.checkBank,
+          particulars: data.particulars,
+          fundClusterId: data.fundClusterId,
+          revenueSourceId: data.revenueSourceId,
+          createdBy: userId,
+        });
+
+        return {
+          id: Number(result.insertId),
+          orNo,
+        };
       });
-
-      return {
-        id: Number(result.insertId),
-        orNo,
-      };
     } catch (error) {
       throw new Error(`Failed to create cash receipt: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
@@ -284,7 +286,7 @@ export class CashService {
       const totalAmount = receipts.reduce((sum, r) => sum + Number(r.amount), 0);
 
       // Insert bank deposit
-      const result = await db.insert(bankDeposits).values({
+      const [result] = await db.insert(bankDeposits).values({
         depositSlipNo,
         bankAccountId: data.bankAccountId,
         depositDate: data.depositDate,
@@ -407,7 +409,7 @@ export class CashService {
         data.bookBalance + (data.bankInterest || 0) - (data.bankCharges || 0);
 
       // Insert reconciliation
-      const result = await db.insert(bankReconciliations).values({
+      const [result] = await db.insert(bankReconciliations).values({
         bankAccountId: data.bankAccountId,
         reconciliationDate: data.reconciliationDate,
         periodMonth: data.periodMonth,
@@ -437,10 +439,75 @@ export class CashService {
    * Complete a bank reconciliation
    */
   async completeBankReconciliation(id: number, userId: number): Promise<void> {
+    const rows = await db
+      .select({
+        status: bankReconciliations.status,
+        adjustedBookBalance: bankReconciliations.adjustedBookBalance,
+        adjustedBankBalance: bankReconciliations.adjustedBankBalance,
+      })
+      .from(bankReconciliations)
+      .where(eq(bankReconciliations.id, id))
+      .limit(1);
+
+    const recon = rows[0];
+    if (!recon) {
+      throw new Error('Bank reconciliation not found');
+    }
+
+    if (recon.status !== 'draft') {
+      throw new Error('Only draft reconciliations can be completed');
+    }
+
+    // A reconciliation is only complete when adjusted book and bank balances agree
+    const book = Math.round(Number(recon.adjustedBookBalance) * 100);
+    const bank = Math.round(Number(recon.adjustedBankBalance) * 100);
+    if (book !== bank) {
+      throw new Error(
+        `Adjusted balances do not agree (book ₱${(book / 100).toFixed(2)} vs bank ₱${(bank / 100).toFixed(2)}). ` +
+        'Resolve the difference before completing.'
+      );
+    }
+
     await db
       .update(bankReconciliations)
       .set({ status: 'completed' })
-      .where(eq(bankReconciliations.id, id));
+      .where(and(eq(bankReconciliations.id, id), eq(bankReconciliations.status, 'draft')));
+  }
+
+  /**
+   * Get a single bank reconciliation with its bank account and preparer
+   */
+  async getBankReconciliationById(id: number) {
+    const rows = await db
+      .select({
+        id: bankReconciliations.id,
+        reconciliationDate: bankReconciliations.reconciliationDate,
+        periodMonth: bankReconciliations.periodMonth,
+        periodYear: bankReconciliations.periodYear,
+        bookBalance: bankReconciliations.bookBalance,
+        bankBalance: bankReconciliations.bankBalance,
+        outstandingChecks: bankReconciliations.outstandingChecks,
+        depositsInTransit: bankReconciliations.depositsInTransit,
+        bankCharges: bankReconciliations.bankCharges,
+        bankInterest: bankReconciliations.bankInterest,
+        adjustedBookBalance: bankReconciliations.adjustedBookBalance,
+        adjustedBankBalance: bankReconciliations.adjustedBankBalance,
+        status: bankReconciliations.status,
+        preparedDate: bankReconciliations.preparedDate,
+        accountName: bankAccounts.accountName,
+        accountNumber: bankAccounts.accountNumber,
+        bankName: bankAccounts.bankName,
+        bankBranch: bankAccounts.bankBranch,
+        preparedByFirstName: users.firstName,
+        preparedByLastName: users.lastName,
+      })
+      .from(bankReconciliations)
+      .leftJoin(bankAccounts, eq(bankReconciliations.bankAccountId, bankAccounts.id))
+      .leftJoin(users, eq(bankReconciliations.preparedBy, users.id))
+      .where(eq(bankReconciliations.id, id))
+      .limit(1);
+
+    return rows[0] || null;
   }
 
   /**
@@ -586,7 +653,7 @@ export class CashService {
    * Save daily cash position
    */
   async saveDailyCashPosition(data: DailyCashPositionData, userId: number): Promise<{ id: number }> {
-    const result = await db.insert(dailyCashPosition).values({
+    const [result] = await db.insert(dailyCashPosition).values({
       reportDate: data.reportDate,
       fundClusterId: data.fundClusterId,
       openingBalance: data.openingBalance.toString(),
@@ -662,7 +729,7 @@ export class CashService {
    * Create a new petty cash fund
    */
   async createPettyCashFund(data: CreatePettyCashFundData, userId: number): Promise<{ id: number }> {
-    const result = await db.insert(pettyCashFunds).values({
+    const [result] = await db.insert(pettyCashFunds).values({
       fundCode: data.fundCode,
       fundName: data.fundName,
       custodian: data.custodian,
@@ -683,91 +750,223 @@ export class CashService {
    * Disburse from petty cash fund
    */
   async disbursePettyCash(fundId: number, data: PettyCashDisbursementData, userId: number): Promise<{ id: number; needsReplenishment: boolean }> {
-    // Get fund details
-    const fund = await db
-      .select()
-      .from(pettyCashFunds)
-      .where(eq(pettyCashFunds.id, fundId))
-      .limit(1);
-
-    if (!fund[0]) {
-      throw new Error('Petty cash fund not found');
+    if (!(data.amount > 0)) {
+      throw new Error('Disbursement amount must be greater than zero');
     }
 
-    // Check if sufficient balance
-    const currentBalance = Number(fund[0].currentBalance);
-    if (currentBalance < data.amount) {
-      throw new Error('Insufficient petty cash balance');
-    }
+    // Lock the fund row so concurrent disbursements cannot overdraw it or lose an update
+    return await db.transaction(async (tx) => {
+      const fund = await tx
+        .select()
+        .from(pettyCashFunds)
+        .where(eq(pettyCashFunds.id, fundId))
+        .limit(1)
+        .for('update');
 
-    // Create disbursement transaction
-    const result = await db.insert(pettyCashTransactions).values({
-      pettyCashFundId: fundId,
-      transactionType: 'disbursement',
-      transactionDate: data.transactionDate,
-      amount: data.amount.toString(),
-      purpose: data.purpose,
-      orNo: data.orNo,
-      payee: data.payee,
-      createdBy: userId,
+      if (!fund[0]) {
+        throw new Error('Petty cash fund not found');
+      }
+
+      if (!fund[0].isActive) {
+        throw new Error('Petty cash fund is inactive');
+      }
+
+      // Work in centavos to avoid floating-point drift on cash balances
+      const balanceCentavos = Math.round(Number(fund[0].currentBalance) * 100);
+      const amountCentavos = Math.round(data.amount * 100);
+
+      if (balanceCentavos < amountCentavos) {
+        throw new Error('Insufficient petty cash balance');
+      }
+
+      // Create disbursement transaction
+      const [result] = await tx.insert(pettyCashTransactions).values({
+        pettyCashFundId: fundId,
+        transactionType: 'disbursement',
+        transactionDate: data.transactionDate,
+        amount: (amountCentavos / 100).toFixed(2),
+        purpose: data.purpose,
+        orNo: data.orNo,
+        payee: data.payee,
+        createdBy: userId,
+      });
+
+      // Update fund current balance
+      const newBalance = (balanceCentavos - amountCentavos) / 100;
+      await tx
+        .update(pettyCashFunds)
+        .set({ currentBalance: newBalance.toFixed(2) })
+        .where(eq(pettyCashFunds.id, fundId));
+
+      // Check if below replenishment threshold
+      const threshold = fund[0].replenishmentThreshold ? Number(fund[0].replenishmentThreshold) : 0;
+      const needsReplenishment = threshold > 0 && newBalance < threshold;
+
+      return {
+        id: Number(result.insertId),
+        needsReplenishment,
+      };
     });
-
-    // Update fund current balance
-    const newBalance = currentBalance - data.amount;
-    await db
-      .update(pettyCashFunds)
-      .set({ currentBalance: newBalance.toString() })
-      .where(eq(pettyCashFunds.id, fundId));
-
-    // Check if below replenishment threshold
-    const threshold = fund[0].replenishmentThreshold ? Number(fund[0].replenishmentThreshold) : 0;
-    const needsReplenishment = threshold > 0 && newBalance < threshold;
-
-    return {
-      id: Number(result.insertId),
-      needsReplenishment,
-    };
   }
 
   /**
-   * Replenish petty cash fund
+   * Replenish petty cash fund back to its authorized amount.
+   * The replenishment must be supported by an approved (or paid) DV for exactly the
+   * amount spent, and a DV can replenish a fund only once.
    */
-  async replenishPettyCash(fundId: number, dvId: number, userId: number): Promise<{ id: number }> {
-    // Get fund details
-    const fund = await db
-      .select()
+  async replenishPettyCash(fundId: number, dvId: number, userId: number): Promise<{ id: number; amount: number }> {
+    return await db.transaction(async (tx) => {
+      const fund = await tx
+        .select()
+        .from(pettyCashFunds)
+        .where(eq(pettyCashFunds.id, fundId))
+        .limit(1)
+        .for('update');
+
+      if (!fund[0]) {
+        throw new Error('Petty cash fund not found');
+      }
+
+      const fundAmount = Number(fund[0].fundAmount);
+      const replenishmentCentavos = Math.round((fundAmount - Number(fund[0].currentBalance)) * 100);
+
+      if (replenishmentCentavos <= 0) {
+        throw new Error('Fund is already at its authorized amount; nothing to replenish');
+      }
+
+      const dv = await tx
+        .select({ id: disbursementVouchers.id, dvNo: disbursementVouchers.dvNo, amount: disbursementVouchers.amount, status: disbursementVouchers.status })
+        .from(disbursementVouchers)
+        .where(eq(disbursementVouchers.id, dvId))
+        .limit(1);
+
+      if (!dv[0]) {
+        throw new Error('Disbursement voucher not found');
+      }
+
+      if (dv[0].status !== 'approved' && dv[0].status !== 'paid') {
+        throw new Error(`DV ${dv[0].dvNo} must be approved before it can replenish petty cash (status: ${dv[0].status})`);
+      }
+
+      if (Math.round(Number(dv[0].amount) * 100) !== replenishmentCentavos) {
+        throw new Error(
+          `DV ${dv[0].dvNo} amount (₱${Number(dv[0].amount).toFixed(2)}) must equal the amount to replenish (₱${(replenishmentCentavos / 100).toFixed(2)})`
+        );
+      }
+
+      const alreadyUsed = await tx
+        .select({ id: pettyCashTransactions.id })
+        .from(pettyCashTransactions)
+        .where(and(eq(pettyCashTransactions.dvId, dvId), eq(pettyCashTransactions.transactionType, 'replenishment')))
+        .limit(1);
+
+      if (alreadyUsed.length > 0) {
+        throw new Error(`DV ${dv[0].dvNo} has already been used to replenish petty cash`);
+      }
+
+      // Create replenishment transaction
+      const [result] = await tx.insert(pettyCashTransactions).values({
+        pettyCashFundId: fundId,
+        transactionType: 'replenishment',
+        transactionDate: new Date(),
+        amount: (replenishmentCentavos / 100).toFixed(2),
+        purpose: `Petty cash replenishment (DV ${dv[0].dvNo})`,
+        dvId,
+        createdBy: userId,
+      });
+
+      // Update fund current balance back to fund amount
+      await tx
+        .update(pettyCashFunds)
+        .set({ currentBalance: fundAmount.toFixed(2) })
+        .where(eq(pettyCashFunds.id, fundId));
+
+      return {
+        id: Number(result.insertId),
+        amount: replenishmentCentavos / 100,
+      };
+    });
+  }
+
+  /**
+   * Get a single petty cash fund with its fund cluster
+   */
+  async getPettyCashFundById(fundId: number) {
+    const rows = await db
+      .select({
+        id: pettyCashFunds.id,
+        fundCode: pettyCashFunds.fundCode,
+        fundName: pettyCashFunds.fundName,
+        custodian: pettyCashFunds.custodian,
+        fundAmount: pettyCashFunds.fundAmount,
+        currentBalance: pettyCashFunds.currentBalance,
+        replenishmentThreshold: pettyCashFunds.replenishmentThreshold,
+        isActive: pettyCashFunds.isActive,
+        fundClusterId: pettyCashFunds.fundClusterId,
+        fundClusterCode: fundClusters.code,
+        fundClusterName: fundClusters.name,
+        createdAt: pettyCashFunds.createdAt,
+      })
       .from(pettyCashFunds)
+      .leftJoin(fundClusters, eq(pettyCashFunds.fundClusterId, fundClusters.id))
       .where(eq(pettyCashFunds.id, fundId))
       .limit(1);
 
-    if (!fund[0]) {
-      throw new Error('Petty cash fund not found');
-    }
+    return rows[0] || null;
+  }
 
-    const fundAmount = Number(fund[0].fundAmount);
-    const currentBalance = Number(fund[0].currentBalance);
-    const replenishmentAmount = fundAmount - currentBalance;
+  /**
+   * Get the transaction register of a petty cash fund, newest first
+   */
+  async getPettyCashTransactions(fundId: number) {
+    return await db
+      .select({
+        id: pettyCashTransactions.id,
+        transactionType: pettyCashTransactions.transactionType,
+        transactionDate: pettyCashTransactions.transactionDate,
+        amount: pettyCashTransactions.amount,
+        purpose: pettyCashTransactions.purpose,
+        orNo: pettyCashTransactions.orNo,
+        payee: pettyCashTransactions.payee,
+        dvId: pettyCashTransactions.dvId,
+        dvNo: disbursementVouchers.dvNo,
+        createdAt: pettyCashTransactions.createdAt,
+      })
+      .from(pettyCashTransactions)
+      .leftJoin(disbursementVouchers, eq(pettyCashTransactions.dvId, disbursementVouchers.id))
+      .where(eq(pettyCashTransactions.pettyCashFundId, fundId))
+      .orderBy(desc(pettyCashTransactions.transactionDate), desc(pettyCashTransactions.id));
+  }
 
-    // Create replenishment transaction
-    const result = await db.insert(pettyCashTransactions).values({
-      pettyCashFundId: fundId,
-      transactionType: 'replenishment',
-      transactionDate: new Date(),
-      amount: replenishmentAmount.toString(),
-      purpose: 'Petty cash replenishment',
-      dvId,
-      createdBy: userId,
-    });
+  /**
+   * Approved or paid DVs that can support a petty cash replenishment
+   * (not yet used for one), for the replenish picker
+   */
+  async getDVsForReplenishment(fundClusterId: number) {
+    const used = db
+      .select({ dvId: pettyCashTransactions.dvId })
+      .from(pettyCashTransactions)
+      .where(and(eq(pettyCashTransactions.transactionType, 'replenishment'), isNotNull(pettyCashTransactions.dvId)));
 
-    // Update fund current balance back to fund amount
-    await db
-      .update(pettyCashFunds)
-      .set({ currentBalance: fundAmount.toString() })
-      .where(eq(pettyCashFunds.id, fundId));
-
-    return {
-      id: Number(result.insertId),
-    };
+    return await db
+      .select({
+        id: disbursementVouchers.id,
+        dvNo: disbursementVouchers.dvNo,
+        payeeName: disbursementVouchers.payeeName,
+        amount: disbursementVouchers.amount,
+        status: disbursementVouchers.status,
+        dvDate: disbursementVouchers.dvDate,
+      })
+      .from(disbursementVouchers)
+      .where(
+        and(
+          eq(disbursementVouchers.fundClusterId, fundClusterId),
+          inArray(disbursementVouchers.status, ['approved', 'paid']),
+          notInArray(disbursementVouchers.id, used)
+        )
+      )
+      .orderBy(desc(disbursementVouchers.dvDate))
+      .limit(100);
   }
 
   /**
@@ -826,7 +1025,7 @@ export class CashService {
     try {
       const caNo = await generateCANumber();
 
-      const result = await db.insert(cashAdvances).values({
+      const [result] = await db.insert(cashAdvances).values({
         caNo,
         employeeId: data.employeeId,
         fundClusterId: data.fundClusterId,

@@ -337,6 +337,9 @@ CREATE TABLE `collections` (
   `collection_date` datetime NOT NULL,
   `amount` decimal(15,2) NOT NULL,
   `payment_mode` enum('cash','check','online') NOT NULL,
+  `check_no` varchar(50) DEFAULT NULL,
+  `check_date` datetime DEFAULT NULL,
+  `check_bank` varchar(100) DEFAULT NULL,
   `remarks` text DEFAULT NULL,
   `created_by` int(11) NOT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp()

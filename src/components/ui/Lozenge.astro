@@ -1,0 +1,22 @@
+---
+// ADS-style status lozenge. Pass a record `status` (mapped through src/lib/ui/status.ts)
+// or an explicit `appearance`; `label` overrides the generated text.
+import { lozengeClass, statusLabel, type LozengeAppearance } from '../../lib/ui/status';
+
+interface Props {
+  status?: string | null;
+  appearance?: LozengeAppearance;
+  label?: string;
+  icon?: string;
+  class?: string;
+}
+
+const { status, appearance, label, icon, class: extra = '' } = Astro.props;
+const className = lozengeClass(appearance ?? status);
+const text = label ?? statusLabel(status);
+---
+
+<span class={`${className} ${extra}`}>
+  {icon && <i class={`pi ${icon} !text-[10px]`} aria-hidden="true"></i>}
+  {text}
+</span>

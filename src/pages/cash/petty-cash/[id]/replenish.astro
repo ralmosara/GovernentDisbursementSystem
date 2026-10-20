@@ -1,0 +1,143 @@
+---
+import MainLayout from '../../../../layouts/MainLayout.astro';
+import { cashService } from '../../../../lib/services/cash.service';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+const fundId = parseInt(Astro.params.id as string);
+const fund = fundId ? await cashService.getPettyCashFundById(fundId) : null;
+
+if (!fund) {
+  return Astro.redirect('/cash/petty-cash');
+}
+
+const fundAmount = Number(fund.fundAmount);
+const replenishAmount = Math.round((fundAmount - Number(fund.currentBalance)) * 100) / 100;
+
+// Only DVs for exactly the amount spent can support the replenishment
+const candidateDVs = replenishAmount > 0 ? await cashService.getDVsForReplenishment(fund.fundClusterId) : [];
+const matchingDVs = candidateDVs.filter(dv => Math.round(Number(dv.amount) * 100) === Math.round(replenishAmount * 100));
+
+const peso = (n: number | string) =>
+  `₱${Number(n).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+---
+
+<MainLayout title={`Replenish ${fund.fundCode}`}>
+  <div class="page-header mb-6">
+    <div class="flex items-center gap-3 mb-2">
+      <a href={`/cash/petty-cash/${fund.id}`} class="text-gray-500 hover:text-gray-700" aria-label="Back to fund">
+        <i class="pi pi-arrow-left"></i>
+      </a>
+      <h1 class="page-title">Replenish Petty Cash</h1>
+    </div>
+    <p class="page-description">{fund.fundCode} – {fund.fundName} · Custodian: {fund.custodian}</p>
+  </div>
+
+  <div class="card max-w-2xl">
+    <div class="card-body">
+      <dl class="grid grid-cols-3 gap-4 mb-6 text-center">
+        <div class="p-3 bg-gray-50 rounded-md">
+          <dt class="text-xs text-gray-600">Authorized Fund</dt>
+          <dd class="text-lg font-bold">{peso(fundAmount)}</dd>
+        </div>
+        <div class="p-3 bg-gray-50 rounded-md">
+          <dt class="text-xs text-gray-600">Cash on Hand</dt>
+          <dd class="text-lg font-bold">{peso(fund.currentBalance)}</dd>
+        </div>
+        <div class="p-3 bg-blue-50 rounded-md">
+          <dt class="text-xs text-gray-600">To Replenish</dt>
+          <dd class="text-lg font-bold text-blue-700">{peso(replenishAmount)}</dd>
+        </div>
+      </dl>
+
+      {replenishAmount <= 0 ? (
+        <p class="text-gray-700">This fund is at its authorized amount. There is nothing to replenish.</p>
+      ) : matchingDVs.length === 0 ? (
+        <div class="p-4 rounded-md bg-yellow-50 border border-yellow-200 text-sm text-yellow-900">
+          <p class="font-medium mb-1">No approved DV matches this replenishment.</p>
+          <p>
+            Prepare a disbursement voucher for exactly {peso(replenishAmount)} under fund cluster
+            {' '}{fund.fundClusterCode}, attach the petty cash replenishment report, and have it approved. It will then appear here.
+          </p>
+          <a href="/disbursements/create" class="btn btn-primary btn-sm mt-3">
+            <i class="pi pi-plus mr-2" aria-hidden="true"></i>
+            Create DV
+          </a>
+        </div>
+      ) : (
+        <form id="replenish-form" novalidate>
+          <input type="hidden" name="fundId" value={fund.id} />
+          <div class="form-group">
+            <label for="dvId" class="form-label form-label-required">Supporting Disbursement Voucher</label>
+            <select id="dvId" name="dvId" class="form-select" required>
+              <option value="">Select an approved DV</option>
+              {matchingDVs.map(dv => (
+                <option value={dv.id}>
+                  {dv.dvNo} · {dv.payeeName} · {peso(dv.amount)} ({dv.status})
+                </option>
+              ))}
+            </select>
+            <p class="form-help">Only approved or paid DVs for exactly {peso(replenishAmount)} that have not been used before are listed.</p>
+          </div>
+
+          <div id="replenish-error" class="hidden mb-4 p-3 rounded-md bg-red-50 border border-red-200 text-sm text-red-800" role="alert"></div>
+
+          <div class="flex justify-end gap-3">
+            <a href={`/cash/petty-cash/${fund.id}`} class="btn btn-secondary btn-md">Cancel</a>
+            <button type="submit" class="btn btn-primary btn-md" id="replenish-submit">
+              <i class="pi pi-check mr-2" aria-hidden="true"></i>
+              Replenish {peso(replenishAmount)}
+            </button>
+          </div>
+        </form>
+      )}
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('replenish-form') as HTMLFormElement | null;
+    const errorBox = document.getElementById('replenish-error') as HTMLElement | null;
+    const submit = document.getElementById('replenish-submit') as HTMLButtonElement | null;
+
+    form?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const data = new FormData(form);
+      const fundId = Number(data.get('fundId'));
+      const dvId = Number(data.get('dvId'));
+
+      if (!dvId) {
+        errorBox!.textContent = 'Select the disbursement voucher that supports this replenishment.';
+        errorBox!.classList.remove('hidden');
+        return;
+      }
+
+      submit!.disabled = true;
+      errorBox!.classList.add('hidden');
+
+      try {
+        const response = await fetch('/api/cash/petty-cash', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'replenish', fundId, dvId }),
+        });
+        const result = await response.json();
+
+        if (response.ok) {
+          window.location.href = `/cash/petty-cash/${fundId}`;
+        } else {
+          errorBox!.textContent = result.error || 'Replenishment failed.';
+          errorBox!.classList.remove('hidden');
+          submit!.disabled = false;
+        }
+      } catch {
+        errorBox!.textContent = 'Could not reach the server. Check your connection and try again.';
+        errorBox!.classList.remove('hidden');
+        submit!.disabled = false;
+      }
+    });
+  </script>
+</MainLayout>

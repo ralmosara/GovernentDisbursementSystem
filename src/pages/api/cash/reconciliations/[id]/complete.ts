@@ -36,7 +36,7 @@ export const POST: APIRoute = async ({ params, locals }) => {
       JSON.stringify({
         error: error instanceof Error ? error.message : 'Failed to complete bank reconciliation',
       }),
-      { status: 500, headers: { 'Content-Type': 'application/json' } }
+      { status: error instanceof Error && /not found|Only draft|do not agree/.test(error.message) ? 400 : 500, headers: { 'Content-Type': 'application/json' } }
     );
   }
 };

@@ -168,25 +168,25 @@ function formatCurrency(value: number): string {
           <table class="min-w-full divide-y divide-gray-200">
             <thead class="bg-gray-50">
               <tr>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">
                   Employee No.
                 </th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">
                   Name
                 </th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">
                   Position
                 </th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">
                   Salary Grade
                 </th>
-                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-right text-xs font-semibold text-gray-600">
                   Basic Salary
                 </th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">
                   Status
                 </th>
-                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-right text-xs font-semibold text-gray-600">
                   Actions
                 </th>
               </tr>
@@ -213,12 +213,12 @@ function formatCurrency(value: number): string {
                     ₱{formatCurrency(parseFloat(employee.basicSalary))}
                   </td>
                   <td class="px-6 py-4 whitespace-nowrap text-sm">
-                    <span class={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                      employee.employmentStatus === 'Active' ? 'bg-green-100 text-green-800' :
-                      employee.employmentStatus === 'Resigned' ? 'bg-gray-100 text-gray-800' :
-                      employee.employmentStatus === 'Retired' ? 'bg-blue-100 text-blue-800' :
-                      employee.employmentStatus === 'On Leave' ? 'bg-yellow-100 text-yellow-800' :
-                      'bg-red-100 text-red-800'
+                    <span class={`badge ${
+                      employee.employmentStatus === 'Active' ? 'badge-success' :
+                      employee.employmentStatus === 'Resigned' ? 'badge-secondary' :
+                      employee.employmentStatus === 'Retired' ? 'badge-info' :
+                      employee.employmentStatus === 'On Leave' ? 'badge-warning' :
+                      'badge-danger'
                     }`}>
                       {employee.employmentStatus}
                     </span>

@@ -20,6 +20,18 @@ const objectOfExpenditureList = await db.select().from(objectOfExpenditure);
 
 // Get MFO/PAP
 const mfoPapList = await db.select().from(mfoPap);
+
+// Prefill, e.g. when coming from "Create voucher from this obligation"
+const params = Astro.url.searchParams;
+const prefill = {
+  fromObligation: parseInt(params.get('fromObligation') ?? '') || null,
+  orsBursNo: params.get('orsBursNo') ?? '',
+  payeeName: params.get('payeeName') ?? '',
+  particulars: params.get('particulars') ?? '',
+  amount: params.get('amount') ?? '',
+  fundClusterId: parseInt(params.get('fundClusterId') ?? '') || null,
+  objectExpenditureId: parseInt(params.get('objectExpenditureId') ?? '') || null,
+};
 ---
 
 <MainLayout title="Create Disbursement Voucher">
@@ -27,12 +39,27 @@ const mfoPapList = await db.select().from(mfoPap);
     <!-- Page Header -->
     <div class="page-header">
       <div class="flex items-center gap-4 mb-2">
-        <a href="/disbursements" class="text-gray-600 hover:text-gray-900">
-          <i class="pi pi-arrow-left"></i>
+        <a href="/disbursements" class="text-gray-600 hover:text-gray-900" aria-label="Back">
+          <i class="pi pi-arrow-left" aria-hidden="true"></i>
         </a>
         <h1 class="page-title">Create Disbursement Voucher</h1>
       </div>
       <p class="page-description">Create a new disbursement voucher for payment processing</p>
+    </div>
+
+    {prefill.fromObligation && (
+      <div class="alert alert-info mb-4 max-w-5xl" role="status">
+        <i class="pi pi-info-circle" aria-hidden="true"></i>
+        <span>
+          Filled in from obligation <a href={`/budget/obligations/${prefill.fromObligation}`} class="font-medium text-primary-600 hover:underline">{prefill.orsBursNo}</a>.
+          Check the details, then add the payment mode.
+        </span>
+      </div>
+    )}
+
+    <div id="form-error" class="alert alert-error mb-4 max-w-5xl hidden" role="alert">
+      <i class="pi pi-times-circle" aria-hidden="true"></i>
+      <span id="form-error-text"></span>
     </div>
 
     <!-- DV Form -->
@@ -52,7 +79,7 @@ const mfoPapList = await db.select().from(mfoPap);
                   <select name="fundClusterId" id="fundClusterId" class="form-select" required>
                     <option value="">Select Fund Cluster</option>
                     {fundClustersList.map(fc => (
-                      <option value={fc.id}>{fc.code} - {fc.name}</option>
+                      <option value={fc.id} selected={fc.id === prefill.fundClusterId}>{fc.code} - {fc.name}</option>
                     ))}
                   </select>
                   <p class="form-help">Select the fund cluster for this disbursement</p>
@@ -67,9 +94,11 @@ const mfoPapList = await db.select().from(mfoPap);
                     id="orsBursNo"
                     class="form-input"
                     placeholder="e.g., 2024-001-0123"
+                    value={prefill.orsBursNo}
                     required
                   />
                   <p class="form-help">Obligation Request and Status / Budget Utilization Request and Status</p>
+                  <div id="ors-check" class="hidden mt-2 p-3 rounded bg-gray-50 text-sm" aria-live="polite"></div>
                 </div>
 
                 <!-- Fiscal Year -->
@@ -116,8 +145,13 @@ const mfoPapList = await db.select().from(mfoPap);
                     id="payeeName"
                     class="form-input"
                     placeholder="Enter full name or entity name"
+                    value={prefill.payeeName}
+                    list="payee-suggestions"
+                    autocomplete="off"
                     required
                   />
+                  <datalist id="payee-suggestions"></datalist>
+                  <div id="payee-history" class="hidden mt-2 p-3 rounded bg-gray-50 text-sm"></div>
                 </div>
 
                 <!-- TIN -->
@@ -162,7 +196,7 @@ const mfoPapList = await db.select().from(mfoPap);
                     class="form-textarea"
                     placeholder="Describe the purpose and details of this disbursement..."
                     required
-                  ></textarea>
+                  >{prefill.particulars}</textarea>
                   <p class="form-help">Provide detailed description of the transaction</p>
                 </div>
 
@@ -201,7 +235,7 @@ const mfoPapList = await db.select().from(mfoPap);
                         return items.length > 0 ? (
                           <optgroup label={category}>
                             {items.map(obj => (
-                              <option value={obj.id}>
+                              <option value={obj.id} selected={obj.id === prefill.objectExpenditureId}>
                                 {obj.code} - {obj.name}
                               </option>
                             ))}
@@ -224,6 +258,7 @@ const mfoPapList = await db.select().from(mfoPap);
                         step="0.01"
                         min="0"
                         placeholder="0.00"
+                        value={prefill.amount}
                         required
                       />
                     </div>
@@ -231,6 +266,20 @@ const mfoPapList = await db.select().from(mfoPap);
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+
+          <!-- Possible duplicate payment -->
+          <div id="duplicate-check" class="hidden mt-8 alert alert-warning" role="alert">
+            <i class="pi pi-exclamation-triangle" aria-hidden="true"></i>
+            <div class="min-w-0 flex-1">
+              <p class="font-semibold">This might be a duplicate payment</p>
+              <p class="mt-0.5">These live vouchers have the same amount and the same payee or ORS/BURS number:</p>
+              <ul id="duplicate-list" class="mt-2 space-y-1"></ul>
+              <label class="mt-3 flex items-start gap-2 font-medium">
+                <input type="checkbox" id="duplicate-ack" class="mt-0.5" />
+                <span>I've checked these and this is a separate payment. <span class="font-normal text-gray-700">(This confirmation is recorded in the audit log.)</span></span>
+              </label>
             </div>
           </div>
 
@@ -280,7 +329,7 @@ const mfoPapList = await db.select().from(mfoPap);
         return ones[Math.floor(n / 100)] + ' Hundred' + (n % 100 !== 0 ? ' ' + convertLessThanThousand(n % 100) : '');
       }
 
-      const pesos = Math.floor(num);
+      let pesos = Math.floor(num);
       const centavos = Math.round((num - pesos) * 100);
 
       let result = '';
@@ -322,12 +371,187 @@ const mfoPapList = await db.select().from(mfoPap);
       }
     });
 
-    // Form submission
+    // ---------- Pre-submit checks ----------
+    const peso = (value: number) =>
+      `₱${value.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const escapeHtml = (value: string) =>
+      value.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+
+    const orsInput = document.getElementById('orsBursNo') as HTMLInputElement;
+    const payeeInput = document.getElementById('payeeName') as HTMLInputElement;
+    const orsCheck = document.getElementById('ors-check')!;
+    const duplicateCheck = document.getElementById('duplicate-check')!;
+    const duplicateList = document.getElementById('duplicate-list')!;
+    const duplicateAck = document.getElementById('duplicate-ack') as HTMLInputElement;
+    const formError = document.getElementById('form-error')!;
+    const formErrorText = document.getElementById('form-error-text')!;
+
+    interface Duplicate {
+      id: number;
+      dvNo: string;
+      payeeName: string;
+      amount: number;
+      status: string;
+      reason: string;
+    }
+
+    let duplicates: Duplicate[] = [];
+    let checkTimer: number | undefined;
+
+    function showError(message: string) {
+      formErrorText.textContent = message;
+      formError.classList.remove('hidden');
+      formError.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    function renderDuplicates(list: Duplicate[]) {
+      // Keep the acknowledgement only if the matches haven't changed
+      const sameMatches = duplicates.map(d => d.dvNo).join() === list.map(d => d.dvNo).join();
+      duplicateAck.checked = sameMatches && duplicateAck.checked;
+      duplicates = list;
+      duplicateCheck.classList.toggle('hidden', list.length === 0);
+      duplicateList.innerHTML = list
+        .map(d => `<li><a href="/disbursements/${d.id}" target="_blank" rel="noopener" class="font-medium text-primary-600 hover:underline">${escapeHtml(d.dvNo)}</a>
+          · ${escapeHtml(d.payeeName)} · ${peso(d.amount)} · <span class="badge">${escapeHtml(String(d.status).replace(/_/g, ' '))}</span>
+          <span class="text-gray-700">(${escapeHtml(d.reason)})</span></li>`)
+        .join('');
+    }
+
+    interface ObligationCheck {
+      id: number;
+      amount: number;
+      committed: number;
+      remaining: number;
+      status: string;
+      voucherCount: number;
+    }
+
+    function renderObligation(obligation: ObligationCheck | null) {
+      if (!orsInput.value.trim()) {
+        orsCheck.classList.add('hidden');
+        return;
+      }
+      orsCheck.classList.remove('hidden');
+      if (!obligation) {
+        orsCheck.innerHTML = '<i class="pi pi-info-circle text-gray-500 mr-1" aria-hidden="true"></i>No obligation with this ORS/BURS number is in the registry. Check the number, or record the obligation first.';
+        return;
+      }
+      const amount = parseFloat(amountInput.value) || 0;
+      const after = obligation.remaining - amount;
+      const over = amount > 0 && after < -0.004;
+      orsCheck.innerHTML = `
+        <p class="font-medium"><a href="/budget/obligations/${obligation.id}" target="_blank" rel="noopener" class="text-primary-600 hover:underline">Obligation found</a>
+          · <span class="badge">${escapeHtml(obligation.status)}</span></p>
+        <p class="mt-1 text-gray-700">Obligated ${peso(obligation.amount)} · on ${obligation.voucherCount} voucher(s) ${peso(obligation.committed)} ·
+          <strong>${peso(obligation.remaining)} remaining</strong></p>
+        ${obligation.status !== 'approved' ? '<p class="mt-1 text-orange-700"><i class="pi pi-exclamation-triangle mr-1" aria-hidden="true"></i>This obligation is not approved yet.</p>' : ''}
+        ${over ? `<p class="mt-1 text-red-700 font-medium"><i class="pi pi-exclamation-circle mr-1" aria-hidden="true"></i>This amount is ${peso(-after)} more than what is left on the obligation.</p>` : ''}`;
+    }
+
+    async function runChecks() {
+      const params = new URLSearchParams({
+        payee: payeeInput.value,
+        amount: amountInput.value,
+        ors: orsInput.value.trim(),
+      });
+      try {
+        const response = await fetch(`/api/disbursements/checks?${params}`);
+        if (!response.ok) return;
+        const result = await response.json();
+        renderDuplicates(result.duplicates ?? []);
+        renderObligation(result.obligation ?? null);
+      } catch {
+        // Checks are advisory; the server re-checks duplicates on submit
+      }
+    }
+
+    function scheduleChecks() {
+      window.clearTimeout(checkTimer);
+      checkTimer = window.setTimeout(runChecks, 400);
+    }
+
+    [orsInput, payeeInput, amountInput].forEach(el => el?.addEventListener('input', scheduleChecks));
+
+    // ---------- Payee suggestions from earlier vouchers ----------
+    interface PayeeSuggestion {
+      payeeName: string;
+      payeeTin: string | null;
+      payeeAddress: string | null;
+      particulars: string[];
+    }
+
+    const datalist = document.getElementById('payee-suggestions')!;
+    const payeeHistory = document.getElementById('payee-history')!;
+    let payees: PayeeSuggestion[] = [];
+    let payeeTimer: number | undefined;
+
+    function showPayeeHistory() {
+      const match = payees.find(p => p.payeeName.toLowerCase() === payeeInput.value.trim().toLowerCase());
+      if (!match) {
+        payeeHistory.classList.add('hidden');
+        return;
+      }
+      payeeHistory.classList.remove('hidden');
+      const fillDetails = match.payeeTin || match.payeeAddress
+        ? '<button type="button" class="btn btn-secondary btn-xs mt-2" data-fill-payee>Use last TIN and address</button>'
+        : '';
+      const pastParticulars = match.particulars.length
+        ? `<p class="mt-2 text-xs font-semibold text-gray-600">Reuse earlier particulars</p>
+          <div class="mt-1 flex flex-col items-start gap-1">${match.particulars
+            .map((p, i) => `<button type="button" class="max-w-full text-left text-primary-600 hover:underline truncate" data-fill-particulars="${i}" title="${escapeHtml(p)}">${escapeHtml(p)}</button>`)
+            .join('')}</div>`
+        : '';
+      payeeHistory.innerHTML = `<p class="font-medium">Paid before</p>${fillDetails}${pastParticulars}`;
+
+      payeeHistory.querySelector('[data-fill-payee]')?.addEventListener('click', () => {
+        (document.getElementById('payeeTin') as HTMLInputElement).value = match.payeeTin ?? '';
+        (document.getElementById('payeeAddress') as HTMLInputElement).value = match.payeeAddress ?? '';
+      });
+      payeeHistory.querySelectorAll<HTMLElement>('[data-fill-particulars]').forEach(button =>
+        button.addEventListener('click', () => {
+          (document.getElementById('particulars') as HTMLTextAreaElement).value =
+            match.particulars[Number(button.dataset.fillParticulars)];
+        })
+      );
+    }
+
+    payeeInput?.addEventListener('input', () => {
+      window.clearTimeout(payeeTimer);
+      payeeTimer = window.setTimeout(async () => {
+        const q = payeeInput.value.trim();
+        if (q.length < 2) return;
+        try {
+          const response = await fetch(`/api/disbursements/payees?q=${encodeURIComponent(q)}`);
+          if (!response.ok) return;
+          payees = (await response.json()).payees ?? [];
+          datalist.innerHTML = payees.map(p => `<option value="${escapeHtml(p.payeeName)}"></option>`).join('');
+          showPayeeHistory();
+        } catch {
+          // Suggestions are optional
+        }
+      }, 250);
+    });
+    payeeInput?.addEventListener('change', showPayeeHistory);
+
+    // Prefilled forms (e.g. from an obligation) get their checks straight away
+    if (orsInput.value || payeeInput.value) runChecks();
+    if (amountInput.value) amountInput.dispatchEvent(new Event('input'));
+
+    // ---------- Submit ----------
+    const submitLabel = submitBtn.innerHTML;
+
     form?.addEventListener('submit', async (e) => {
       e.preventDefault();
+      formError.classList.add('hidden');
+
+      if (duplicates.length > 0 && !duplicateAck.checked) {
+        duplicateCheck.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        duplicateAck.focus();
+        return;
+      }
 
       submitBtn.disabled = true;
-      submitBtn.innerHTML = '<i class="pi pi-spin pi-spinner mr-2"></i> Creating...';
+      submitBtn.innerHTML = '<span class="spinner spinner-sm" aria-hidden="true"></span> Creating…';
 
       try {
         const formData = new FormData(form);
@@ -344,31 +568,36 @@ const mfoPapList = await db.select().from(mfoPap);
           objectExpenditureId: parseInt(formData.get('objectExpenditureId') as string),
           amount: parseFloat(formData.get('amount') as string),
           paymentMode: formData.get('paymentMode') as string,
+          duplicateWarningAcknowledged: duplicateAck.checked ? duplicates.map(d => d.dvNo) : undefined,
         };
 
         const response = await fetch('/api/disbursements', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(data)
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
         });
+        const result = await response.json().catch(() => ({}));
 
         if (response.ok) {
-          const result = await response.json();
           window.location.href = `/disbursements/${result.id}`;
+          return;
+        }
+
+        if (response.status === 409 && result.code === 'POSSIBLE_DUPLICATE') {
+          // The server found matches the form hadn't shown yet
+          renderDuplicates(result.duplicates ?? []);
+          duplicateAck.checked = false;
+          duplicateCheck.scrollIntoView({ behavior: 'smooth', block: 'center' });
         } else {
-          const error = await response.json();
-          alert('Error: ' + (error.message || 'Failed to create DV'));
-          submitBtn.disabled = false;
-          submitBtn.innerHTML = '<i class="pi pi-check mr-2"></i> Create Disbursement Voucher';
+          showError(result.message || 'The voucher could not be created. Check the form and try again.');
         }
       } catch (error) {
         console.error('Error:', error);
-        alert('An error occurred. Please try again.');
-        submitBtn.disabled = false;
-        submitBtn.innerHTML = '<i class="pi pi-check mr-2"></i> Create Disbursement Voucher';
+        showError('Could not reach the server. Check your connection and try again.');
       }
+
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = submitLabel;
     });
   </script>
 </MainLayout>

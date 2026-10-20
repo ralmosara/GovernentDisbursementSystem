@@ -1,0 +1,44 @@
+---
+// ADS progress tracker: a horizontal sequence of steps showing where a record is.
+import type { Step } from './types';
+
+interface Props {
+  steps: Step[];
+  label?: string;
+}
+
+const { steps, label = 'Progress' } = Astro.props;
+const stateText = {
+  done: 'Completed',
+  current: 'Current step',
+  todo: 'Not started',
+  failed: 'Stopped here',
+  skipped: 'Skipped',
+};
+const icons: Record<Step['state'], string> = {
+  done: 'pi-check',
+  current: '',
+  todo: '',
+  failed: 'pi-times',
+  skipped: 'pi-minus',
+};
+---
+
+<nav aria-label={label} class="overflow-x-auto scrollbar-thin">
+  <ol class="progress-tracker">
+    {steps.map((step, index) => (
+      <li class="progress-step" data-state={step.state} aria-current={step.state === 'current' ? 'step' : undefined}>
+        <span class="progress-marker" aria-hidden="true">
+          {icons[step.state] ? <i class={`pi ${icons[step.state]}`}></i> : index + 1}
+        </span>
+        <span class="sr-only">{stateText[step.state]}: </span>
+        {step.href ? (
+          <a href={step.href} class="progress-label hover:underline">{step.label}</a>
+        ) : (
+          <span class="progress-label">{step.label}</span>
+        )}
+        {step.meta && <span class="progress-meta">{step.meta}</span>}
+      </li>
+    ))}
+  </ol>
+</nav>

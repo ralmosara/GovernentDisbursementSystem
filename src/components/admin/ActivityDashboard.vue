@@ -3,7 +3,7 @@
     <!-- Quick Stats -->
     <div class="stats-grid">
       <div class="stat-card">
-        <div class="stat-icon bg-blue-100 text-blue-600">
+        <div class="stat-icon badge-info">
           <i class="pi pi-clock"></i>
         </div>
         <div class="stat-content">
@@ -14,7 +14,7 @@
       </div>
 
       <div class="stat-card">
-        <div class="stat-icon bg-green-100 text-green-600">
+        <div class="stat-icon badge-success">
           <i class="pi pi-calendar"></i>
         </div>
         <div class="stat-content">
@@ -25,7 +25,7 @@
       </div>
 
       <div class="stat-card">
-        <div class="stat-icon bg-purple-100 text-purple-600">
+        <div class="stat-icon badge-discovery">
           <i class="pi pi-chart-bar"></i>
         </div>
         <div class="stat-content">
@@ -36,7 +36,7 @@
       </div>
 
       <div class="stat-card">
-        <div class="stat-icon bg-orange-100 text-orange-600">
+        <div class="stat-icon badge-warning">
           <i class="pi pi-users"></i>
         </div>
         <div class="stat-content">
@@ -451,7 +451,7 @@ onMounted(() => {
 }
 
 .stat-card {
-  background: white;
+  background: var(--ds-surface-raised);
   border-radius: 0.5rem;
   box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
   padding: 1.5rem;
@@ -476,20 +476,20 @@ onMounted(() => {
 
 .stat-label {
   font-size: 0.875rem;
-  color: #6b7280;
+  color: var(--ds-text-subtlest);
   margin-bottom: 0.25rem;
 }
 
 .stat-value {
   font-size: 2rem;
   font-weight: 700;
-  color: #1f2937;
+  color: var(--ds-text);
   margin-bottom: 0.25rem;
 }
 
 .stat-change {
   font-size: 0.75rem;
-  color: #6b7280;
+  color: var(--ds-text-subtlest);
 }
 
 .content-grid {
@@ -499,14 +499,14 @@ onMounted(() => {
 }
 
 .card {
-  background: white;
+  background: var(--ds-surface-raised);
   border-radius: 0.5rem;
   box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
 }
 
 .card-header {
   padding: 1.5rem;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--ds-border);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -515,7 +515,7 @@ onMounted(() => {
 .card-title {
   font-size: 1.125rem;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--ds-text);
   margin: 0;
 }
 
@@ -526,7 +526,7 @@ onMounted(() => {
 
 .form-control-sm {
   padding: 0.375rem 0.75rem;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--ds-border);
   border-radius: 0.375rem;
   font-size: 0.875rem;
 }
@@ -542,7 +542,7 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   padding: 3rem 1rem;
-  color: #6b7280;
+  color: var(--ds-text-subtlest);
 }
 
 .loading-state i {
@@ -553,7 +553,7 @@ onMounted(() => {
 .empty-state i {
   font-size: 3rem;
   margin-bottom: 1rem;
-  color: #d1d5db;
+  color: #B3B9C4;
 }
 
 .activity-list {
@@ -569,12 +569,12 @@ onMounted(() => {
   gap: 1rem;
   padding: 0.75rem;
   border-radius: 0.375rem;
-  background-color: #f9fafb;
+  background-color: var(--ds-surface-sunken);
   transition: background-color 0.15s;
 }
 
 .activity-item:hover {
-  background-color: #f3f4f6;
+  background-color: var(--ds-background-neutral);
 }
 
 .activity-icon {
@@ -587,14 +587,14 @@ onMounted(() => {
   flex-shrink: 0;
 }
 
-.action-create { background-color: #d1fae5; color: #065f46; }
-.action-update { background-color: #dbeafe; color: #1e40af; }
-.action-delete { background-color: #fee2e2; color: #991b1b; }
-.action-approve { background-color: #d1fae5; color: #065f46; }
-.action-reject { background-color: #fee2e2; color: #991b1b; }
-.action-submit { background-color: #dbeafe; color: #1e40af; }
-.action-cancel { background-color: #fef3c7; color: #92400e; }
-.action-process { background-color: #e0e7ff; color: #3730a3; }
+.action-create { background-color: var(--ds-background-success); color: var(--ds-text-success); }
+.action-update { background-color: var(--ds-background-information); color: var(--ds-link-pressed); }
+.action-delete { background-color: var(--ds-background-danger); color: var(--ds-text-danger); }
+.action-approve { background-color: var(--ds-background-success); color: var(--ds-text-success); }
+.action-reject { background-color: var(--ds-background-danger); color: var(--ds-text-danger); }
+.action-submit { background-color: var(--ds-background-information); color: var(--ds-link-pressed); }
+.action-cancel { background-color: var(--ds-background-warning); color: var(--ds-text-warning); }
+.action-process { background-color: var(--ds-background-information); color: var(--ds-link-pressed); }
 
 .activity-content {
   flex: 1;
@@ -603,7 +603,7 @@ onMounted(() => {
 
 .activity-text {
   font-size: 0.875rem;
-  color: #1f2937;
+  color: var(--ds-text);
   margin-bottom: 0.25rem;
   display: flex;
   gap: 0.5rem;
@@ -619,28 +619,28 @@ onMounted(() => {
   border-radius: 0.25rem;
 }
 
-.badge-success { background-color: #d1fae5; color: #065f46; }
-.badge-info { background-color: #dbeafe; color: #1e40af; }
-.badge-danger { background-color: #fee2e2; color: #991b1b; }
-.badge-warning { background-color: #fef3c7; color: #92400e; }
-.badge-primary { background-color: #dbeafe; color: #1e40af; }
-.badge-purple { background-color: #e0e7ff; color: #3730a3; }
-.badge-secondary { background-color: #e5e7eb; color: #374151; }
+.badge-success { background-color: var(--ds-background-success); color: var(--ds-text-success); }
+.badge-info { background-color: var(--ds-background-information); color: var(--ds-link-pressed); }
+.badge-danger { background-color: var(--ds-background-danger); color: var(--ds-text-danger); }
+.badge-warning { background-color: var(--ds-background-warning); color: var(--ds-text-warning); }
+.badge-primary { background-color: var(--ds-background-information); color: var(--ds-link-pressed); }
+.badge-purple { background-color: var(--ds-background-information); color: var(--ds-link-pressed); }
+.badge-secondary { background-color: var(--ds-background-neutral-hovered); color: var(--ds-text-subtle); }
 
 .activity-table {
-  color: #6b7280;
+  color: var(--ds-text-subtlest);
   font-size: 0.8125rem;
 }
 
 .activity-record {
   font-family: 'Courier New', monospace;
-  color: #6b7280;
+  color: var(--ds-text-subtlest);
   font-size: 0.8125rem;
 }
 
 .activity-meta {
   font-size: 0.75rem;
-  color: #9ca3af;
+  color: var(--ds-text-subtlest);
   display: flex;
   gap: 1rem;
   align-items: center;
@@ -666,7 +666,7 @@ onMounted(() => {
   width: 2rem;
   height: 2rem;
   border-radius: 50%;
-  background-color: #3b82f6;
+  background-color: var(--ds-background-brand-bold);
   color: white;
   display: flex;
   align-items: center;
@@ -683,26 +683,26 @@ onMounted(() => {
 .user-name {
   font-size: 0.875rem;
   font-weight: 500;
-  color: #1f2937;
+  color: var(--ds-text);
   margin-bottom: 0.125rem;
 }
 
 .user-actions {
   font-size: 0.75rem;
-  color: #6b7280;
+  color: var(--ds-text-subtlest);
 }
 
 .user-bar {
   flex: 2;
   height: 0.5rem;
-  background-color: #e5e7eb;
+  background-color: var(--ds-background-neutral-hovered);
   border-radius: 0.25rem;
   overflow: hidden;
 }
 
 .user-bar-fill {
   height: 100%;
-  background-color: #3b82f6;
+  background-color: var(--ds-background-brand-bold);
   transition: width 0.3s;
 }
 
@@ -730,18 +730,18 @@ onMounted(() => {
 .action-count,
 .table-count {
   font-weight: 600;
-  color: #1f2937;
+  color: var(--ds-text);
 }
 
 .table-name {
   font-weight: 500;
-  color: #1f2937;
+  color: var(--ds-text);
 }
 
 .action-bar,
 .table-bar {
   height: 0.75rem;
-  background-color: #e5e7eb;
+  background-color: var(--ds-background-neutral-hovered);
   border-radius: 0.375rem;
   overflow: hidden;
 }
@@ -752,32 +752,32 @@ onMounted(() => {
   transition: width 0.3s;
 }
 
-.bg-success { background-color: #10b981; }
-.bg-info { background-color: #3b82f6; }
-.bg-danger { background-color: #ef4444; }
-.bg-warning { background-color: #f59e0b; }
-.bg-primary { background-color: #3b82f6; }
-.bg-purple { background-color: #8b5cf6; }
-.bg-secondary { background-color: #6b7280; }
+.bg-success { background-color: var(--ds-background-success-bold); }
+.bg-info { background-color: var(--ds-background-brand-bold); }
+.bg-danger { background-color: var(--ds-background-danger-bold); }
+.bg-warning { background-color: #E56910; }
+.bg-primary { background-color: var(--ds-background-brand-bold); }
+.bg-purple { background-color: #8270DB; }
+.bg-secondary { background-color: #626F86; }
 
 .table-bar-fill {
-  background-color: #3b82f6;
+  background-color: var(--ds-background-brand-bold);
 }
 
 .action-percentage,
 .table-percentage {
   font-size: 0.75rem;
-  color: #6b7280;
+  color: var(--ds-text-subtlest);
 }
 
-.bg-blue-100 { background-color: #dbeafe; }
-.text-blue-600 { color: #2563eb; }
-.bg-green-100 { background-color: #d1fae5; }
-.text-green-600 { color: #059669; }
-.bg-purple-100 { background-color: #e0e7ff; }
-.text-purple-600 { color: #7c3aed; }
-.bg-orange-100 { background-color: #ffedd5; }
-.text-orange-600 { color: #ea580c; }
+.bg-blue-100 { background-color: var(--ds-background-information); }
+.text-blue-600 { color: var(--ds-link-pressed); }
+.bg-green-100 { background-color: var(--ds-background-success); }
+.text-green-600 { color: var(--ds-text-success); }
+.bg-purple-100 { background-color: var(--ds-background-information); }
+.text-purple-600 { color: var(--ds-text-discovery); }
+.bg-orange-100 { background-color: var(--ds-background-warning); }
+.text-orange-600 { color: var(--ds-text-warning); }
 
 @media (max-width: 1024px) {
   .content-grid {

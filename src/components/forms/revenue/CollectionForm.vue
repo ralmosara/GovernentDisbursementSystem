@@ -72,7 +72,7 @@
             <dt class="text-gray-500">Status:</dt>
             <dd>
               <span
-                class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
+                class="badge"
                 :class="getStatusClass(selectedAR.status)"
               >
                 {{ selectedAR.status.toUpperCase() }}
@@ -433,12 +433,12 @@ function formatDate(dateString: string): string {
 
 function getStatusClass(status: string): string {
   const classes: Record<string, string> = {
-    outstanding: 'bg-yellow-100 text-yellow-800',
-    partial: 'bg-blue-100 text-blue-800',
-    paid: 'bg-green-100 text-green-800',
-    written_off: 'bg-red-100 text-red-800',
+    outstanding: 'badge-warning',
+    partial: 'badge-info',
+    paid: 'badge-success',
+    written_off: 'badge-danger',
   };
-  return classes[status] || 'bg-gray-100 text-gray-800';
+  return classes[status] || 'badge-secondary';
 }
 
 function validateForm(): boolean {

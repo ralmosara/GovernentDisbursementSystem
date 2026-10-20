@@ -5,17 +5,38 @@ import {
   registryObligations,
   fundClusters,
   objectOfExpenditure,
-  mfoPap
+  mfoPap,
+  disbursementVouchers
 } from '../db/schema';
-import { eq, and, sum, sql, desc } from 'drizzle-orm';
+import { eq, and, sum, sql, desc, inArray, or, type SQL } from 'drizzle-orm';
 
 export interface BudgetAvailability {
   appropriation: number;
   allotment: number;
+  /** Approved obligations */
   obligation: number;
+  /** Obligations awaiting approval; these reserve funds */
+  pendingObligation: number;
+  /** Paid DVs charged against this allotment's ORS/BURS numbers */
   disbursement: number;
+  /** Allotment less approved obligations */
   unobligatedBalance: number;
+  /** Allotment less approved and pending obligations (what a new request may use) */
   availableBalance: number;
+  /** Approved obligations not yet disbursed */
+  unpaidObligation: number;
+}
+
+/** Drizzle returns DECIMAL columns as strings; convert for arithmetic and display */
+function toNumber(value: string | number | null | undefined): number {
+  if (value === null || value === undefined || value === '') return 0;
+  const n = typeof value === 'number' ? value : parseFloat(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Compare peso amounts at centavo precision to avoid floating-point drift */
+function toCentavos(value: number): number {
+  return Math.round(value * 100);
 }
 
 export class BudgetService {
@@ -40,11 +61,51 @@ export class BudgetService {
     }
 
     const allotment = allotmentResult[0];
+    const allotmentAmount = toNumber(allotment.allotment_amount);
 
-    // Calculate total obligations for this allotment
-    const obligationsResult = await db
+    // Total obligations for this allotment, split by status
+    const obligationRows = await db
       .select({
+        status: registryObligations.status,
         total: sum(registryObligations.amount).mapWith(Number)
+      })
+      .from(registryObligations)
+      .where(
+        and(
+          eq(registryObligations.allotmentId, allotmentId),
+          inArray(registryObligations.status, ['approved', 'pending'])
+        )
+      )
+      .groupBy(registryObligations.status);
+
+    const totalObligations = toNumber(obligationRows.find(r => r.status === 'approved')?.total);
+    const pendingObligations = toNumber(obligationRows.find(r => r.status === 'pending')?.total);
+
+    const totalDisbursements = await this.getDisbursedAmount(allotmentId);
+
+    const unobligatedBalance = allotmentAmount - totalObligations;
+    const availableBalance = allotmentAmount - totalObligations - pendingObligations;
+
+    return {
+      appropriation: toNumber(allotment.appropriation_amount),
+      allotment: allotmentAmount,
+      obligation: totalObligations,
+      pendingObligation: pendingObligations,
+      disbursement: totalDisbursements,
+      unobligatedBalance,
+      availableBalance,
+      unpaidObligation: Math.max(totalObligations - totalDisbursements, 0)
+    };
+  }
+
+  /**
+   * Sum of paid DVs whose ORS/BURS number matches an approved obligation of this allotment
+   */
+  private async getDisbursedAmount(allotmentId: number): Promise<number> {
+    const obligationRefs = await db
+      .select({
+        orsNumber: registryObligations.orsNumber,
+        bursNumber: registryObligations.bursNumber
       })
       .from(registryObligations)
       .where(
@@ -54,74 +115,98 @@ export class BudgetService {
         )
       );
 
-    const totalObligations = obligationsResult[0]?.total || 0;
+    const refs = obligationRefs
+      .flatMap(r => [r.orsNumber, r.bursNumber])
+      .filter((ref): ref is string => !!ref);
 
-    // Calculate total disbursements (from approved DVs linked to obligations)
-    // This will be implemented when we create the DV module
-    const totalDisbursements = 0; // Placeholder
+    if (refs.length === 0) return 0;
 
-    const unobligatedBalance = allotment.allotment_amount - totalObligations;
-    const availableBalance = allotment.allotment_amount - totalObligations - totalDisbursements;
+    const result = await db
+      .select({ total: sum(disbursementVouchers.amount).mapWith(Number) })
+      .from(disbursementVouchers)
+      .where(
+        and(
+          inArray(disbursementVouchers.orsBursNo, refs),
+          eq(disbursementVouchers.status, 'paid')
+        )
+      );
 
-    return {
-      appropriation: allotment.appropriation_amount || 0,
-      allotment: allotment.allotment_amount,
-      obligation: totalObligations,
-      disbursement: totalDisbursements,
-      unobligatedBalance,
-      availableBalance
-    };
+    return toNumber(result[0]?.total);
   }
 
   /**
-   * Check if sufficient budget is available for an obligation
+   * Check if sufficient budget is available for a new obligation request.
+   * Pending obligations reserve funds so concurrent requests cannot jointly over-obligate.
    */
   async checkBudgetAvailability(allotmentId: number, amount: number): Promise<boolean> {
     const availability = await this.getBudgetAvailability(allotmentId);
-    return availability.unobligatedBalance >= amount;
+    return toCentavos(availability.availableBalance) >= toCentavos(amount);
+  }
+
+  /**
+   * Check whether a pending obligation can still be approved: approved obligations
+   * plus this one must not exceed the allotment
+   */
+  async canApproveObligation(allotmentId: number, amount: number): Promise<boolean> {
+    const availability = await this.getBudgetAvailability(allotmentId);
+    return toCentavos(availability.unobligatedBalance) >= toCentavos(amount);
+  }
+
+  /**
+   * Totals for the appropriations matching `appropriationFilter` and the allotments and
+   * approved obligations beneath them. Each level is summed in its own query: summing
+   * across a JOIN repeats an appropriation once per allotment (and an allotment once
+   * per obligation), which inflates the totals.
+   */
+  private async sumBudgetLevels(appropriationFilter: SQL) {
+    const [appropriationRow] = await db
+      .select({ total: sum(registryAppropriations.amount).mapWith(Number) })
+      .from(registryAppropriations)
+      .where(appropriationFilter);
+
+    const [allotmentRow] = await db
+      .select({ total: sum(registryAllotments.amount).mapWith(Number) })
+      .from(registryAllotments)
+      .innerJoin(registryAppropriations, eq(registryAllotments.appropriationId, registryAppropriations.id))
+      .where(appropriationFilter);
+
+    const [obligationRow] = await db
+      .select({ total: sum(registryObligations.amount).mapWith(Number) })
+      .from(registryObligations)
+      .innerJoin(registryAllotments, eq(registryObligations.allotmentId, registryAllotments.id))
+      .innerJoin(registryAppropriations, eq(registryAllotments.appropriationId, registryAppropriations.id))
+      .where(and(appropriationFilter, eq(registryObligations.status, 'approved')));
+
+    const appropriation = toNumber(appropriationRow?.total);
+    const allotment = toNumber(allotmentRow?.total);
+    const obligation = toNumber(obligationRow?.total);
+
+    return {
+      appropriation,
+      allotment,
+      obligation,
+      unobligatedBalance: allotment - obligation,
+      utilizationRate: allotment ? (obligation / allotment) * 100 : 0
+    };
   }
 
   /**
    * Get budget summary by fund cluster
    */
   async getBudgetSummaryByFundCluster(fundClusterId: number, year: number) {
-    const result = await db
-      .select({
-        fundClusterCode: fundClusters.code,
-        fundClusterName: fundClusters.name,
-        appropriation: sum(registryAppropriations.amount).mapWith(Number),
-        allotment: sum(registryAllotments.amount).mapWith(Number),
-        obligation: sum(registryObligations.amount).mapWith(Number)
-      })
-      .from(registryAppropriations)
-      .leftJoin(
-        registryAllotments,
-        eq(registryAppropriations.id, registryAllotments.appropriationId)
-      )
-      .leftJoin(
-        registryObligations,
-        and(
-          eq(registryAllotments.id, registryObligations.allotmentId),
-          eq(registryObligations.status, 'approved')
-        )
-      )
-      .leftJoin(
-        fundClusters,
-        eq(registryAppropriations.fundClusterId, fundClusters.id)
-      )
-      .where(
-        and(
-          eq(registryAppropriations.fundClusterId, fundClusterId),
-          eq(registryAppropriations.year, year)
-        )
-      )
-      .groupBy(fundClusters.code, fundClusters.name);
+    const [cluster] = await db
+      .select({ code: fundClusters.code, name: fundClusters.name })
+      .from(fundClusters)
+      .where(eq(fundClusters.id, fundClusterId))
+      .limit(1);
 
-    return result.map(row => ({
-      ...row,
-      unobligatedBalance: (row.allotment || 0) - (row.obligation || 0),
-      utilizationRate: row.allotment ? ((row.obligation || 0) / row.allotment) * 100 : 0
-    }));
+    if (!cluster) return [];
+
+    const totals = await this.sumBudgetLevels(
+      and(eq(registryAppropriations.fundClusterId, fundClusterId), eq(registryAppropriations.year, year))!
+    );
+
+    return [{ fundClusterCode: cluster.code, fundClusterName: cluster.name, ...totals }];
   }
 
   /**
@@ -129,35 +214,7 @@ export class BudgetService {
    */
   async getOverallBudgetSummary(year: number) {
     try {
-      const result = await db
-        .select({
-          appropriation: sum(registryAppropriations.amount).mapWith(Number),
-          allotment: sum(registryAllotments.amount).mapWith(Number),
-          obligation: sum(registryObligations.amount).mapWith(Number)
-        })
-        .from(registryAppropriations)
-        .leftJoin(
-          registryAllotments,
-          eq(registryAppropriations.id, registryAllotments.appropriationId)
-        )
-        .leftJoin(
-          registryObligations,
-          and(
-            eq(registryAllotments.id, registryObligations.allotmentId),
-            eq(registryObligations.status, 'approved')
-          )
-        )
-        .where(eq(registryAppropriations.year, year));
-
-      const summary = result[0] || { appropriation: null, allotment: null, obligation: null };
-
-      return {
-        appropriation: summary.appropriation || 0,
-        allotment: summary.allotment || 0,
-        obligation: summary.obligation || 0,
-        unobligatedBalance: (summary.allotment || 0) - (summary.obligation || 0),
-        utilizationRate: summary.allotment ? ((summary.obligation || 0) / summary.allotment) * 100 : 0
-      };
+      return await this.sumBudgetLevels(eq(registryAppropriations.year, year));
     } catch (error) {
       // If there are no appropriations, return empty summary
       console.error('Error getting budget summary:', error);
@@ -268,9 +325,9 @@ export class BudgetService {
       .from(registryAllotments)
       .where(eq(registryAllotments.appropriationId, data.appropriationId));
 
-    const totalExistingAllotments = existingAllotments[0]?.total || 0;
+    const totalExistingAllotments = toNumber(existingAllotments[0]?.total);
 
-    if (totalExistingAllotments + data.amount > parseFloat(appropriation.amount.toString())) {
+    if (toCentavos(totalExistingAllotments + data.amount) > toCentavos(toNumber(appropriation.amount))) {
       throw new Error('Allotment amount exceeds available appropriation');
     }
 
@@ -349,10 +406,10 @@ export class BudgetService {
       throw new Error('Only pending obligations can be approved');
     }
 
-    // Check budget availability again
-    const hasAvailableBudget = await this.checkBudgetAvailability(
+    // Check budget availability again (this obligation's own reservation is excluded)
+    const hasAvailableBudget = await this.canApproveObligation(
       obligation.allotmentId,
-      parseFloat(obligation.amount.toString())
+      toNumber(obligation.amount)
     );
 
     if (!hasAvailableBudget) {
@@ -377,6 +434,20 @@ export class BudgetService {
    * Reject an obligation
    */
   async rejectObligation(obligationId: number, rejectedBy: number, remarks: string) {
+    const obligationResult = await db
+      .select({ status: registryObligations.status })
+      .from(registryObligations)
+      .where(eq(registryObligations.id, obligationId))
+      .limit(1);
+
+    if (!obligationResult.length) {
+      throw new Error('Obligation not found');
+    }
+
+    if (obligationResult[0].status !== 'pending') {
+      throw new Error('Only pending obligations can be rejected');
+    }
+
     await db
       .update(registryObligations)
       .set({
@@ -414,7 +485,8 @@ export class BudgetService {
       .leftJoin(fundClusters, eq(registryAppropriations.fundClusterId, fundClusters.id))
       .where(eq(registryAppropriations.id, id));
 
-    return appropriations[0] || null;
+    const appropriation = appropriations[0];
+    return appropriation ? { ...appropriation, amount: toNumber(appropriation.amount) } : null;
   }
 
   /**
@@ -443,7 +515,87 @@ export class BudgetService {
       .where(eq(registryAppropriations.year, year))
       .orderBy(desc(registryAppropriations.createdAt));
 
-    return appropriations;
+    return appropriations.map(a => ({ ...a, amount: toNumber(a.amount) }));
+  }
+
+  /**
+   * Get a single allotment with its appropriation, fund cluster, object of expenditure and MFO/PAP
+   */
+  async getAllotmentById(id: number) {
+    const rows = await db
+      .select({
+        id: registryAllotments.id,
+        appropriationId: registryAllotments.appropriationId,
+        allotmentClass: registryAllotments.allotmentClass,
+        amount: registryAllotments.amount,
+        purpose: registryAllotments.purpose,
+        createdAt: registryAllotments.createdAt,
+        updatedAt: registryAllotments.updatedAt,
+        appropriation_reference: registryAppropriations.reference,
+        appropriation_year: registryAppropriations.year,
+        appropriation_amount: registryAppropriations.amount,
+        fundCluster_code: fundClusters.code,
+        fundCluster_name: fundClusters.name,
+        objectOfExpenditure_code: objectOfExpenditure.code,
+        objectOfExpenditure_name: objectOfExpenditure.name,
+        objectOfExpenditure_category: objectOfExpenditure.category,
+        mfoPap_code: mfoPap.code,
+        mfoPap_name: mfoPap.name
+      })
+      .from(registryAllotments)
+      .leftJoin(registryAppropriations, eq(registryAllotments.appropriationId, registryAppropriations.id))
+      .leftJoin(fundClusters, eq(registryAppropriations.fundClusterId, fundClusters.id))
+      .leftJoin(objectOfExpenditure, eq(registryAllotments.objectOfExpenditureId, objectOfExpenditure.id))
+      .leftJoin(mfoPap, eq(registryAllotments.mfoPapId, mfoPap.id))
+      .where(eq(registryAllotments.id, id))
+      .limit(1);
+
+    const row = rows[0];
+    if (!row) return null;
+
+    return {
+      id: row.id,
+      appropriationId: row.appropriationId,
+      allotmentClass: row.allotmentClass,
+      amount: toNumber(row.amount),
+      purpose: row.purpose,
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+      appropriation: {
+        id: row.appropriationId,
+        reference: row.appropriation_reference,
+        year: row.appropriation_year,
+        amount: toNumber(row.appropriation_amount),
+        fundCluster: { code: row.fundCluster_code, name: row.fundCluster_name }
+      },
+      objectOfExpenditure: {
+        code: row.objectOfExpenditure_code,
+        name: row.objectOfExpenditure_name,
+        category: row.objectOfExpenditure_category
+      },
+      mfoPap: row.mfoPap_code ? { code: row.mfoPap_code, name: row.mfoPap_name } : null
+    };
+  }
+
+  /**
+   * Get obligations charged against an allotment
+   */
+  async getObligationsByAllotment(allotmentId: number) {
+    const rows = await db
+      .select()
+      .from(registryObligations)
+      .where(eq(registryObligations.allotmentId, allotmentId))
+      .orderBy(desc(registryObligations.obligationDate));
+
+    return rows.map(r => ({ ...r, amount: toNumber(r.amount) }));
+  }
+
+  /**
+   * Get a single obligation with its allotment hierarchy
+   */
+  async getObligationById(id: number) {
+    const rows = await this.getObligations(undefined, id);
+    return rows[0] || null;
   }
 
   /**
@@ -478,12 +630,16 @@ export class BudgetService {
         objectOfExpenditure_id: objectOfExpenditure.id,
         objectOfExpenditure_code: objectOfExpenditure.code,
         objectOfExpenditure_name: objectOfExpenditure.name,
-        objectOfExpenditure_category: objectOfExpenditure.category
+        objectOfExpenditure_category: objectOfExpenditure.category,
+        // MFO/PAP fields (flat)
+        mfoPap_code: mfoPap.code,
+        mfoPap_name: mfoPap.name
       })
       .from(registryAllotments)
       .leftJoin(registryAppropriations, eq(registryAllotments.appropriationId, registryAppropriations.id))
       .leftJoin(fundClusters, eq(registryAppropriations.fundClusterId, fundClusters.id))
       .leftJoin(objectOfExpenditure, eq(registryAllotments.objectOfExpenditureId, objectOfExpenditure.id))
+      .leftJoin(mfoPap, eq(registryAllotments.mfoPapId, mfoPap.id))
       .orderBy(desc(registryAllotments.createdAt));
 
     const rows = appropriationId
@@ -497,17 +653,18 @@ export class BudgetService {
       objectOfExpenditureId: row.objectOfExpenditureId,
       mfoPapId: row.mfoPapId,
       allotmentClass: row.allotmentClass,
-      amount: row.amount,
+      amount: toNumber(row.amount),
       purpose: row.purpose,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
+      mfoPap: row.mfoPap_code ? { code: row.mfoPap_code, name: row.mfoPap_name } : null,
       appropriation: {
         id: row.appropriation_id,
         fundClusterId: row.appropriation_fundClusterId,
         year: row.appropriation_year,
         reference: row.appropriation_reference,
         description: row.appropriation_description,
-        amount: row.appropriation_amount,
+        amount: toNumber(row.appropriation_amount),
         fundCluster: {
           id: row.fundCluster_id,
           code: row.fundCluster_code,
@@ -526,7 +683,7 @@ export class BudgetService {
   /**
    * Get all obligations
    */
-  async getObligations(status?: string) {
+  async getObligations(status?: string, id?: number) {
     // Use flat SELECT to avoid MariaDB JSON aggregation issues
     const query = db
       .select({
@@ -576,8 +733,13 @@ export class BudgetService {
       .leftJoin(objectOfExpenditure, eq(registryAllotments.objectOfExpenditureId, objectOfExpenditure.id))
       .orderBy(desc(registryObligations.createdAt));
 
-    const rows = status
-      ? await query.where(eq(registryObligations.status, status))
+    const filters = [
+      status ? eq(registryObligations.status, status) : undefined,
+      id ? eq(registryObligations.id, id) : undefined
+    ].filter(Boolean);
+
+    const rows = filters.length
+      ? await query.where(and(...filters))
       : await query;
 
     // Manually reconstruct nested structure
@@ -586,7 +748,7 @@ export class BudgetService {
       allotmentId: row.allotmentId,
       payee: row.payee,
       particulars: row.particulars,
-      amount: row.amount,
+      amount: toNumber(row.amount),
       orsNumber: row.orsNumber,
       bursNumber: row.bursNumber,
       obligationDate: row.obligationDate,
@@ -602,14 +764,14 @@ export class BudgetService {
         appropriationId: row.allotment_appropriationId,
         objectOfExpenditureId: row.allotment_objectOfExpenditureId,
         allotmentClass: row.allotment_allotmentClass,
-        amount: row.allotment_amount,
+        amount: toNumber(row.allotment_amount),
         purpose: row.allotment_purpose,
         appropriation: {
           id: row.appropriation_id,
           fundClusterId: row.appropriation_fundClusterId,
           year: row.appropriation_year,
           reference: row.appropriation_reference,
-          amount: row.appropriation_amount,
+          amount: toNumber(row.appropriation_amount),
           fundCluster: {
             id: row.fundCluster_id,
             code: row.fundCluster_code,

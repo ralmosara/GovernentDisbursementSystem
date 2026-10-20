@@ -89,7 +89,7 @@ export class PaymentService {
     }
 
     // 5. Create payment record
-    const result = await db.insert(payments).values({
+    const [result] = await db.insert(payments).values({
       dvId: data.dvId,
       paymentType: data.paymentType,
       paymentDate: data.paymentDate,

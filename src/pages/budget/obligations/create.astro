@@ -10,6 +10,9 @@ if (!user) {
 
 // Get allotments for selection
 const allotments = await budgetService.getAllotments();
+
+// Pre-select allotment when coming from an allotment or appropriation page
+const preselectedAllotmentId = parseInt(Astro.url.searchParams.get('allotment') || '0');
 ---
 
 <MainLayout title="Create Obligation">
@@ -17,8 +20,8 @@ const allotments = await budgetService.getAllotments();
     <!-- Page Header -->
     <div class="page-header">
       <div class="flex items-center gap-4 mb-2">
-        <a href="/budget/obligations" class="text-gray-600 hover:text-gray-900">
-          <i class="pi pi-arrow-left"></i>
+        <a href="/budget/obligations" class="text-gray-600 hover:text-gray-900" aria-label="Back">
+          <i class="pi pi-arrow-left" aria-hidden="true"></i>
         </a>
         <h1 class="page-title">Create New Obligation</h1>
       </div>
@@ -36,7 +39,7 @@ const allotments = await budgetService.getAllotments();
               <select name="allotmentId" id="allotmentId" class="form-select" required>
                 <option value="">Select Allotment</option>
                 {allotments.map(allot => (
-                  <option value={allot.id} data-available={allot.amount}>
+                  <option value={allot.id} data-available={allot.amount} selected={allot.id === preselectedAllotmentId}>
                     {allot.appropriation.fundCluster.code} - {allot.objectOfExpenditure.code} - {allot.objectOfExpenditure.name} (₱{allot.amount.toLocaleString('en-PH')})
                   </option>
                 ))}
@@ -47,6 +50,8 @@ const allotments = await budgetService.getAllotments();
                 <div class="mt-1 text-sm text-blue-700">
                   <div>Allotment: <span id="allot-amount" class="font-semibold">₱0.00</span></div>
                   <div>Unobligated Balance: <span id="unobligated" class="font-semibold">₱0.00</span></div>
+                  <div>Pending Obligations: <span id="pending-obligations" class="font-semibold">₱0.00</span></div>
+                  <div>Available for New Requests: <span id="available-balance" class="font-semibold">₱0.00</span></div>
                 </div>
               </div>
             </div>
@@ -158,10 +163,15 @@ const allotments = await budgetService.getAllotments();
     const allotmentSelect = document.getElementById('allotmentId') as HTMLSelectElement;
     const amountInput = document.getElementById('amount') as HTMLInputElement;
     const budgetAvailabilityDiv = document.getElementById('budget-availability');
+    const peso = (n: number) => `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+    // Availability for the selected allotment, fetched once per selection
+    let availability: { allotment: number; unobligatedBalance: number; pendingObligation: number; availableBalance: number } | null = null;
 
     // Handle allotment selection - check budget availability
     allotmentSelect?.addEventListener('change', async () => {
       const allotmentId = allotmentSelect.value;
+      availability = null;
 
       if (!allotmentId) {
         budgetAvailabilityDiv?.classList.add('hidden');
@@ -171,49 +181,51 @@ const allotments = await budgetService.getAllotments();
       try {
         const response = await fetch(`/api/budget/availability/${allotmentId}`);
         if (response.ok) {
-          const data = await response.json();
+          availability = await response.json();
 
           // Show budget availability
           budgetAvailabilityDiv?.classList.remove('hidden');
-          document.getElementById('allot-amount')!.textContent =
-            `₱${data.allotment.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
-          document.getElementById('unobligated')!.textContent =
-            `₱${data.unobligatedBalance.toLocaleString('en-PH', { minimumFractionDigits: 2 })}`;
+          document.getElementById('allot-amount')!.textContent = peso(availability!.allotment);
+          document.getElementById('unobligated')!.textContent = peso(availability!.unobligatedBalance);
+          document.getElementById('pending-obligations')!.textContent = peso(availability!.pendingObligation);
+          document.getElementById('available-balance')!.textContent = peso(availability!.availableBalance);
+          validateAmount();
         }
       } catch (error) {
         console.error('Error fetching budget availability:', error);
       }
     });
 
-    // Validate amount against available budget
-    amountInput?.addEventListener('input', async () => {
-      const allotmentId = allotmentSelect.value;
+    // Validate amount against available budget (pending obligations already reserve funds)
+    function validateAmount() {
       const amount = parseFloat(amountInput.value);
       const amountHelp = document.getElementById('amount-help');
 
-      if (!allotmentId || !amount) {
+      if (!availability || !amount) {
         return;
       }
 
       try {
-        const response = await fetch(`/api/budget/availability/${allotmentId}`);
-        if (response.ok) {
-          const data = await response.json();
-
-          if (amount > data.unobligatedBalance) {
-            amountHelp!.textContent = `Warning: Amount exceeds unobligated balance of ₱${data.unobligatedBalance.toLocaleString('en-PH')}`;
-            amountHelp!.classList.remove('form-help');
-            amountHelp!.classList.add('form-error');
-          } else {
-            amountHelp!.textContent = 'Enter the obligation amount';
-            amountHelp!.classList.remove('form-error');
-            amountHelp!.classList.add('form-help');
-          }
+        if (amount > availability.availableBalance) {
+          amountHelp!.textContent = `Amount exceeds the available balance of ${peso(availability.availableBalance)}`;
+          amountHelp!.classList.remove('form-help');
+          amountHelp!.classList.add('form-error');
+        } else {
+          amountHelp!.textContent = 'Enter the obligation amount';
+          amountHelp!.classList.remove('form-error');
+          amountHelp!.classList.add('form-help');
         }
       } catch (error) {
         console.error('Error checking amount:', error);
       }
-    });
+    }
+
+    amountInput?.addEventListener('input', validateAmount);
+
+    // Load availability for a pre-selected allotment
+    if (allotmentSelect?.value) {
+      allotmentSelect.dispatchEvent(new Event('change'));
+    }
 
     form?.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -243,7 +255,9 @@ const allotments = await budgetService.getAllotments();
         });
 
         if (response.ok) {
-          window.location.href = '/budget/obligations';
+          // Land on the new obligation so the preparer sees what happens next
+          const result = await response.json().catch(() => ({}));
+          window.location.href = result.id ? `/budget/obligations/${result.id}?created=1` : '/budget/obligations';
         } else {
           const error = await response.json();
           alert('Error: ' + (error.message || 'Failed to create obligation'));

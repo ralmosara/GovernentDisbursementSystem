@@ -6,123 +6,105 @@ import { ensureCSRFToken } from '../lib/security/csrf';
 const csrfToken = ensureCSRFToken(Astro.cookies);
 
 // If already logged in, redirect to dashboard (handled by middleware)
+
+// Only show the seeded credentials hint on a local development server
+const showDevCredentials = import.meta.env.DEV;
 ---
 
-<BaseLayout title="Login - Philippine Government FMS">
-  <div class="min-h-screen flex items-center justify-center bg-gradient-to-br from-primary-900 via-primary-800 to-primary-700 px-4">
-    <div class="max-w-md w-full">
-      <!-- Logo/Brand -->
-      <div class="text-center mb-8">
-  
-        <h1 class="text-3xl font-bold text-white mb-2">
-          Philippine Government FMS
-        </h1>
-        <p class="text-primary-200">
-          Financial Management System
-        </p>
-      </div>
-
-      <!-- Login Card -->
-      <div class="bg-white rounded-lg shadow-2xl p-8">
-        <div class="mb-6">
-          <h2 class="text-2xl font-bold text-gray-900">Sign In</h2>
-          <p class="text-sm text-gray-500 mt-1">
-            Enter your credentials to access the system
-          </p>
-        </div>
-
-        <!-- Error Message -->
-        <div id="error-message" class="hidden alert alert-error mb-4">
-          <i class="pi pi-exclamation-circle mr-2"></i>
-          <span id="error-text"></span>
-        </div>
-
-        <!-- Rate Limit Warning -->
-        <div id="rate-limit-warning" class="hidden alert alert-warning mb-4">
-          <i class="pi pi-exclamation-triangle mr-2"></i>
-          <span id="rate-limit-text"></span>
-        </div>
-
-        <!-- Login Form -->
-        <form id="login-form" method="POST" action="/api/auth/login">
-          <!-- CSRF Token -->
-          <input type="hidden" name="csrf_token" value={csrfToken} />
-          <div class="form-group">
-            <label for="username" class="form-label form-label-required">
-              Username
-            </label>
-            <input
-              type="text"
-              id="username"
-              name="username"
-              class="form-input"
-              placeholder="Enter your username"
-              required
-              autocomplete="username"
-            />
-          </div>
-
-          <div class="form-group">
-            <label for="password" class="form-label form-label-required">
-              Password
-            </label>
-            <input
-              type="password"
-              id="password"
-              name="password"
-              class="form-input"
-              placeholder="Enter your password"
-              required
-              autocomplete="current-password"
-            />
-          </div>
-
-          <div class="flex items-center justify-between mb-6">
-            <label class="flex items-center">
-              <input
-                type="checkbox"
-                name="remember"
-                class="rounded border-gray-300 text-primary-600 shadow-sm focus:border-primary-300 focus:ring focus:ring-primary-200 focus:ring-opacity-50"
-              />
-              <span class="ml-2 text-sm text-gray-600">Remember me</span>
-            </label>
-            <a href="/forgot-password" class="text-sm text-primary-600 hover:text-primary-700">
-              Forgot password?
-            </a>
-          </div>
-
-          <button
-            type="submit"
-            class="btn btn-primary btn-lg w-full"
-            id="login-button"
-          >
-            <span id="login-button-text">Sign In</span>
-            <span id="login-spinner" class="hidden">
-              <span class="spinner spinner-sm mr-2"></span>
-              Signing in...
-            </span>
-          </button>
-        </form>
-
-        <!-- Default Credentials Info -->
-        <div class="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-md">
-          <p class="text-xs text-blue-800 font-semibold mb-1">
-            Default Credentials (Development):
-          </p>
-          <p class="text-xs text-blue-700">
-            Username: <code class="bg-blue-100 px-1 rounded">admin</code><br/>
-            Password: <code class="bg-blue-100 px-1 rounded">admin123</code>
-          </p>
-        </div>
-      </div>
-
-      <!-- Footer -->
-      <div class="text-center mt-6">
-        <p class="text-sm text-primary-200">
-          &copy; 2025 Philippine Government. All rights reserved.
-        </p>
-      </div>
+<BaseLayout title="Log in - Philippine Government FMS">
+  <div class="min-h-screen flex flex-col items-center bg-gray-50 px-4 py-10 sm:py-16">
+    <!-- Brand -->
+    <div class="flex items-center gap-2.5 mb-8">
+      <span class="flex items-center justify-center w-9 h-9 rounded-lg bg-primary-600 text-white" aria-hidden="true">
+        <svg width="20" height="20" viewBox="0 0 16 16" fill="none">
+          <path d="M8 1.5 14 4.5v1H2v-1L8 1.5Z" fill="currentColor"/>
+          <path d="M3.5 7h2v5h-2V7Zm3.5 0h2v5H7V7Zm3.5 0h2v5h-2V7Z" fill="currentColor" opacity=".85"/>
+          <path d="M2 13h12v1.5H2V13Z" fill="currentColor"/>
+        </svg>
+      </span>
+      <span class="text-xl font-semibold text-gray-800">Gov FMS</span>
     </div>
+
+    <!-- Login card -->
+    <main class="w-full max-w-[400px] bg-white rounded-lg shadow-lg px-6 py-8 sm:px-10">
+      <h1 class="text-center text-base font-semibold text-gray-700 mb-6">Log in to continue</h1>
+
+      <!-- Error Message -->
+      <div id="error-message" class="hidden alert alert-error mb-4" role="alert">
+        <i class="pi pi-exclamation-circle" aria-hidden="true"></i>
+        <span id="error-text"></span>
+      </div>
+
+      <!-- Rate Limit Warning -->
+      <div id="rate-limit-warning" class="hidden alert alert-warning mb-4" role="status">
+        <i class="pi pi-exclamation-triangle" aria-hidden="true"></i>
+        <span id="rate-limit-text"></span>
+      </div>
+
+      <!-- Login Form -->
+      <form id="login-form" method="POST" action="/api/auth/login">
+        <!-- CSRF Token -->
+        <input type="hidden" name="csrf_token" value={csrfToken} />
+        <div class="form-group">
+          <label for="username" class="form-label form-label-required">Username</label>
+          <input
+            type="text"
+            id="username"
+            name="username"
+            class="form-input"
+            placeholder="Enter your username"
+            required
+            autocomplete="username"
+            autofocus
+          />
+        </div>
+
+        <div class="form-group">
+          <label for="password" class="form-label form-label-required">Password</label>
+          <input
+            type="password"
+            id="password"
+            name="password"
+            class="form-input"
+            placeholder="Enter your password"
+            required
+            autocomplete="current-password"
+          />
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-lg w-full mt-2" id="login-button">
+          <span id="login-button-text">Continue</span>
+          <span id="login-spinner" class="hidden">
+            <span class="spinner spinner-sm mr-2"></span>
+            Logging in…
+          </span>
+        </button>
+      </form>
+
+      <div class="mt-6 pt-5 border-t border-gray-200 text-center">
+        <a href="/forgot-password" class="text-sm text-primary-600 hover:underline">Can't log in?</a>
+      </div>
+
+      {showDevCredentials && (
+        <!-- Default Credentials Info (development server only) -->
+        <div class="mt-5 alert alert-info">
+          <i class="pi pi-info-circle" aria-hidden="true"></i>
+          <div class="text-xs">
+            <p class="font-semibold mb-0.5">Development credentials</p>
+            <p>
+              Username <code class="px-1 rounded-sm bg-surface">admin</code> ·
+              Password <code class="px-1 rounded-sm bg-surface">admin123</code>
+            </p>
+          </div>
+        </div>
+      )}
+    </main>
+
+    <!-- Footer -->
+    <footer class="mt-8 text-center text-xs text-gray-500 space-y-1">
+      <p>Financial Management System for Philippine government agencies</p>
+      <p>&copy; {new Date().getFullYear()} Philippine Government. All rights reserved.</p>
+    </footer>
   </div>
 
   <script>
@@ -156,8 +138,10 @@ const csrfToken = ensureCSRFToken(Astro.cookies);
         const result = await response.json();
 
         if (response.ok) {
-          // Redirect to dashboard on success
-          window.location.href = '/dashboard';
+          // Return to the page that required sign-in; only same-site paths are allowed
+          const next = new URLSearchParams(window.location.search).get('next');
+          const isSafeNext = next && next.startsWith('/') && !next.startsWith('//') && !next.startsWith('/\\');
+          window.location.href = isSafeNext ? next : '/dashboard';
         } else if (response.status === 429) {
           // Rate limit exceeded
           if (errorText) {
@@ -170,9 +154,11 @@ const csrfToken = ensureCSRFToken(Astro.cookies);
           loginButtonText?.classList.remove('hidden');
           loginSpinner?.classList.add('hidden');
         } else if (response.status === 403) {
-          // CSRF validation failed
+          // Deactivated account, or CSRF validation failed
           if (errorText) {
-            errorText.textContent = 'Session expired. Please refresh the page and try again.';
+            errorText.textContent = result.error && !result.error.includes('CSRF')
+              ? result.error
+              : 'Session expired. Please refresh the page and try again.';
           }
           errorMessage?.classList.remove('hidden');
 

@@ -1,6 +1,10 @@
 ---
 import MainLayout from '../../layouts/MainLayout.astro';
-import { canViewAuditLogs } from '../../lib/utils/permissions';
+import { db } from '../../lib/db/connection';
+import { fundClusters, objectOfExpenditure } from '../../lib/db/schema';
+import { asc } from 'drizzle-orm';
+import { hasRole } from '../../lib/utils/permissions';
+import { getSettingsGroup } from '../../lib/services/settings.service';
 
 const user = Astro.locals.user;
 
@@ -8,13 +12,25 @@ if (!user) {
   return Astro.redirect('/login');
 }
 
-// Check if user is admin (only admins can access settings)
-if (user.role !== 'administrator') {
+// Only administrators can access settings
+if (!(await hasRole(user.id, 'administrator'))) {
   return Astro.redirect('/dashboard');
 }
+
+const [general, security, clusters, objectCodes] = await Promise.all([
+  getSettingsGroup('general'),
+  getSettingsGroup('security'),
+  db.select().from(fundClusters).orderBy(asc(fundClusters.code)),
+  db.select().from(objectOfExpenditure).orderBy(asc(objectOfExpenditure.code)),
+]);
+
+const coaByCategory = objectCodes.reduce<Record<string, typeof objectCodes>>((groups, code) => {
+  (groups[code.category] ||= []).push(code);
+  return groups;
+}, {});
 ---
 
-<MainLayout title="System Settings" user={user}>
+<MainLayout title="System Settings">
   <div class="page-header">
     <div>
       <h1 class="page-title">System Settings</h1>
@@ -24,95 +40,87 @@ if (user.role !== 'administrator') {
 
   <div class="settings-container">
     <!-- Navigation Tabs -->
-    <div class="settings-tabs">
-      <button class="tab-button active" data-tab="general">
-        <i class="pi pi-cog"></i>
+    <div class="settings-tabs" role="tablist" aria-label="Settings sections">
+      <button class="tab-button active" data-tab="general" role="tab" aria-selected="true" aria-controls="general-tab">
+        <i class="pi pi-cog" aria-hidden="true"></i>
         General
       </button>
-      <button class="tab-button" data-tab="users">
-        <i class="pi pi-users"></i>
-        User Management
-      </button>
-      <button class="tab-button" data-tab="coa">
-        <i class="pi pi-book"></i>
-        Chart of Accounts
-      </button>
-      <button class="tab-button" data-tab="funds">
-        <i class="pi pi-wallet"></i>
-        Fund Sources
-      </button>
-      <button class="tab-button" data-tab="security">
-        <i class="pi pi-shield"></i>
+      <button class="tab-button" data-tab="security" role="tab" aria-selected="false" aria-controls="security-tab">
+        <i class="pi pi-shield" aria-hidden="true"></i>
         Security
       </button>
-      <button class="tab-button" data-tab="email">
-        <i class="pi pi-envelope"></i>
-        Email
+      <button class="tab-button" data-tab="users" role="tab" aria-selected="false" aria-controls="users-tab">
+        <i class="pi pi-users" aria-hidden="true"></i>
+        User Management
+      </button>
+      <button class="tab-button" data-tab="coa" role="tab" aria-selected="false" aria-controls="coa-tab">
+        <i class="pi pi-book" aria-hidden="true"></i>
+        Chart of Accounts
+      </button>
+      <button class="tab-button" data-tab="funds" role="tab" aria-selected="false" aria-controls="funds-tab">
+        <i class="pi pi-wallet" aria-hidden="true"></i>
+        Fund Clusters
       </button>
     </div>
 
     <!-- Tab Content -->
     <div class="settings-content">
+      <div id="settings-status" class="status-banner" role="status" aria-live="polite" hidden></div>
+
       <!-- General Settings Tab -->
-      <div id="general-tab" class="tab-content active">
+      <div id="general-tab" class="tab-content active" role="tabpanel">
         <div class="settings-section">
           <h2 class="section-title">Agency Information</h2>
+          <p class="text-muted">Shown on printed vouchers, reports and certificates.</p>
 
-          <form id="generalForm" class="settings-form">
+          <form id="generalForm" class="settings-form" data-group="general" novalidate>
             <div class="form-group">
-              <label for="agencyName">Agency Name</label>
-              <input type="text" id="agencyName" name="agencyName" class="form-control"
-                     value="Department of Budget and Management" required>
-            </div>
-
-            <div class="form-group">
-              <label for="agencyCode">Agency Code</label>
-              <input type="text" id="agencyCode" name="agencyCode" class="form-control"
-                     value="DBM" required>
-            </div>
-
-            <div class="form-group">
-              <label for="agencyAddress">Address</label>
-              <textarea id="agencyAddress" name="agencyAddress" class="form-control" rows="3" required
-              >General Solano St., San Miguel, Manila</textarea>
-            </div>
-
-            <div class="form-group">
-              <label for="contactEmail">Contact Email</label>
-              <input type="email" id="contactEmail" name="contactEmail" class="form-control"
-                     value="info@dbm.gov.ph" required>
-            </div>
-
-            <div class="form-group">
-              <label for="contactPhone">Contact Phone</label>
-              <input type="tel" id="contactPhone" name="contactPhone" class="form-control"
-                     value="(02) 8123-4567" required>
-            </div>
-
-            <h3 class="subsection-title">Fiscal Year Settings</h3>
-
-            <div class="form-group">
-              <label for="currentFiscalYear">Current Fiscal Year</label>
-              <input type="number" id="currentFiscalYear" name="currentFiscalYear" class="form-control"
-                     value="2026" required>
+              <label for="agency_name">Agency Name</label>
+              <input type="text" id="agency_name" name="agency_name" class="form-control"
+                     value={general.agency_name} maxlength="255" required>
+              <small class="field-error" data-error-for="agency_name"></small>
             </div>
 
             <div class="form-row">
               <div class="form-group">
-                <label for="fiscalYearStart">Fiscal Year Start</label>
-                <input type="date" id="fiscalYearStart" name="fiscalYearStart" class="form-control"
-                       value="2026-01-01" required>
+                <label for="agency_code">Agency Code</label>
+                <input type="text" id="agency_code" name="agency_code" class="form-control"
+                       value={general.agency_code} maxlength="50">
+                <small class="field-error" data-error-for="agency_code"></small>
               </div>
               <div class="form-group">
-                <label for="fiscalYearEnd">Fiscal Year End</label>
-                <input type="date" id="fiscalYearEnd" name="fiscalYearEnd" class="form-control"
-                       value="2026-12-31" required>
+                <label for="current_fiscal_year">Current Fiscal Year</label>
+                <input type="number" id="current_fiscal_year" name="current_fiscal_year" class="form-control"
+                       value={general.current_fiscal_year} min="2000" max="2100" required>
+                <small class="field-error" data-error-for="current_fiscal_year"></small>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="agency_address">Address</label>
+              <textarea id="agency_address" name="agency_address" class="form-control" rows="3" maxlength="500"
+              >{general.agency_address}</textarea>
+              <small class="field-error" data-error-for="agency_address"></small>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label for="contact_email">Contact Email</label>
+                <input type="email" id="contact_email" name="contact_email" class="form-control"
+                       value={general.contact_email} maxlength="255">
+                <small class="field-error" data-error-for="contact_email"></small>
+              </div>
+              <div class="form-group">
+                <label for="contact_phone">Contact Phone</label>
+                <input type="tel" id="contact_phone" name="contact_phone" class="form-control"
+                       value={general.contact_phone} maxlength="50">
+                <small class="field-error" data-error-for="contact_phone"></small>
               </div>
             </div>
 
             <div class="form-actions">
               <button type="submit" class="btn btn-primary">
-                <i class="pi pi-check"></i>
+                <i class="pi pi-check" aria-hidden="true"></i>
                 Save Changes
               </button>
             </div>
@@ -120,13 +128,86 @@ if (user.role !== 'administrator') {
         </div>
       </div>
 
+      <!-- Security Tab -->
+      <div id="security-tab" class="tab-content" role="tabpanel">
+        <div class="settings-section">
+          <h2 class="section-title">Security Settings</h2>
+
+          <form id="securityForm" class="settings-form" data-group="security" novalidate>
+            <h3 class="subsection-title">Approval Controls</h3>
+
+            <div class="form-group">
+              <label class="checkbox-label">
+                <input type="checkbox" name="enforce_segregation_of_duties" checked={security.enforce_segregation_of_duties}>
+                Enforce segregation of duties on disbursement vouchers
+              </label>
+              <small class="form-text">
+                The person who prepared a DV cannot approve it, and one person cannot approve two stages of the
+                same DV. Turn off only in single-user test environments.
+              </small>
+            </div>
+
+            <h3 class="subsection-title">Password Policy</h3>
+            <p class="text-muted">Applied when an administrator creates a user and when users change their password.</p>
+
+            <div class="form-group">
+              <label for="password_min_length">Minimum Password Length</label>
+              <input type="number" id="password_min_length" name="password_min_length"
+                     class="form-control" value={security.password_min_length} min="8" max="64" required>
+              <small class="field-error" data-error-for="password_min_length"></small>
+            </div>
+
+            <div class="form-group">
+              <label class="checkbox-label">
+                <input type="checkbox" name="password_require_uppercase" checked={security.password_require_uppercase}>
+                Require uppercase letters
+              </label>
+            </div>
+
+            <div class="form-group">
+              <label class="checkbox-label">
+                <input type="checkbox" name="password_require_lowercase" checked={security.password_require_lowercase}>
+                Require lowercase letters
+              </label>
+            </div>
+
+            <div class="form-group">
+              <label class="checkbox-label">
+                <input type="checkbox" name="password_require_number" checked={security.password_require_number}>
+                Require numbers
+              </label>
+            </div>
+
+            <div class="form-group">
+              <label class="checkbox-label">
+                <input type="checkbox" name="password_require_special" checked={security.password_require_special}>
+                Require special characters
+              </label>
+            </div>
+
+            <h3 class="subsection-title">Login Protection</h3>
+            <p class="text-muted">
+              Fixed by the application: an account is locked for 1 hour after 5 failed sign-ins within 15 minutes,
+              and an IP address after 10. Sessions end after 8 hours of inactivity.
+            </p>
+
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary">
+                <i class="pi pi-check" aria-hidden="true"></i>
+                Save Security Settings
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+
       <!-- Users Tab -->
-      <div id="users-tab" class="tab-content">
+      <div id="users-tab" class="tab-content" role="tabpanel">
         <div class="settings-section">
           <div class="section-header">
             <h2 class="section-title">User Management</h2>
-            <a href="/admin/users/create" class="btn btn-primary">
-              <i class="pi pi-plus"></i>
+            <a href="/admin/users?create=1" class="btn btn-primary">
+              <i class="pi pi-plus" aria-hidden="true"></i>
               Add New User
             </a>
           </div>
@@ -135,19 +216,19 @@ if (user.role !== 'administrator') {
 
           <div class="action-cards">
             <a href="/admin/users" class="action-card">
-              <i class="pi pi-users"></i>
+              <i class="pi pi-users" aria-hidden="true"></i>
               <h3>All Users</h3>
               <p>View and manage all user accounts</p>
             </a>
 
             <a href="/admin/users?status=active" class="action-card">
-              <i class="pi pi-user-check"></i>
+              <i class="pi pi-user-plus" aria-hidden="true"></i>
               <h3>Active Users</h3>
               <p>View currently active user accounts</p>
             </a>
 
             <a href="/admin/users?status=inactive" class="action-card">
-              <i class="pi pi-user-minus"></i>
+              <i class="pi pi-user-minus" aria-hidden="true"></i>
               <h3>Inactive Users</h3>
               <p>View deactivated user accounts</p>
             </a>
@@ -156,227 +237,77 @@ if (user.role !== 'administrator') {
       </div>
 
       <!-- COA Tab -->
-      <div id="coa-tab" class="tab-content">
-        <div class="settings-section">
-          <div class="section-header">
-            <h2 class="section-title">Chart of Accounts</h2>
-            <button class="btn btn-primary" id="addCoaBtn">
-              <i class="pi pi-plus"></i>
-              Add Object Code
-            </button>
-          </div>
+      <div id="coa-tab" class="tab-content" role="tabpanel">
+        <div class="settings-section settings-section--wide">
+          <h2 class="section-title">Chart of Accounts</h2>
+          <p class="text-muted">
+            UACS object of expenditure codes available for allotments and disbursement vouchers
+            ({objectCodes.length} codes).
+          </p>
 
-          <p class="text-muted">Configure the Chart of Accounts (COA) for financial tracking.</p>
+          <label for="coaFilter" class="sr-only">Filter object codes</label>
+          <input type="search" id="coaFilter" class="form-control coa-filter" placeholder="Filter by code or name…">
 
-          <div class="coa-actions">
-            <button class="btn btn-secondary" id="importCoaBtn">
-              <i class="pi pi-upload"></i>
-              Import from Excel
-            </button>
-            <button class="btn btn-secondary" id="exportCoaBtn">
-              <i class="pi pi-download"></i>
-              Export COA
-            </button>
-          </div>
-
-          <div id="coaList" class="mt-4">
-            <p class="text-center text-muted">Loading Chart of Accounts...</p>
-          </div>
+          {Object.entries(coaByCategory).map(([category, codes]) => (
+            <details class="coa-group" open>
+              <summary>{category} <span class="text-muted">({codes.length})</span></summary>
+              <table class="settings-table">
+                <thead>
+                  <tr><th scope="col">Code</th><th scope="col">Name</th><th scope="col">Status</th></tr>
+                </thead>
+                <tbody>
+                  {codes.map(code => (
+                    <tr data-coa-row data-search={`${code.code} ${code.name}`.toLowerCase()}>
+                      <td class="mono">{code.code}</td>
+                      <td>{code.name}</td>
+                      <td>{code.isActive ? 'Active' : 'Inactive'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </details>
+          ))}
         </div>
       </div>
 
-      <!-- Fund Sources Tab -->
-      <div id="funds-tab" class="tab-content">
-        <div class="settings-section">
-          <div class="section-header">
-            <h2 class="section-title">Fund Sources</h2>
-            <button class="btn btn-primary" id="addFundBtn">
-              <i class="pi pi-plus"></i>
-              Add Fund Source
-            </button>
-          </div>
-
-          <p class="text-muted">Manage fund sources, appropriations, and allotments.</p>
+      <!-- Fund Clusters Tab -->
+      <div id="funds-tab" class="tab-content" role="tabpanel">
+        <div class="settings-section settings-section--wide">
+          <h2 class="section-title">Fund Clusters</h2>
+          <p class="text-muted">Budget flows from fund cluster to appropriation to allotment to obligation.</p>
 
           <div class="fund-hierarchy">
             <div class="hierarchy-level">
-              <h3>Fund Sources</h3>
-              <p>Top-level funding sources (e.g., General Fund, Special Fund)</p>
+              <h3>Fund Clusters</h3>
+              <p>Sources of funds (e.g., Regular Agency Fund)</p>
             </div>
-            <div class="hierarchy-arrow">↓</div>
+            <div class="hierarchy-arrow" aria-hidden="true">→</div>
             <div class="hierarchy-level">
-              <h3>Appropriations</h3>
-              <p>Budget authorizations from Congress (e.g., GAA 2026)</p>
+              <h3><a href="/budget/appropriations">Appropriations</a></h3>
+              <p>Budget authority (e.g., GAA 2026)</p>
             </div>
-            <div class="hierarchy-arrow">↓</div>
+            <div class="hierarchy-arrow" aria-hidden="true">→</div>
             <div class="hierarchy-level">
-              <h3>Allotments</h3>
-              <p>Budget releases to departments (e.g., Q1 2026)</p>
+              <h3><a href="/budget/allotments">Allotments</a></h3>
+              <p>Releases by object of expenditure</p>
             </div>
           </div>
 
-          <div id="fundList" class="mt-4">
-            <p class="text-center text-muted">Loading fund sources...</p>
-          </div>
-        </div>
-      </div>
-
-      <!-- Security Tab -->
-      <div id="security-tab" class="tab-content">
-        <div class="settings-section">
-          <h2 class="section-title">Security Settings</h2>
-
-          <form id="securityForm" class="settings-form">
-            <h3 class="subsection-title">Password Policy</h3>
-
-            <div class="form-group">
-              <label for="minPasswordLength">Minimum Password Length</label>
-              <input type="number" id="minPasswordLength" name="minPasswordLength"
-                     class="form-control" value="8" min="6" max="20" required>
-            </div>
-
-            <div class="form-group">
-              <label class="checkbox-label">
-                <input type="checkbox" name="requireUppercase" checked>
-                Require uppercase letters
-              </label>
-            </div>
-
-            <div class="form-group">
-              <label class="checkbox-label">
-                <input type="checkbox" name="requireLowercase" checked>
-                Require lowercase letters
-              </label>
-            </div>
-
-            <div class="form-group">
-              <label class="checkbox-label">
-                <input type="checkbox" name="requireNumbers" checked>
-                Require numbers
-              </label>
-            </div>
-
-            <div class="form-group">
-              <label class="checkbox-label">
-                <input type="checkbox" name="requireSpecialChars" checked>
-                Require special characters
-              </label>
-            </div>
-
-            <div class="form-group">
-              <label for="passwordExpiry">Password Expiry (days)</label>
-              <input type="number" id="passwordExpiry" name="passwordExpiry"
-                     class="form-control" value="90" min="0" max="365">
-              <small class="form-text">Set to 0 for no expiry</small>
-            </div>
-
-            <h3 class="subsection-title">Session Settings</h3>
-
-            <div class="form-group">
-              <label for="sessionTimeout">Session Timeout (minutes)</label>
-              <input type="number" id="sessionTimeout" name="sessionTimeout"
-                     class="form-control" value="30" min="5" max="120" required>
-            </div>
-
-            <div class="form-group">
-              <label class="checkbox-label">
-                <input type="checkbox" name="allowConcurrentSessions">
-                Allow concurrent sessions
-              </label>
-            </div>
-
-            <h3 class="subsection-title">Login Security</h3>
-
-            <div class="form-group">
-              <label for="maxFailedAttempts">Max Failed Login Attempts</label>
-              <input type="number" id="maxFailedAttempts" name="maxFailedAttempts"
-                     class="form-control" value="5" min="3" max="10" required>
-            </div>
-
-            <div class="form-group">
-              <label for="lockoutDuration">Account Lockout Duration (minutes)</label>
-              <input type="number" id="lockoutDuration" name="lockoutDuration"
-                     class="form-control" value="15" min="5" max="60" required>
-            </div>
-
-            <div class="form-actions">
-              <button type="submit" class="btn btn-primary">
-                <i class="pi pi-check"></i>
-                Save Security Settings
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-
-      <!-- Email Tab -->
-      <div id="email-tab" class="tab-content">
-        <div class="settings-section">
-          <h2 class="section-title">Email Configuration</h2>
-
-          <form id="emailForm" class="settings-form">
-            <h3 class="subsection-title">SMTP Settings</h3>
-
-            <div class="form-group">
-              <label for="smtpHost">SMTP Host</label>
-              <input type="text" id="smtpHost" name="smtpHost" class="form-control"
-                     placeholder="smtp.gmail.com" required>
-            </div>
-
-            <div class="form-row">
-              <div class="form-group">
-                <label for="smtpPort">SMTP Port</label>
-                <input type="number" id="smtpPort" name="smtpPort" class="form-control"
-                       value="587" required>
-              </div>
-              <div class="form-group">
-                <label for="smtpEncryption">Encryption</label>
-                <select id="smtpEncryption" name="smtpEncryption" class="form-control">
-                  <option value="tls">TLS</option>
-                  <option value="ssl">SSL</option>
-                  <option value="none">None</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="form-group">
-              <label for="smtpUsername">SMTP Username</label>
-              <input type="text" id="smtpUsername" name="smtpUsername" class="form-control"
-                     placeholder="your-email@domain.com" required>
-            </div>
-
-            <div class="form-group">
-              <label for="smtpPassword">SMTP Password</label>
-              <input type="password" id="smtpPassword" name="smtpPassword" class="form-control"
-                     placeholder="••••••••">
-              <small class="form-text">Leave blank to keep existing password</small>
-            </div>
-
-            <h3 class="subsection-title">Email Sender</h3>
-
-            <div class="form-group">
-              <label for="fromName">From Name</label>
-              <input type="text" id="fromName" name="fromName" class="form-control"
-                     value="Government Disbursement System" required>
-            </div>
-
-            <div class="form-group">
-              <label for="fromEmail">From Email</label>
-              <input type="email" id="fromEmail" name="fromEmail" class="form-control"
-                     placeholder="noreply@agency.gov.ph" required>
-            </div>
-
-            <div class="form-actions">
-              <button type="button" class="btn btn-secondary" id="testEmailBtn">
-                <i class="pi pi-send"></i>
-                Send Test Email
-              </button>
-              <button type="submit" class="btn btn-primary">
-                <i class="pi pi-check"></i>
-                Save Email Settings
-              </button>
-            </div>
-          </form>
+          <table class="settings-table">
+            <thead>
+              <tr><th scope="col">Code</th><th scope="col">Name</th><th scope="col">Description</th><th scope="col">Status</th></tr>
+            </thead>
+            <tbody>
+              {clusters.map(cluster => (
+                <tr>
+                  <td class="mono">{cluster.code}</td>
+                  <td>{cluster.name}</td>
+                  <td class="text-muted">{cluster.description}</td>
+                  <td>{cluster.isActive ? 'Active' : 'Inactive'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -384,69 +315,89 @@ if (user.role !== 'administrator') {
 </MainLayout>
 
 <script>
-  // Tab switching functionality
-  document.addEventListener('DOMContentLoaded', () => {
-    const tabButtons = document.querySelectorAll('.tab-button');
-    const tabContents = document.querySelectorAll('.tab-content');
+  const tabButtons = document.querySelectorAll<HTMLButtonElement>('.tab-button');
+  const tabContents = document.querySelectorAll<HTMLElement>('.tab-content');
+  const statusBanner = document.getElementById('settings-status') as HTMLElement;
 
-    tabButtons.forEach(button => {
-      button.addEventListener('click', () => {
-        const tabName = button.dataset.tab;
-
-        // Remove active class from all buttons and contents
-        tabButtons.forEach(btn => btn.classList.remove('active'));
-        tabContents.forEach(content => content.classList.remove('active'));
-
-        // Add active class to clicked button and corresponding content
-        button.classList.add('active');
-        document.getElementById(`${tabName}-tab`)?.classList.add('active');
-      });
+  function activateTab(tabName: string) {
+    tabButtons.forEach(btn => {
+      const active = btn.dataset.tab === tabName;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-selected', String(active));
     });
+    tabContents.forEach(content => content.classList.toggle('active', content.id === `${tabName}-tab`));
+  }
 
-    // Form submission handlers
-    const generalForm = document.getElementById('generalForm');
-    generalForm?.addEventListener('submit', async (e) => {
+  tabButtons.forEach(button => {
+    button.addEventListener('click', () => {
+      activateTab(button.dataset.tab!);
+      history.replaceState(null, '', `#${button.dataset.tab}`);
+    });
+  });
+
+  // Open the tab named in the URL hash (e.g. /admin/settings#security)
+  const initialTab = location.hash.slice(1);
+  if (initialTab && document.getElementById(`${initialTab}-tab`)) {
+    activateTab(initialTab);
+  }
+
+  function showStatus(message: string, kind: 'success' | 'error') {
+    statusBanner.textContent = message;
+    statusBanner.className = `status-banner status-banner--${kind}`;
+    statusBanner.hidden = false;
+  }
+
+  // Settings forms: send typed JSON, show per-field validation errors from the API
+  document.querySelectorAll<HTMLFormElement>('form[data-group]').forEach(form => {
+    form.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const formData = new FormData(generalForm);
+      const submitButton = form.querySelector<HTMLButtonElement>('button[type="submit"]')!;
+      form.querySelectorAll<HTMLElement>('.field-error').forEach(el => (el.textContent = ''));
 
+      const payload: Record<string, string | number | boolean> = {};
+      form.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input[name], textarea[name]').forEach(field => {
+        if (field instanceof HTMLInputElement && field.type === 'checkbox') {
+          payload[field.name] = field.checked;
+        } else if (field instanceof HTMLInputElement && field.type === 'number') {
+          payload[field.name] = Number(field.value);
+        } else {
+          payload[field.name] = field.value;
+        }
+      });
+
+      submitButton.disabled = true;
       try {
-        const response = await fetch('/api/admin/settings/general', {
-          method: 'POST',
-          body: formData
+        const response = await fetch(`/api/admin/settings/${form.dataset.group}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
         });
+        const result = await response.json();
 
         if (response.ok) {
-          alert('Settings saved successfully!');
+          showStatus('Settings saved.', 'success');
         } else {
-          alert('Failed to save settings. Please try again.');
+          for (const [field, message] of Object.entries<string>(result.errors || {})) {
+            const target = form.querySelector<HTMLElement>(`[data-error-for="${field}"]`);
+            if (target) target.textContent = message;
+          }
+          showStatus(result.message || 'Failed to save settings.', 'error');
         }
       } catch (error) {
         console.error('Error saving settings:', error);
-        alert('An error occurred. Please try again.');
+        showStatus('Could not reach the server. Check your connection and try again.', 'error');
+      } finally {
+        submitButton.disabled = false;
       }
     });
+  });
 
-    // Security form handler
-    const securityForm = document.getElementById('securityForm');
-    securityForm?.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      alert('Security settings saved! (Demo mode)');
-    });
-
-    // Email form handler
-    const emailForm = document.getElementById('emailForm');
-    emailForm?.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      alert('Email settings saved! (Demo mode)');
-    });
-
-    // Test email button
-    const testEmailBtn = document.getElementById('testEmailBtn');
-    testEmailBtn?.addEventListener('click', async () => {
-      const email = prompt('Enter email address to send test email:');
-      if (email) {
-        alert(`Test email sent to ${email}! (Demo mode)`);
-      }
+  // Chart of Accounts filter
+  const coaFilter = document.getElementById('coaFilter') as HTMLInputElement | null;
+  coaFilter?.addEventListener('input', () => {
+    const term = coaFilter.value.trim().toLowerCase();
+    document.querySelectorAll<HTMLElement>('[data-coa-row]').forEach(row => {
+      row.hidden = term !== '' && !row.dataset.search!.includes(term);
     });
   });
 </script>
@@ -462,12 +413,12 @@ if (user.role !== 'administrator') {
   .page-title {
     font-size: 2rem;
     font-weight: 600;
-    color: #1a202c;
+    color: var(--ds-text);
     margin: 0;
   }
 
   .page-description {
-    color: #718096;
+    color: var(--ds-text-subtlest);
     margin: 0.5rem 0 0 0;
   }
 
@@ -482,7 +433,7 @@ if (user.role !== 'administrator') {
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
-    background: white;
+    background: var(--ds-surface-raised);
     border-radius: 8px;
     padding: 1rem;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
@@ -499,18 +450,18 @@ if (user.role !== 'administrator') {
     border-radius: 6px;
     cursor: pointer;
     font-size: 0.9rem;
-    color: #4a5568;
+    color: var(--ds-text-subtle);
     transition: all 0.2s;
     text-align: left;
   }
 
   .tab-button:hover {
-    background: #f7fafc;
-    color: #2d3748;
+    background: var(--ds-surface-sunken);
+    color: var(--ds-text);
   }
 
   .tab-button.active {
-    background: #3182ce;
+    background: var(--ds-background-brand-bold);
     color: white;
   }
 
@@ -519,7 +470,7 @@ if (user.role !== 'administrator') {
   }
 
   .settings-content {
-    background: white;
+    background: var(--ds-surface-raised);
     border-radius: 8px;
     padding: 2rem;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
@@ -540,7 +491,7 @@ if (user.role !== 'administrator') {
   .section-title {
     font-size: 1.5rem;
     font-weight: 600;
-    color: #1a202c;
+    color: var(--ds-text);
     margin: 0 0 1.5rem 0;
   }
 
@@ -554,10 +505,10 @@ if (user.role !== 'administrator') {
   .subsection-title {
     font-size: 1.2rem;
     font-weight: 600;
-    color: #2d3748;
+    color: var(--ds-text);
     margin: 2rem 0 1rem 0;
     padding-top: 2rem;
-    border-top: 1px solid #e2e8f0;
+    border-top: 1px solid var(--ds-border);
   }
 
   .subsection-title:first-child {
@@ -577,14 +528,14 @@ if (user.role !== 'administrator') {
   .form-group label {
     display: block;
     font-weight: 500;
-    color: #2d3748;
+    color: var(--ds-text);
     margin-bottom: 0.5rem;
   }
 
   .form-control {
     width: 100%;
     padding: 0.75rem;
-    border: 1px solid #cbd5e0;
+    border: 1px solid var(--ds-border);
     border-radius: 6px;
     font-size: 0.95rem;
     transition: border-color 0.2s;
@@ -592,7 +543,7 @@ if (user.role !== 'administrator') {
 
   .form-control:focus {
     outline: none;
-    border-color: #3182ce;
+    border-color: var(--ds-border-selected);
     box-shadow: 0 0 0 3px rgba(49, 130, 206, 0.1);
   }
 
@@ -606,7 +557,7 @@ if (user.role !== 'administrator') {
     display: block;
     margin-top: 0.25rem;
     font-size: 0.85rem;
-    color: #718096;
+    color: var(--ds-text-subtlest);
   }
 
   .checkbox-label {
@@ -627,7 +578,7 @@ if (user.role !== 'administrator') {
     gap: 1rem;
     margin-top: 2rem;
     padding-top: 2rem;
-    border-top: 1px solid #e2e8f0;
+    border-top: 1px solid var(--ds-border);
   }
 
   .btn {
@@ -645,21 +596,21 @@ if (user.role !== 'administrator') {
   }
 
   .btn-primary {
-    background: #3182ce;
+    background: var(--ds-background-brand-bold);
     color: white;
   }
 
   .btn-primary:hover {
-    background: #2c5aa0;
+    background: var(--ds-background-brand-bold-hovered);
   }
 
   .btn-secondary {
-    background: #718096;
+    background: #626F86;
     color: white;
   }
 
   .btn-secondary:hover {
-    background: #4a5568;
+    background: #44546F;
   }
 
   .action-cards {
@@ -671,8 +622,8 @@ if (user.role !== 'administrator') {
 
   .action-card {
     padding: 1.5rem;
-    background: #f7fafc;
-    border: 1px solid #e2e8f0;
+    background: var(--ds-surface-sunken);
+    border: 1px solid var(--ds-border);
     border-radius: 8px;
     text-decoration: none;
     color: inherit;
@@ -680,15 +631,15 @@ if (user.role !== 'administrator') {
   }
 
   .action-card:hover {
-    background: #edf2f7;
-    border-color: #cbd5e0;
+    background: var(--ds-background-neutral);
+    border-color: var(--ds-border);
     transform: translateY(-2px);
     box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
   }
 
   .action-card i {
     font-size: 2rem;
-    color: #3182ce;
+    color: var(--ds-link);
     margin-bottom: 0.75rem;
   }
 
@@ -700,7 +651,7 @@ if (user.role !== 'administrator') {
 
   .action-card p {
     font-size: 0.85rem;
-    color: #718096;
+    color: var(--ds-text-subtlest);
     margin: 0;
   }
 
@@ -718,15 +669,15 @@ if (user.role !== 'administrator') {
     align-items: center;
     gap: 1rem;
     padding: 1.5rem;
-    background: #f7fafc;
+    background: var(--ds-surface-sunken);
     border-radius: 8px;
   }
 
   .hierarchy-level {
     flex: 1;
     padding: 1rem;
-    background: white;
-    border: 2px solid #e2e8f0;
+    background: var(--ds-surface-raised);
+    border: 2px solid var(--ds-border);
     border-radius: 6px;
   }
 
@@ -738,18 +689,18 @@ if (user.role !== 'administrator') {
 
   .hierarchy-level p {
     font-size: 0.85rem;
-    color: #718096;
+    color: var(--ds-text-subtlest);
     margin: 0;
   }
 
   .hierarchy-arrow {
     font-size: 1.5rem;
-    color: #cbd5e0;
+    color: #B3B9C4;
     font-weight: bold;
   }
 
   .text-muted {
-    color: #718096;
+    color: var(--ds-text-subtlest);
   }
 
   .text-center {
@@ -781,5 +732,114 @@ if (user.role !== 'administrator') {
     .hierarchy-arrow {
       transform: rotate(90deg);
     }
+  }
+  .settings-section--wide {
+    max-width: none;
+  }
+
+  .status-banner {
+    padding: 0.75rem 1rem;
+    border-radius: 6px;
+    margin-bottom: 1.5rem;
+    font-size: 0.95rem;
+  }
+
+  .status-banner--success {
+    background: var(--ds-background-success);
+    border: 1px solid #BAF3DB;
+    color: var(--ds-text-success);
+  }
+
+  .status-banner--error {
+    background: var(--ds-background-danger);
+    border: 1px solid var(--ds-border-danger);
+    color: var(--ds-text-danger);
+  }
+
+  .field-error {
+    display: block;
+    margin-top: 0.25rem;
+    font-size: 0.85rem;
+    color: var(--ds-text-danger);
+    min-height: 0;
+  }
+
+  .field-error:empty {
+    display: none;
+  }
+
+  .tab-button:focus-visible,
+  .form-control:focus-visible,
+  .btn:focus-visible {
+    outline: 2px solid var(--ds-border-selected);
+    outline-offset: 2px;
+  }
+
+  .btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+
+  .coa-filter {
+    margin: 1rem 0;
+    max-width: 360px;
+  }
+
+  .coa-group {
+    margin-bottom: 1rem;
+    border: 1px solid var(--ds-border);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .coa-group summary {
+    padding: 0.75rem 1rem;
+    background: var(--ds-surface-sunken);
+    font-weight: 600;
+    cursor: pointer;
+  }
+
+  .settings-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+  }
+
+  .settings-table th,
+  .settings-table td {
+    padding: 0.6rem 1rem;
+    text-align: left;
+    border-bottom: 1px solid var(--ds-border);
+  }
+
+  .settings-table th {
+    font-weight: 600;
+    color: var(--ds-text-subtle);
+    background: var(--ds-surface-sunken);
+  }
+
+  .mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    white-space: nowrap;
+  }
+
+  .hierarchy-level a {
+    color: var(--ds-link-pressed);
+    text-decoration: none;
+  }
+
+  .hierarchy-level a:hover {
+    text-decoration: underline;
+  }
+
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
   }
 </style>

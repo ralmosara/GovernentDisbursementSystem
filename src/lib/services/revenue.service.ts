@@ -14,6 +14,7 @@ import {
   generateARNumber,
   generateCollectionNumber,
 } from '../utils/serial-generator';
+import { logAudit } from '../middleware/audit-logger';
 
 // ============================================
 // TYPE DEFINITIONS
@@ -99,7 +100,7 @@ export class RevenueService {
       }
 
       // Insert revenue source
-      const result = await db.insert(revenueSources).values({
+      const [result] = await db.insert(revenueSources).values({
         code: data.code,
         name: data.name,
         category: data.category,
@@ -215,7 +216,7 @@ export class RevenueService {
       }
 
       // Insert revenue entry
-      const result = await db.insert(revenueEntries).values({
+      const [result] = await db.insert(revenueEntries).values({
         entryNo,
         revenueSourceId: data.revenueSourceId,
         fundClusterId: data.fundClusterId,
@@ -304,7 +305,7 @@ export class RevenueService {
         createdBy: row.users
           ? {
               id: row.users.id,
-              fullName: row.users.fullName,
+              fullName: `${row.users.firstName} ${row.users.lastName}`,
             }
           : null,
       }));
@@ -360,7 +361,7 @@ export class RevenueService {
         createdBy: row.users
           ? {
               id: row.users.id,
-              fullName: row.users.fullName,
+              fullName: `${row.users.firstName} ${row.users.lastName}`,
             }
           : null,
       };
@@ -492,7 +493,7 @@ export class RevenueService {
       }
 
       // Insert AR
-      const result = await db.insert(accountsReceivable).values({
+      const [result] = await db.insert(accountsReceivable).values({
         arNo,
         revenueSourceId: data.revenueSourceId,
         debtorName: data.debtorName,
@@ -634,7 +635,7 @@ export class RevenueService {
         createdBy: row.users
           ? {
               id: row.users.id,
-              fullName: row.users.fullName,
+              fullName: `${row.users.firstName} ${row.users.lastName}`,
             }
           : null,
         collections: collectionHistory.map((c) => ({
@@ -692,40 +693,47 @@ export class RevenueService {
   /**
    * Update AR balance and status after collection
    */
-  async updateARBalance(arId: number, collectionAmount: number) {
+  async updateARBalance(arId: number, collectionAmount: number, tx?: Parameters<Parameters<typeof db.transaction>[0]>[0]) {
+    const executor = tx ?? db;
     try {
-      // Get current AR
-      const ar = await db
+      // Get current AR (locked when called inside a transaction)
+      const query = executor
         .select()
         .from(accountsReceivable)
         .where(eq(accountsReceivable.id, arId))
         .limit(1);
+      const ar = tx ? await query.for('update') : await query;
 
       if (ar.length === 0) {
         throw new Error('AR not found');
       }
 
-      const currentBalance = parseFloat(ar[0].balance);
-      const currentCollected = parseFloat(ar[0].amountCollected);
+      // Work in centavos so a fully settled AR reaches exactly zero
+      const balanceCentavos = Math.round(parseFloat(ar[0].balance) * 100);
+      const collectedCentavos = Math.round(parseFloat(ar[0].amountCollected ?? '0') * 100);
+      const amountCentavos = Math.round(collectionAmount * 100);
 
-      // Calculate new values
-      const newBalance = currentBalance - collectionAmount;
-      const newCollected = currentCollected + collectionAmount;
+      if (amountCentavos > balanceCentavos) {
+        throw new Error(`Collection amount (${collectionAmount.toFixed(2)}) cannot exceed AR balance (${(balanceCentavos / 100).toFixed(2)})`);
+      }
+
+      const newBalance = (balanceCentavos - amountCentavos) / 100;
+      const newCollected = (collectedCentavos + amountCentavos) / 100;
 
       // Determine new status
       let newStatus: 'outstanding' | 'partial' | 'paid' = 'outstanding';
-      if (newBalance === 0) {
+      if (balanceCentavos - amountCentavos === 0) {
         newStatus = 'paid';
-      } else if (newCollected > 0) {
+      } else if (collectedCentavos + amountCentavos > 0) {
         newStatus = 'partial';
       }
 
       // Update AR
-      await db
+      await executor
         .update(accountsReceivable)
         .set({
-          balance: newBalance.toString(),
-          amountCollected: newCollected.toString(),
+          balance: newBalance.toFixed(2),
+          amountCollected: newCollected.toFixed(2),
           status: newStatus,
           updatedAt: new Date(),
         })
@@ -742,6 +750,24 @@ export class RevenueService {
    */
   async writeOffAR(arId: number, userId: number, reason: string) {
     try {
+      if (!reason || reason.trim() === '') {
+        throw new Error('A reason is required to write off a receivable');
+      }
+
+      const ar = await db
+        .select({ status: accountsReceivable.status, balance: accountsReceivable.balance, arNo: accountsReceivable.arNo })
+        .from(accountsReceivable)
+        .where(eq(accountsReceivable.id, arId))
+        .limit(1);
+
+      if (ar.length === 0) {
+        throw new Error('AR not found');
+      }
+
+      if (ar[0].status === 'paid' || ar[0].status === 'written_off') {
+        throw new Error(`AR ${ar[0].arNo} is already ${ar[0].status === 'paid' ? 'fully paid' : 'written off'}`);
+      }
+
       await db
         .update(accountsReceivable)
         .set({
@@ -750,7 +776,14 @@ export class RevenueService {
         })
         .where(eq(accountsReceivable.id, arId));
 
-      // TODO: Add audit log entry with reason
+      await logAudit({
+        userId,
+        action: 'UPDATE',
+        tableName: 'accounts_receivable',
+        recordId: arId,
+        oldValues: { status: ar[0].status, balance: ar[0].balance },
+        newValues: { status: 'written_off', writeOffAmount: ar[0].balance, reason: reason.trim() },
+      });
     } catch (error) {
       throw new Error(`Failed to write off AR: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
@@ -807,44 +840,42 @@ export class RevenueService {
         throw new Error('Collection amount must be greater than 0');
       }
 
-      // Get AR balance
-      const ar = await db
-        .select({ balance: accountsReceivable.balance })
+      const status = await db
+        .select({ status: accountsReceivable.status })
         .from(accountsReceivable)
         .where(eq(accountsReceivable.id, data.arId))
         .limit(1);
 
-      if (ar.length === 0) {
+      if (status.length === 0) {
         throw new Error('AR not found');
       }
 
-      const arBalance = parseFloat(ar[0].balance);
-
-      // Validate amount <= AR balance
-      if (amount > arBalance) {
-        throw new Error(`Collection amount (${amount}) cannot exceed AR balance (${arBalance})`);
+      if (status[0].status === 'written_off') {
+        throw new Error('Cannot record a collection against a written-off receivable');
       }
 
-      // Insert collection
-      const result = await db.insert(collections).values({
-        collectionNo,
-        arId: data.arId,
-        orNo: data.orNo || null,
-        collectionDate: data.collectionDate,
-        amount: data.amount,
-        paymentMode: data.paymentMode,
-        checkNo: data.checkNo || null,
-        checkDate: data.checkDate || null,
-        checkBank: data.checkBank || null,
-        remarks: data.remarks || null,
-        createdBy: userId,
-        createdAt: new Date(),
+      // Balance check, AR update and collection insert commit together; the AR row is
+      // locked so concurrent collections cannot exceed the balance
+      const id = await db.transaction(async (tx) => {
+        await this.updateARBalance(data.arId, amount, tx);
+
+        const [result] = await tx.insert(collections).values({
+          collectionNo,
+          arId: data.arId,
+          orNo: data.orNo || null,
+          collectionDate: data.collectionDate,
+          amount: data.amount,
+          paymentMode: data.paymentMode,
+          checkNo: data.paymentMode === 'check' ? data.checkNo || null : null,
+          checkDate: data.paymentMode === 'check' && data.checkDate ? new Date(data.checkDate) : null,
+          checkBank: data.paymentMode === 'check' ? data.checkBank || null : null,
+          remarks: data.remarks || null,
+          createdBy: userId,
+          createdAt: new Date(),
+        });
+
+        return Number(result.insertId);
       });
-
-      const id = Number(result.insertId);
-
-      // Update AR balance and status
-      await this.updateARBalance(data.arId, amount);
 
       return {
         id,
@@ -932,7 +963,8 @@ export class RevenueService {
           invoiceNo: accountsReceivable.invoiceNo,
           revenueSourceName: revenueSources.name,
           createdBy: collections.createdBy,
-          createdByName: users.fullName,
+          createdByFirstName: users.firstName,
+          createdByLastName: users.lastName,
         })
         .from(collections)
         .leftJoin(accountsReceivable, eq(collections.arId, accountsReceivable.id))

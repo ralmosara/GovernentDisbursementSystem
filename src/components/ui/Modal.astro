@@ -1,0 +1,41 @@
+---
+// ADS modal dialog built on native <dialog>, which provides focus trapping, Esc to
+// close and a backdrop. Open it with document.getElementById(id).showModal().
+interface Props {
+  id: string;
+  title: string;
+  appearance?: 'default' | 'danger' | 'warning';
+  width?: 'small' | 'medium' | 'large';
+}
+
+const { id, title, appearance = 'default', width = 'small' } = Astro.props;
+// Literal class names so Tailwind keeps them (it can't see classes built from template strings)
+const widthClass = { small: 'modal-small', medium: 'modal-medium', large: 'modal-large' }[width];
+const icon = appearance === 'danger' ? 'pi-times-circle' : appearance === 'warning' ? 'pi-exclamation-triangle' : '';
+---
+
+<dialog id={id} class={`modal ${widthClass}`} aria-labelledby={`${id}-title`}>
+  <div class="modal-header">
+    <h2 id={`${id}-title`} class="flex items-center gap-2 text-lg font-semibold text-gray-800">
+      {icon && <i class={`pi ${icon} ${appearance === 'danger' ? 'text-red-600' : 'text-orange-600'}`} aria-hidden="true"></i>}
+      {title}
+    </h2>
+    <button type="button" class="nav-icon-button" data-modal-close aria-label="Close">
+      <i class="pi pi-times" aria-hidden="true"></i>
+    </button>
+  </div>
+  <div class="modal-body"><slot /></div>
+  {Astro.slots.has('footer') && <div class="modal-footer"><slot name="footer" /></div>}
+</dialog>
+
+<script>
+  document.querySelectorAll<HTMLDialogElement>('dialog.modal').forEach(dialog => {
+    if (dialog.dataset.wired) return;
+    dialog.dataset.wired = 'true';
+    dialog.querySelectorAll('[data-modal-close]').forEach(button => button.addEventListener('click', () => dialog.close()));
+    // A click on the dialog element itself (not its contents) is a click on the backdrop
+    dialog.addEventListener('click', event => {
+      if (event.target === dialog) dialog.close();
+    });
+  });
+</script>

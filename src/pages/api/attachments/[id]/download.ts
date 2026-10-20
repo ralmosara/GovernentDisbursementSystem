@@ -4,7 +4,10 @@ import { getFileFullPath } from '../../../../lib/utils/file-handler';
 import { readFile } from 'fs/promises';
 import { existsSync } from 'fs';
 
-export const GET: APIRoute = async ({ params, locals }) => {
+// Only these types may be rendered inline (e.g. thumbnails); everything else is forced to download
+const INLINE_SAFE_TYPES = ['image/jpeg', 'image/jpg', 'image/png', 'application/pdf'];
+
+export const GET: APIRoute = async ({ params, locals, url }) => {
   const user = locals.user;
   if (!user) {
     return new Response('Unauthorized', { status: 401 });
@@ -27,13 +30,18 @@ export const GET: APIRoute = async ({ params, locals }) => {
     // Read file from disk
     const fileBuffer = await readFile(fullPath);
 
+    const inline = url.searchParams.get('inline') === '1' && INLINE_SAFE_TYPES.includes(downloadInfo.mimeType);
+    const disposition = inline ? 'inline' : 'attachment';
+
     // Return file with appropriate headers
     return new Response(fileBuffer, {
       status: 200,
       headers: {
         'Content-Type': downloadInfo.mimeType,
-        'Content-Disposition': `attachment; filename="${encodeURIComponent(downloadInfo.originalName)}"`,
+        'Content-Disposition': `${disposition}; filename="${encodeURIComponent(downloadInfo.originalName)}"`,
         'Content-Length': fileBuffer.length.toString(),
+        'X-Content-Type-Options': 'nosniff',
+        'Cache-Control': 'private, no-store',
       },
     });
   } catch (error: any) {

@@ -7,7 +7,7 @@ test.describe('User Authentication', () => {
 
   test('should display login page correctly', async ({ page }) => {
     // Check page title
-    await expect(page).toHaveTitle(/Login/i);
+    await expect(page).toHaveTitle(/Log ?in/i);
 
     // Check for login form elements
     await expect(page.locator('input[name="username"]')).toBeVisible();
@@ -26,8 +26,8 @@ test.describe('User Authentication', () => {
     // Should redirect to dashboard
     await expect(page).toHaveURL(/\/dashboard/);
 
-    // Check for user menu or welcome message
-    await expect(page.locator('text=/Welcome|Dashboard/i')).toBeVisible();
+    // The home page greets the signed-in user
+    await expect(page.getByRole('heading', { level: 1, name: /Good (morning|afternoon|evening)/i })).toBeVisible();
   });
 
   test('should show error with invalid credentials', async ({ page }) => {
@@ -89,8 +89,9 @@ test.describe('User Authentication', () => {
 
     await expect(page).toHaveURL(/\/dashboard/);
 
-    // Click logout button (assuming it exists in navigation)
-    await page.click('button:has-text("Logout"), a:has-text("Logout")');
+    // Log out from the account menu in the top navigation
+    await page.getByRole('button', { name: /^Account:/ }).click();
+    await page.getByRole('menuitem', { name: 'Log out' }).click();
 
     // Should redirect to login page
     await expect(page).toHaveURL(/\/login/);

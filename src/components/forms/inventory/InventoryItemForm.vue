@@ -269,12 +269,12 @@ function handleCancel() {
           <span class="text-blue-700">Stock Status:</span>
           <div class="mt-1">
             <span
-              class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
+              class="badge"
               :class="{
-                'bg-green-100 text-green-800': stockStatus.color === 'green',
-                'bg-orange-100 text-orange-800': stockStatus.color === 'orange',
-                'bg-red-100 text-red-800': stockStatus.color === 'red',
-                'bg-purple-100 text-purple-800': stockStatus.color === 'purple',
+                'badge-success': stockStatus.color === 'green',
+                'badge-warning': stockStatus.color === 'orange',
+                'badge-danger': stockStatus.color === 'red',
+                'badge-discovery': stockStatus.color === 'purple',
               }"
             >
               {{ stockStatus.label }}

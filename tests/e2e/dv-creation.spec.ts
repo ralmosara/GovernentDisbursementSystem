@@ -13,10 +13,11 @@ test.describe('Disbursement Voucher Creation', () => {
 
   test('should navigate to DV creation page', async ({ page }) => {
     // Navigate to disbursements
-    await page.click('a:has-text("Disbursement")');
+    await page.locator('summary:has-text("Disbursements")').click();
+    await page.getByRole('link', { name: 'Disbursement vouchers' }).click();
 
     // Click create new DV button
-    await page.click('a:has-text("Create"), a:has-text("New DV")');
+    await page.click('a:has-text("New voucher"), a:has-text("Create a voucher")');
 
     // Should be on create page
     await expect(page).toHaveURL(/\/disbursements\/create/);

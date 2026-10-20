@@ -4,6 +4,7 @@ import { users, userRoles, roles } from '../../../../lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { hashPassword } from '../../../../lib/auth/password';
 import { hasRole } from '../../../../lib/utils/permissions';
+import { validatePasswordPolicy } from '../../../../lib/services/settings.service';
 
 export const GET: APIRoute = async ({ locals }) => {
   const user = locals.user;
@@ -85,6 +86,18 @@ export const POST: APIRoute = async ({ request, locals }) => {
     if (!data.employeeNo || !data.username || !data.email || !data.password) {
       return new Response(
         JSON.stringify({ error: 'Missing required fields' }),
+        {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      );
+    }
+
+    // Enforce the configured password policy
+    const passwordProblems = await validatePasswordPolicy(String(data.password));
+    if (passwordProblems.length > 0) {
+      return new Response(
+        JSON.stringify({ error: `Password must contain ${passwordProblems.join(', ')}` }),
         {
           status: 400,
           headers: { 'Content-Type': 'application/json' },

@@ -1,0 +1,241 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import { payrollService } from '../../../lib/services/payroll.service';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+const id = parseInt(Astro.params.id as string);
+const employee = id ? await payrollService.getEmployeeById(id) : null;
+
+if (!employee) {
+  return Astro.redirect('/payroll/employees');
+}
+
+const deductions = await payrollService.getEmployeeDeductions(id);
+
+const peso = (v: unknown) =>
+  `₱${(Number(v) || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const formatDate = (d: Date | string | null | undefined) =>
+  d ? new Date(d).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' }) : '—';
+
+// Show only the last 4 characters of government and bank numbers on screen
+const mask = (value: string | null | undefined) =>
+  value ? `${'•'.repeat(Math.max(value.length - 4, 0))}${value.slice(-4)}` : '—';
+
+const fullName = [employee.firstName, employee.middleName, employee.lastName, employee.suffix].filter(Boolean).join(' ');
+const monthlyGross = Number(employee.basicSalary) + Number(employee.pera) + Number(employee.additionalAllowance);
+const activeDeductions = deductions.filter(d => d.isActive);
+const monthlyDeductions = activeDeductions.reduce((s, d) => s + Number(d.amount), 0);
+
+const statusBadge: Record<string, string> = {
+  Active: 'badge-success',
+  'On Leave': 'badge-warning',
+  Resigned: 'badge-secondary',
+  Retired: 'badge-secondary',
+  Terminated: 'badge-danger',
+};
+---
+
+<MainLayout title={fullName}>
+  <div class="page-header mb-6">
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div>
+        <div class="flex items-center gap-3 mb-2">
+          <a href="/payroll/employees" class="text-gray-500 hover:text-gray-700" aria-label="Back to employees">
+            <i class="pi pi-arrow-left"></i>
+          </a>
+          <h1 class="page-title">{fullName}</h1>
+          <span class={`badge ${statusBadge[employee.employmentStatus || ''] || 'badge-secondary'}`}>
+            {employee.employmentStatus}
+          </span>
+        </div>
+        <p class="page-description">
+          <span class="font-mono">{employee.employeeNo}</span> · {employee.position}
+          {employee.salaryGrade && <> · SG {employee.salaryGrade}-{employee.stepIncrement}</>}
+        </p>
+      </div>
+      <div class="flex gap-3">
+        <a href={`/payroll/deductions/create?employeeId=${employee.id}`} class="btn btn-secondary btn-md">
+          <i class="pi pi-minus-circle mr-2" aria-hidden="true"></i>
+          Add Deduction
+        </a>
+        <button type="button" id="edit-toggle" class="btn btn-primary btn-md" aria-expanded="false" aria-controls="edit-panel">
+          <i class="pi pi-pencil mr-2" aria-hidden="true"></i>
+          Edit Employee
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit panel (Vue form mounted on demand) -->
+  <div id="edit-panel" class="card mb-6" hidden>
+    <div class="card-header"><h2 class="text-lg font-semibold text-gray-900">Edit Employee</h2></div>
+    <div class="card-body">
+      <div id="edit-error" class="hidden mb-4 p-3 rounded-md bg-red-50 border border-red-200 text-sm text-red-800" role="alert"></div>
+      <div id="employee-edit-form" data-employee-id={employee.id}></div>
+    </div>
+  </div>
+
+  <div id="details-panel">
+    <!-- Pay summary -->
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+      <div class="card"><div class="card-body">
+        <p class="text-sm text-gray-600">Basic Salary</p>
+        <p class="text-2xl font-bold text-gray-900">{peso(employee.basicSalary)}</p>
+      </div></div>
+      <div class="card"><div class="card-body">
+        <p class="text-sm text-gray-600">Monthly Gross (Basic + PERA + Allowance)</p>
+        <p class="text-2xl font-bold text-gray-900">{peso(monthlyGross)}</p>
+      </div></div>
+      <div class="card"><div class="card-body">
+        <p class="text-sm text-gray-600">Active Loan Deductions / Month</p>
+        <p class="text-2xl font-bold text-gray-900">{peso(monthlyDeductions)}</p>
+      </div></div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+      <div class="card">
+        <div class="card-header"><h2 class="text-lg font-semibold text-gray-900">Employment</h2></div>
+        <div class="card-body">
+          <dl class="grid grid-cols-2 gap-4 text-sm">
+            <div><dt class="text-gray-600">Appointment</dt><dd class="text-gray-900 font-medium">{employee.appointmentStatus}</dd></div>
+            <div><dt class="text-gray-600">Date Hired</dt><dd class="text-gray-900 font-medium">{formatDate(employee.dateHired)}</dd></div>
+            <div><dt class="text-gray-600">Date Regularized</dt><dd class="text-gray-900 font-medium">{formatDate(employee.dateRegularized)}</dd></div>
+            {employee.dateResigned && <div><dt class="text-gray-600">Date Separated</dt><dd class="text-gray-900 font-medium">{formatDate(employee.dateResigned)}</dd></div>}
+            <div><dt class="text-gray-600">PERA</dt><dd class="text-gray-900 font-medium">{peso(employee.pera)}</dd></div>
+            <div><dt class="text-gray-600">Additional Allowance</dt><dd class="text-gray-900 font-medium">{peso(employee.additionalAllowance)}</dd></div>
+            <div><dt class="text-gray-600">Tax Exemption Code</dt><dd class="text-gray-900 font-medium">{employee.taxExemptionCode}</dd></div>
+            <div><dt class="text-gray-600">Dependents</dt><dd class="text-gray-900 font-medium">{employee.numberOfDependents}</dd></div>
+          </dl>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><h2 class="text-lg font-semibold text-gray-900">Personal &amp; Contact</h2></div>
+        <div class="card-body">
+          <dl class="grid grid-cols-2 gap-4 text-sm">
+            <div><dt class="text-gray-600">Date of Birth</dt><dd class="text-gray-900 font-medium">{formatDate(employee.dateOfBirth)}</dd></div>
+            <div><dt class="text-gray-600">Civil Status</dt><dd class="text-gray-900 font-medium">{employee.civilStatus || '—'}</dd></div>
+            <div><dt class="text-gray-600">Gender</dt><dd class="text-gray-900 font-medium">{employee.gender || '—'}</dd></div>
+            <div><dt class="text-gray-600">Mobile</dt><dd class="text-gray-900 font-medium">{employee.mobileNo || '—'}</dd></div>
+            <div class="col-span-2"><dt class="text-gray-600">Email</dt><dd class="text-gray-900 font-medium break-all">{employee.email || '—'}</dd></div>
+            <div class="col-span-2"><dt class="text-gray-600">Address</dt><dd class="text-gray-900 font-medium">{employee.address || '—'}</dd></div>
+          </dl>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h2 class="text-lg font-semibold text-gray-900">Government Numbers</h2>
+          <p class="text-xs text-gray-500">Masked for privacy (R.A. 10173). Full values are visible in Edit.</p>
+        </div>
+        <div class="card-body">
+          <dl class="grid grid-cols-2 gap-4 text-sm">
+            <div><dt class="text-gray-600">TIN</dt><dd class="text-gray-900 font-mono">{mask(employee.tinNo)}</dd></div>
+            <div><dt class="text-gray-600">GSIS</dt><dd class="text-gray-900 font-mono">{mask(employee.gsisNo)}</dd></div>
+            <div><dt class="text-gray-600">PhilHealth</dt><dd class="text-gray-900 font-mono">{mask(employee.philhealthNo)}</dd></div>
+            <div><dt class="text-gray-600">Pag-IBIG</dt><dd class="text-gray-900 font-mono">{mask(employee.pagibigNo)}</dd></div>
+          </dl>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><h2 class="text-lg font-semibold text-gray-900">Bank (Payroll Credit)</h2></div>
+        <div class="card-body">
+          <dl class="grid grid-cols-2 gap-4 text-sm">
+            <div><dt class="text-gray-600">Bank</dt><dd class="text-gray-900 font-medium">{employee.bankName || '—'}</dd></div>
+            <div><dt class="text-gray-600">Account No.</dt><dd class="text-gray-900 font-mono">{mask(employee.bankAccountNo)}</dd></div>
+            <div class="col-span-2"><dt class="text-gray-600">Account Name</dt><dd class="text-gray-900 font-medium">{employee.bankAccountName || '—'}</dd></div>
+          </dl>
+        </div>
+      </div>
+    </div>
+
+    <!-- Deductions -->
+    <div class="card">
+      <div class="card-header"><h2 class="text-lg font-semibold text-gray-900">Loan &amp; Other Deductions ({deductions.length})</h2></div>
+      <div class="card-body">
+        {deductions.length === 0 ? (
+          <p class="text-gray-500 text-sm">No deductions on file. Mandatory contributions (GSIS, PhilHealth, Pag-IBIG, withholding tax) are computed during payroll processing.</p>
+        ) : (
+          <div class="overflow-x-auto">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Type</th><th>Name</th><th class="text-right">Monthly</th><th>Installments</th><th class="text-right">Balance</th><th>Period</th><th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {deductions.map(d => (
+                  <tr>
+                    <td class="text-sm">{d.deductionType}</td>
+                    <td class="text-sm">{d.deductionName}</td>
+                    <td class="text-right font-mono">{peso(d.amount)}</td>
+                    <td class="text-sm">{d.installments ? `${d.installmentsPaid ?? 0} / ${d.installments}` : '—'}</td>
+                    <td class="text-right font-mono">{d.balance !== null ? peso(d.balance) : '—'}</td>
+                    <td class="text-sm whitespace-nowrap">{formatDate(d.startDate)} – {d.endDate ? formatDate(d.endDate) : 'open'}</td>
+                    <td><span class={`badge text-xs ${d.isActive ? 'badge-success' : 'badge-secondary'}`}>{d.isActive ? 'Active' : 'Ended'}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  </div>
+</MainLayout>
+
+<script>
+  import { createApp, type App } from 'vue';
+  import EmployeeForm from '../../../components/forms/payroll/EmployeeForm.vue';
+
+  const toggle = document.getElementById('edit-toggle') as HTMLButtonElement;
+  const editPanel = document.getElementById('edit-panel') as HTMLElement;
+  const detailsPanel = document.getElementById('details-panel') as HTMLElement;
+  const mount = document.getElementById('employee-edit-form') as HTMLElement;
+  const errorBox = document.getElementById('edit-error') as HTMLElement;
+  const employeeId = Number(mount.dataset.employeeId);
+  let app: App | null = null;
+
+  function setEditing(editing: boolean) {
+    editPanel.hidden = !editing;
+    detailsPanel.hidden = editing;
+    toggle.setAttribute('aria-expanded', String(editing));
+    toggle.innerHTML = editing
+      ? '<i class="pi pi-times mr-2" aria-hidden="true"></i>Cancel Edit'
+      : '<i class="pi pi-pencil mr-2" aria-hidden="true"></i>Edit Employee';
+
+    if (editing && !app) {
+      app = createApp(EmployeeForm, {
+        employeeId,
+        onSubmit: async (formData: Record<string, unknown>) => {
+          errorBox.classList.add('hidden');
+          try {
+            const response = await fetch(`/api/payroll/employees/${employeeId}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(formData),
+            });
+            if (!response.ok) {
+              const result = await response.json().catch(() => ({}));
+              throw new Error(result.error || 'Failed to save changes');
+            }
+            window.location.reload();
+          } catch (error) {
+            errorBox.textContent = error instanceof Error ? error.message : 'Failed to save changes';
+            errorBox.classList.remove('hidden');
+          }
+        },
+        onCancel: () => setEditing(false),
+      });
+      app.mount(mount);
+    }
+  }
+
+  toggle.addEventListener('click', () => setEditing(editPanel.hidden));
+</script>

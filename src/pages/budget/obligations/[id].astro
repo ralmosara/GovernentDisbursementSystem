@@ -1,6 +1,9 @@
 ---
 import MainLayout from '../../../layouts/MainLayout.astro';
 import { budgetService } from '../../../lib/services/budget.service';
+import Banner from '../../../components/ui/Banner.astro';
+import Lozenge from '../../../components/ui/Lozenge.astro';
+import { insightsService } from '../../../lib/services/insights.service';
 
 const user = Astro.locals.user;
 
@@ -15,8 +18,7 @@ if (!id || isNaN(parseInt(id))) {
 }
 
 // Get obligation details
-const obligations = await budgetService.getObligations();
-const obligation = obligations.find(o => o.id === parseInt(id));
+const obligation = await budgetService.getObligationById(parseInt(id));
 
 if (!obligation) {
   return Astro.redirect('/budget/obligations');
@@ -24,6 +26,24 @@ if (!obligation) {
 
 // Get budget availability for the allotment
 const budgetAvailability = await budgetService.getBudgetAvailability(obligation.allotmentId);
+
+// How much of this obligation vouchers have already used
+const reference = obligation.orsNumber || obligation.bursNumber || '';
+const usage = reference ? await insightsService.getObligationByReference(reference).catch(() => null) : null;
+const remainingToDisburse = usage ? usage.remaining : Number(obligation.amount);
+
+// Prefill a DV from this obligation (fund cluster, object of expenditure, payee, amount left)
+const dvPrefill = new URLSearchParams({
+  fromObligation: String(obligation.id),
+  orsBursNo: reference,
+  payeeName: obligation.payee,
+  particulars: obligation.particulars,
+  amount: Math.max(remainingToDisburse, 0).toFixed(2),
+  fundClusterId: String(obligation.allotment.appropriation.fundCluster.id ?? ''),
+  objectExpenditureId: String(obligation.allotment.objectOfExpenditure.id ?? ''),
+});
+const justCreated = Astro.url.searchParams.get('created') === '1';
+const canDisburse = obligation.status === 'approved' && remainingToDisburse > 0 && Boolean(reference);
 
 // Format dates
 const formatDate = (date: Date | string | null) => {
@@ -52,18 +72,39 @@ const getStatusBadge = (status: string) => {
     <!-- Page Header -->
     <div class="page-header">
       <div class="flex items-center gap-4 mb-2">
-        <a href="/budget/obligations" class="text-gray-600 hover:text-gray-900">
-          <i class="pi pi-arrow-left"></i>
+        <a href="/budget/obligations" class="text-gray-600 hover:text-gray-900" aria-label="Back">
+          <i class="pi pi-arrow-left" aria-hidden="true"></i>
         </a>
         <h1 class="page-title">Obligation Details</h1>
       </div>
       <div class="flex items-center justify-between">
         <p class="page-description">View obligation information and approval status</p>
-        <span class={`badge ${getStatusBadge(obligation.status || 'pending')}`}>
-          {obligation.status?.toUpperCase() || 'PENDING'}
-        </span>
+        <div class="flex items-center gap-2">
+          <Lozenge status={obligation.status || 'pending'} />
+          {canDisburse && (
+            <a href={`/disbursements/create?${dvPrefill}`} class="btn btn-primary">
+              <i class="pi pi-file-edit" aria-hidden="true"></i>
+              Create voucher from this obligation
+            </a>
+          )}
+        </div>
       </div>
     </div>
+
+    {justCreated && (
+      <Banner appearance="success" title="Obligation request submitted" class="mb-6" role="status">
+        A budget officer will certify it against the allotment. Once it's approved you can create a
+        disbursement voucher from this page; it will be filled in for you.
+      </Banner>
+    )}
+
+    {obligation.status === 'approved' && usage && (
+      <Banner appearance={remainingToDisburse > 0 ? 'info' : 'success'} class="mb-6">
+        {remainingToDisburse > 0
+          ? `₱${remainingToDisburse.toLocaleString('en-PH', { minimumFractionDigits: 2 })} of this obligation is not yet on a voucher (${usage.voucherCount} voucher${usage.voucherCount === 1 ? '' : 's'} so far).`
+          : `This obligation is fully covered by ${usage.voucherCount} voucher${usage.voucherCount === 1 ? '' : 's'}.`}
+      </Banner>
+    )}
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <!-- Main Information -->

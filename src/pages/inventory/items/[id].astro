@@ -33,10 +33,10 @@ try {
 
 const getStockStatusConfig = (status: string) => {
   const configs: Record<string, { label: string; classes: string; icon: string }> = {
-    adequate: { label: 'Adequate', classes: 'bg-green-100 text-green-800', icon: 'pi-check-circle' },
-    low: { label: 'Low Stock', classes: 'bg-orange-100 text-orange-800', icon: 'pi-exclamation-triangle' },
-    out: { label: 'Out of Stock', classes: 'bg-red-100 text-red-800', icon: 'pi-times-circle' },
-    excess: { label: 'Excess', classes: 'bg-purple-100 text-purple-800', icon: 'pi-info-circle' },
+    adequate: { label: 'Adequate', classes: 'badge-success', icon: 'pi-check-circle' },
+    low: { label: 'Low Stock', classes: 'badge-warning', icon: 'pi-exclamation-triangle' },
+    out: { label: 'Out of Stock', classes: 'badge-danger', icon: 'pi-times-circle' },
+    excess: { label: 'Excess', classes: 'badge-discovery', icon: 'pi-info-circle' },
   };
   return configs[status] || configs.adequate;
 };
@@ -63,7 +63,7 @@ const stockConfig = getStockStatusConfig(item.stockStatus);
         <div class="flex items-center space-x-3">
           <h1 class="text-3xl font-bold text-gray-900">{item.itemName}</h1>
           {!item.isActive && (
-            <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+            <span class="badge badge-secondary">
               Inactive
             </span>
           )}
@@ -175,7 +175,7 @@ const stockConfig = getStockStatusConfig(item.stockStatus);
               <div>
                 <dt class="text-sm font-medium text-gray-500">Stock Status</dt>
                 <dd class="mt-1">
-                  <span class={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${stockConfig.classes}`}>
+                  <span class={`badge ${stockConfig.classes}`}>
                     <i class={`pi ${stockConfig.icon} mr-1.5`}></i>
                     {stockConfig.label}
                   </span>

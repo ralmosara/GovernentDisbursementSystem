@@ -1,0 +1,168 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import PettyCashDisbursementForm from '../../../components/forms/cash/PettyCashDisbursementForm.vue';
+import { cashService } from '../../../lib/services/cash.service';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+const fundId = parseInt(Astro.params.id as string);
+if (!fundId) {
+  return Astro.redirect('/cash/petty-cash');
+}
+
+const fund = await cashService.getPettyCashFundById(fundId);
+if (!fund) {
+  return Astro.redirect('/cash/petty-cash');
+}
+
+const transactions = await cashService.getPettyCashTransactions(fundId);
+
+const fundAmount = Number(fund.fundAmount);
+const balance = Number(fund.currentBalance);
+const threshold = fund.replenishmentThreshold ? Number(fund.replenishmentThreshold) : 0;
+const spent = fundAmount - balance;
+const balancePct = fundAmount > 0 ? (balance / fundAmount) * 100 : 0;
+const belowThreshold = threshold > 0 && balance < threshold;
+
+const peso = (n: number | string) =>
+  `₱${Number(n).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const formatDate = (d: Date | string | null) =>
+  d ? new Date(d).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' }) : '—';
+
+// The disbursement form expects the fund list as JSON
+const fundsForForm = JSON.stringify([
+  {
+    id: fund.id,
+    fundCode: fund.fundCode,
+    fundName: fund.fundName,
+    custodian: fund.custodian,
+    fundAmount: fund.fundAmount,
+    currentBalance: fund.currentBalance,
+    replenishmentThreshold: fund.replenishmentThreshold,
+  },
+]);
+---
+
+<MainLayout title={`Petty Cash ${fund.fundCode}`}>
+  <div class="page-header mb-6">
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div>
+        <div class="flex items-center gap-3 mb-2">
+          <a href="/cash/petty-cash" class="text-gray-500 hover:text-gray-700" aria-label="Back to petty cash funds">
+            <i class="pi pi-arrow-left"></i>
+          </a>
+          <h1 class="page-title">{fund.fundCode} – {fund.fundName}</h1>
+          <span class={`badge ${fund.isActive ? 'badge-success' : 'badge-secondary'}`}>
+            {fund.isActive ? 'Active' : 'Inactive'}
+          </span>
+        </div>
+        <p class="page-description">
+          Custodian: {fund.custodian} · Fund cluster {fund.fundClusterCode} – {fund.fundClusterName}
+        </p>
+      </div>
+      {fund.isActive && spent > 0 && (
+        <a href={`/cash/petty-cash/${fund.id}/replenish`} class="btn btn-primary btn-md">
+          <i class="pi pi-refresh mr-2" aria-hidden="true"></i>
+          Replenish {peso(spent)}
+        </a>
+      )}
+    </div>
+  </div>
+
+  {belowThreshold && (
+    <div class="mb-6 p-4 rounded-md bg-yellow-50 border border-yellow-200 text-yellow-900 text-sm" role="alert">
+      <i class="pi pi-exclamation-triangle mr-2" aria-hidden="true"></i>
+      The balance is below the replenishment threshold of {peso(threshold)}. Prepare a DV to replenish this fund.
+    </div>
+  )}
+
+  <!-- Fund summary -->
+  <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+    <div class="card"><div class="card-body">
+      <p class="text-sm text-gray-600">Authorized Fund</p>
+      <p class="text-2xl font-bold text-gray-900">{peso(fundAmount)}</p>
+    </div></div>
+    <div class="card"><div class="card-body">
+      <p class="text-sm text-gray-600">Cash on Hand</p>
+      <p class={`text-2xl font-bold ${belowThreshold ? 'text-yellow-700' : 'text-green-700'}`}>{peso(balance)}</p>
+      <div class="mt-2 w-full bg-gray-200 rounded-full h-2" role="img" aria-label={`${balancePct.toFixed(0)}% of fund remaining`}>
+        <div class={`h-2 rounded-full ${belowThreshold ? 'bg-yellow-500' : 'bg-green-600'}`} style={`width: ${Math.min(Math.max(balancePct, 0), 100)}%`}></div>
+      </div>
+    </div></div>
+    <div class="card"><div class="card-body">
+      <p class="text-sm text-gray-600">Disbursed Since Last Replenishment</p>
+      <p class="text-2xl font-bold text-gray-900">{peso(spent)}</p>
+      {threshold > 0 && <p class="text-xs text-gray-500 mt-1">Replenish below {peso(threshold)}</p>}
+    </div></div>
+  </div>
+
+  <div class="grid grid-cols-1 xl:grid-cols-5 gap-6">
+    <!-- Disburse -->
+    {fund.isActive && (
+      <div class="card xl:col-span-2">
+        <div class="card-header">
+          <h2 class="text-lg font-semibold text-gray-900">Record Disbursement</h2>
+        </div>
+        <div class="card-body">
+          <PettyCashDisbursementForm
+            client:load
+            pettyCashFunds={fundsForForm}
+            initialFundId={fund.id}
+            redirectTo={`/cash/petty-cash/${fund.id}`}
+          />
+        </div>
+      </div>
+    )}
+
+    <!-- Register -->
+    <div class={`card ${fund.isActive ? 'xl:col-span-3' : 'xl:col-span-5'}`}>
+      <div class="card-header">
+        <h2 class="text-lg font-semibold text-gray-900">Petty Cash Register ({transactions.length})</h2>
+      </div>
+      <div class="card-body">
+        {transactions.length === 0 ? (
+          <p class="text-center text-gray-500 py-8">No transactions recorded yet.</p>
+        ) : (
+          <div class="overflow-x-auto">
+            <table class="table table-hover">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Type</th>
+                  <th>Payee / Reference</th>
+                  <th>Purpose</th>
+                  <th class="text-right">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {transactions.map(tx => (
+                  <tr>
+                    <td class="whitespace-nowrap text-sm">{formatDate(tx.transactionDate)}</td>
+                    <td>
+                      <span class={`badge text-xs ${tx.transactionType === 'replenishment' ? 'badge-success' : 'badge-warning'}`}>
+                        {tx.transactionType === 'replenishment' ? 'Replenishment' : 'Disbursement'}
+                      </span>
+                    </td>
+                    <td class="text-sm">
+                      {tx.transactionType === 'replenishment'
+                        ? (tx.dvId ? <a href={`/disbursements/${tx.dvId}`} class="text-primary-600 hover:underline">DV {tx.dvNo}</a> : '—')
+                        : <>{tx.payee}{tx.orNo && <span class="block text-xs text-gray-500">OR {tx.orNo}</span>}</>}
+                    </td>
+                    <td class="text-sm text-gray-700 max-w-xs truncate" title={tx.purpose || ''}>{tx.purpose}</td>
+                    <td class={`text-right font-mono whitespace-nowrap ${tx.transactionType === 'replenishment' ? 'text-green-700' : 'text-gray-900'}`}>
+                      {tx.transactionType === 'replenishment' ? '+' : '−'}{peso(tx.amount)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  </div>
+</MainLayout>

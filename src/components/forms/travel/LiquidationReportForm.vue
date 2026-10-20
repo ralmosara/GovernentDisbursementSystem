@@ -502,7 +502,7 @@ const loadFundClusters = async () => {
   try {
     const response = await fetch('/api/fund-clusters?active=true');
     const data = await response.json();
-    fundClusters.value = data.fundClusters || [];
+    fundClusters.value = Array.isArray(data) ? data : [];
   } catch (error) {
     console.error('Error loading fund clusters:', error);
   }
@@ -527,7 +527,7 @@ onMounted(() => {
 }
 
 .travel-info-card {
-  @apply bg-gradient-to-r from-purple-50 to-pink-50 p-4 rounded-lg border border-purple-200;
+  @apply bg-purple-50 p-4 rounded-lg border border-purple-200;
 }
 
 .section-title {

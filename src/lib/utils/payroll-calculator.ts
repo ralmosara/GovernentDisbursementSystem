@@ -4,7 +4,7 @@
  * Based on current 2024-2025 rates and regulations
  */
 
-import { calculateWithholdingTax, type TaxExemptionCode } from './tax-calculator';
+import { calculateWithholdingTax, calculate13thMonthTax, OTHER_BENEFITS_EXEMPTION, type TaxExemptionCode } from './tax-calculator';
 
 /**
  * GSIS (Government Service Insurance System) Contribution Rates
@@ -27,16 +27,16 @@ const PHILHEALTH_MIN_SALARY = 10000;
 const PHILHEALTH_MAX_SALARY = 100000;
 
 /**
- * Pag-IBIG (HDMF) Contribution Rates
- * - For monthly compensation ≤ ₱1,500: 1%
- * - For monthly compensation > ₱1,500: 2%
- * - Maximum employee contribution: ₱100
- * - Employer share: 2% of monthly compensation
+ * Pag-IBIG (HDMF) Contribution Rates — HDMF Circular No. 460 (effective February 2024)
+ * - Employee: 1% if monthly compensation ≤ ₱1,500, otherwise 2%
+ * - Employer: 2%
+ * - Both shares are computed on compensation up to the maximum fund salary of
+ *   ₱10,000, so each share is at most ₱200
  */
 const PAGIBIG_RATE_LOW = 0.01;
 const PAGIBIG_RATE_HIGH = 0.02;
 const PAGIBIG_THRESHOLD = 1500;
-const PAGIBIG_MAX_EMPLOYEE = 100;
+const PAGIBIG_MAX_FUND_SALARY = 10000;
 
 export interface PayrollCalculationInput {
   basicSalary: number;
@@ -154,16 +154,10 @@ export function calculatePagIBIGContribution(monthlyCompensation: number): {
   const employeeRate =
     monthlyCompensation <= PAGIBIG_THRESHOLD ? PAGIBIG_RATE_LOW : PAGIBIG_RATE_HIGH;
 
-  // Calculate contributions
-  let employeeShare = monthlyCompensation * employeeRate;
-
-  // Cap employee share at maximum
-  if (employeeShare > PAGIBIG_MAX_EMPLOYEE) {
-    employeeShare = PAGIBIG_MAX_EMPLOYEE;
-  }
-
-  // Employer share is always 2%
-  const employerShare = monthlyCompensation * PAGIBIG_RATE_HIGH;
+  // Both shares are computed on compensation capped at the maximum fund salary
+  const fundSalary = Math.min(Math.max(monthlyCompensation, 0), PAGIBIG_MAX_FUND_SALARY);
+  const employeeShare = fundSalary * employeeRate;
+  const employerShare = fundSalary * PAGIBIG_RATE_HIGH;
 
   return {
     employeeShare: Math.round(employeeShare * 100) / 100,
@@ -199,11 +193,15 @@ export function calculatePayroll(input: PayrollCalculationInput): PayrollCalcula
   // Calculate statutory contributions
   const gsis = calculateGSISContribution(basicSalary);
   const philhealth = calculatePhilHealthContribution(basicSalary);
-  const pagibig = calculatePagIBIGContribution(basicSalary + pera);
+  // Pag-IBIG is computed on monthly basic salary (capped at the fund salary)
+  const pagibig = calculatePagIBIGContribution(basicSalary);
 
-  // Calculate taxable income (gross - non-taxable items - mandatory contributions)
+  // Taxable compensation: gross less non-taxable items and mandatory contributions.
+  // PERA forms part of the "13th month pay and other benefits" exempt up to ₱90,000 a
+  // year, so it is excluded monthly; any excess is caught at year-end annualization.
   const taxableIncome =
     grossPay -
+    pera -
     gsis.employeeShare -
     philhealth.employeeShare -
     pagibig.employeeShare;
@@ -293,21 +291,21 @@ export function calculate13thMonthPay(
 export function calculateNet13thMonthPay(
   totalBasicSalary: number,
   monthsWorked: number = 12,
-  otherBenefits: number = 0
+  otherBenefits: number = 0,
+  /** The employee's other taxable compensation for the year; the excess benefit is taxed on top of it */
+  annualTaxableCompensation: number = totalBasicSalary
 ): {
   gross13thMonth: number;
   taxable13thMonth: number;
   tax: number;
   net13thMonth: number;
 } {
-  const EXEMPTION_LIMIT = 90000;
-
   const gross13thMonth = calculate13thMonthPay(totalBasicSalary, monthsWorked);
   const totalBenefits = gross13thMonth + otherBenefits;
 
-  // Only excess over ₱90,000 is taxable
-  const taxable13thMonth = Math.max(totalBenefits - EXEMPTION_LIMIT, 0);
-  const tax = taxable13thMonth * 0.15; // 15% tax rate on excess
+  // Only the excess over ₱90,000 is taxable, at the employee's graduated rate
+  const taxable13thMonth = Math.max(totalBenefits - OTHER_BENEFITS_EXEMPTION, 0);
+  const tax = calculate13thMonthTax(gross13thMonth, otherBenefits, annualTaxableCompensation);
 
   const net13thMonth = gross13thMonth - tax;
 

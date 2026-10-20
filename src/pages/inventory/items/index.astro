@@ -30,10 +30,10 @@ try {
 
 const getStockStatusConfig = (status: string) => {
   const configs: Record<string, { label: string; classes: string }> = {
-    adequate: { label: 'Adequate', classes: 'bg-green-100 text-green-800' },
-    low: { label: 'Low Stock', classes: 'bg-orange-100 text-orange-800' },
-    out: { label: 'Out of Stock', classes: 'bg-red-100 text-red-800' },
-    excess: { label: 'Excess', classes: 'bg-purple-100 text-purple-800' },
+    adequate: { label: 'Adequate', classes: 'badge-success' },
+    low: { label: 'Low Stock', classes: 'badge-warning' },
+    out: { label: 'Out of Stock', classes: 'badge-danger' },
+    excess: { label: 'Excess', classes: 'badge-discovery' },
   };
   return configs[status] || configs.adequate;
 };
@@ -126,28 +126,28 @@ const getStockStatusConfig = (status: string) => {
           <table class="min-w-full divide-y divide-gray-200">
             <thead class="bg-gray-50">
               <tr>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">
                   Item Code
                 </th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">
                   Item Name
                 </th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">
                   Unit
                 </th>
-                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-right text-xs font-semibold text-gray-600">
                   Unit Cost
                 </th>
-                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-right text-xs font-semibold text-gray-600">
                   Quantity
                 </th>
-                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-right text-xs font-semibold text-gray-600">
                   Total Value
                 </th>
-                <th class="px-6 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-center text-xs font-semibold text-gray-600">
                   Stock Status
                 </th>
-                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-right text-xs font-semibold text-gray-600">
                   Actions
                 </th>
               </tr>
@@ -179,7 +179,7 @@ const getStockStatusConfig = (status: string) => {
                       ₱{item.totalValue.toLocaleString()}
                     </td>
                     <td class="px-6 py-4 whitespace-nowrap text-center">
-                      <span class={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${stockConfig.classes}`}>
+                      <span class={`badge ${stockConfig.classes}`}>
                         {stockConfig.label}
                       </span>
                     </td>
