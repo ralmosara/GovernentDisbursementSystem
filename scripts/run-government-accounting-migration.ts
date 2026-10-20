@@ -10,7 +10,7 @@ import { dirname, join } from 'path';
  * INSERT IGNORE and columns are added only when missing.
  */
 
-const MIGRATION_FILES = ['add_government_accounting.sql', 'add_procurement.sql'];
+const MIGRATION_FILES = ['add_government_accounting.sql', 'add_procurement.sql', 'add_property_accountability.sql', 'add_missing_inventory_asset_tables.sql'];
 
 const COLUMNS: { table: string; name: string; definition: string }[] = [
   { table: 'disbursement_vouchers', name: 'tax_treatment', definition: 'VARCHAR(30) NULL' },
@@ -18,6 +18,8 @@ const COLUMNS: { table: string; name: string; definition: string }[] = [
   { table: 'disbursement_vouchers', name: 'total_tax_withheld', definition: 'DECIMAL(15,2) NOT NULL DEFAULT 0' },
   { table: 'disbursement_vouchers', name: 'net_amount', definition: 'DECIMAL(15,2) NULL' },
   { table: 'revenue_sources', name: 'account_code', definition: 'VARCHAR(20) NULL' },
+  // The inventory service records and joins on the creator, but the column was never created
+  { table: 'inventory_items', name: 'created_by', definition: 'INT NULL' },
 ];
 
 /** Split a migration file into statements, ignoring comment lines */

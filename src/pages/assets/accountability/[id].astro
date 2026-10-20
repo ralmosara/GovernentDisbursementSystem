@@ -1,0 +1,192 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import PageHeader from '../../../components/ui/PageHeader.astro';
+import Lozenge from '../../../components/ui/Lozenge.astro';
+import Banner from '../../../components/ui/Banner.astro';
+import Modal from '../../../components/ui/Modal.astro';
+import { propertyService } from '../../../lib/services/property.service';
+import { getSetting } from '../../../lib/services/settings.service';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const id = parseInt(Astro.params.id ?? '');
+const issuance = id ? await propertyService.getIssuance(id) : null;
+if (!issuance) return Astro.redirect('/assets/accountability');
+
+const [history, agencyName] = await Promise.all([
+  propertyService.getAssetHistory(issuance.assetId),
+  getSetting('agency_name').catch(() => ''),
+]);
+const canAct = issuance.status === 'active' && (user.roles ?? []).some(role => role === 'accountant' || role === 'administrator');
+const isPar = issuance.documentType === 'PAR';
+const title = isPar ? 'PROPERTY ACKNOWLEDGMENT RECEIPT' : 'INVENTORY CUSTODIAN SLIP';
+const asset = issuance.asset;
+const peso = (value: string | number) => `₱${parseFloat(String(value)).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const formatDate = (date: Date | string | null) => (date ? new Date(date).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' }) : '—');
+const today = new Date().toLocaleDateString('en-CA');
+---
+
+<MainLayout title={`${issuance.documentNo} - Philippine Government FMS`}>
+  <PageHeader title={issuance.documentNo} breadcrumbs={[{ label: 'Accountability', href: '/assets/accountability' }, { label: issuance.documentNo }]}>
+    <p slot="meta" class="mt-1 flex flex-wrap items-center gap-2 text-sm text-gray-600">
+      <Lozenge status={issuance.status === 'active' ? 'active' : 'closed'} label={issuance.status === 'active' ? 'In use' : issuance.status === 'returned' ? 'Returned' : 'Transferred'} />
+      <span>{asset.assetNo} · {asset.description}</span>
+    </p>
+    <Fragment slot="actions">
+      <button type="button" class="btn btn-secondary" onclick="window.print()"><i class="pi pi-print" aria-hidden="true"></i>Print {issuance.documentType}</button>
+      {canAct && (
+        <>
+          <button type="button" class="btn btn-secondary" data-open="return-dialog">Return</button>
+          <button type="button" class="btn btn-primary" data-open="transfer-dialog">Transfer</button>
+        </>
+      )}
+    </Fragment>
+  </PageHeader>
+
+  {issuance.status === 'transferred' && issuance.transferredToId && (
+    <Banner appearance="info" class="mb-6 no-print">
+      Transferred on {formatDate(issuance.endedDate)}: {issuance.endReason}. <a href={`/assets/accountability/${issuance.transferredToId}`} class="font-medium text-primary-600 hover:underline">See the current issuance</a>.
+    </Banner>
+  )}
+  {issuance.status === 'returned' && (
+    <Banner appearance="info" class="mb-6 no-print">Returned to the supply office on {formatDate(issuance.endedDate)}: {issuance.endReason}</Banner>
+  )}
+
+  <article class="card mb-6" aria-label={title}>
+    <header class="px-6 pt-6 pb-4 text-center border-b border-gray-200">
+      <p class="text-lg font-semibold text-gray-800">{title}</p>
+      {agencyName && <p class="text-sm text-gray-600">{agencyName}</p>}
+      <p class="text-sm text-gray-600">{issuance.documentType} No. {issuance.documentNo}</p>
+    </header>
+    <div class="relative overflow-x-auto">
+      <table class="table">
+        <thead>
+          <tr>
+            <th scope="col">Qty</th>
+            <th scope="col">Unit</th>
+            <th scope="col">Description</th>
+            <th scope="col">{isPar ? 'Property no.' : 'Inventory item no.'}</th>
+            <th scope="col">Date acquired</th>
+            <th scope="col" class="!text-right">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>1</td>
+            <td>unit</td>
+            <td>
+              {asset.description}
+              {asset.serialNo && <span class="block text-xs text-gray-500">Serial no. {asset.serialNo}</span>}
+              {issuance.categoryName && <span class="block text-xs text-gray-500">{issuance.categoryName}</span>}
+            </td>
+            <td class="whitespace-nowrap">{asset.assetNo}</td>
+            <td class="whitespace-nowrap">{formatDate(asset.acquisitionDate)}</td>
+            <td class="text-right tabular-nums">{peso(asset.acquisitionCost)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    {issuance.remarks && <p class="px-6 py-3 border-t border-gray-200 text-sm">{issuance.remarks}</p>}
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-8 px-6 pt-8 pb-6 text-sm border-t border-gray-200">
+      <div>
+        <p class="form-label">Received by</p>
+        <div class="mt-8 border-t border-gray-400 pt-1">
+          <span class="font-medium">{issuance.issuedTo}</span>
+          <span class="block text-gray-600">{[issuance.position, issuance.office].filter(Boolean).join(', ') || 'Position / office'}</span>
+          <span class="block text-gray-600">Date: {formatDate(issuance.issueDate)}</span>
+        </div>
+      </div>
+      <div>
+        <p class="form-label">Issued by</p>
+        <div class="mt-8 border-t border-gray-400 pt-1">
+          <span class="block text-gray-600">Supply and/or Property Custodian</span>
+          <span class="block text-gray-600">Date: {formatDate(issuance.issueDate)}</span>
+        </div>
+      </div>
+    </div>
+  </article>
+
+  <section class="card no-print" aria-labelledby="history-heading">
+    <div class="card-header"><h2 id="history-heading" class="card-title">Accountability history for {asset.assetNo}</h2></div>
+    <ol class="divide-y divide-gray-200">
+      {history.map(h => (
+        <li class="flex flex-wrap items-center justify-between gap-2 px-5 py-3">
+          <span>
+            <a href={`/assets/accountability/${h.id}`} class={`font-medium hover:underline ${h.id === issuance.id ? 'text-gray-800' : 'text-primary-600'}`}>{h.documentNo}</a>
+            <span class="text-gray-600"> · {h.issuedTo}</span>
+          </span>
+          <span class="text-sm text-gray-600">{formatDate(h.issueDate)}{h.endedDate ? ` to ${formatDate(h.endedDate)}` : ' to date'}</span>
+          <Lozenge status={h.status === 'active' ? 'active' : 'closed'} label={h.status === 'active' ? 'In use' : h.status === 'returned' ? 'Returned' : 'Transferred'} />
+        </li>
+      ))}
+    </ol>
+  </section>
+
+  {canAct && (
+    <>
+      <Modal id="transfer-dialog" title="Transfer property" width="medium">
+        <form id="transfer-form" method="dialog" class="space-y-3">
+          <p class="text-sm text-gray-700">Closes this {issuance.documentType} and issues a new one to the receiving officer (Property Transfer Report).</p>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div class="md:col-span-2">
+              <label for="t-issuedTo" class="form-label form-label-required">Transfer to</label>
+              <input id="t-issuedTo" name="issuedTo" class="form-input" required />
+            </div>
+            <div><label for="t-position" class="form-label">Position</label><input id="t-position" name="position" class="form-input" /></div>
+            <div><label for="t-office" class="form-label">Office</label><input id="t-office" name="office" class="form-input" /></div>
+            <div><label for="t-date" class="form-label form-label-required">Date</label><input type="date" id="t-date" name="issueDate" class="form-input" value={today} required /></div>
+          </div>
+          <div>
+            <label for="t-reason" class="form-label form-label-required">Reason</label>
+            <input id="t-reason" name="reason" class="form-input" placeholder="e.g. reassignment, retirement of previous officer" required />
+          </div>
+          <p id="transfer-error" class="form-error hidden" role="alert"></p>
+        </form>
+        <Fragment slot="footer">
+          <button type="button" class="btn btn-subtle" data-modal-close>Cancel</button>
+          <button type="submit" form="transfer-form" class="btn btn-primary">Transfer</button>
+        </Fragment>
+      </Modal>
+
+      <Modal id="return-dialog" title="Return property">
+        <form id="return-form" method="dialog" class="space-y-3">
+          <p class="text-sm text-gray-700">{issuance.issuedTo} returns {asset.assetNo} to the supply office and is no longer accountable for it.</p>
+          <div><label for="r-date" class="form-label form-label-required">Date returned</label><input type="date" id="r-date" name="returnDate" class="form-input" value={today} required /></div>
+          <div><label for="r-reason" class="form-label form-label-required">Reason</label><input id="r-reason" name="reason" class="form-input" placeholder="e.g. unserviceable, end of assignment" required /></div>
+          <p id="return-error" class="form-error hidden" role="alert"></p>
+        </form>
+        <Fragment slot="footer">
+          <button type="button" class="btn btn-subtle" data-modal-close>Cancel</button>
+          <button type="submit" form="return-form" class="btn btn-primary">Record return</button>
+        </Fragment>
+      </Modal>
+    </>
+  )}
+
+  <script define:vars={{ issuanceId: issuance.id }}>
+    document.querySelectorAll('[data-open]').forEach(button =>
+      button.addEventListener('click', () => document.getElementById(button.dataset.open)?.showModal())
+    );
+    function wire(kind) {
+      const form = document.getElementById(`${kind}-form`);
+      form?.addEventListener('submit', async event => {
+        event.preventDefault();
+        const error = document.getElementById(`${kind}-error`);
+        const response = await fetch(`/api/assets/accountability/${issuanceId}/${kind}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(Object.fromEntries(new FormData(form))),
+        });
+        const result = await response.json();
+        if (response.ok) window.location.href = result.id ? `/assets/accountability/${result.id}` : window.location.pathname;
+        else {
+          error.textContent = result.message;
+          error.classList.remove('hidden');
+        }
+      });
+    }
+    wire('transfer');
+    wire('return');
+  </script>
+</MainLayout>

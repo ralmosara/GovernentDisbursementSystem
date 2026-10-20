@@ -2,6 +2,7 @@
 import MainLayout from '../../../layouts/MainLayout.astro';
 import FixedAssetForm from '../../../components/forms/assets/FixedAssetForm.vue';
 import { assetService } from '../../../lib/services/asset.service';
+import { propertyService } from '../../../lib/services/property.service';
 
 const user = Astro.locals.user;
 
@@ -28,6 +29,9 @@ try {
   console.error('Error loading asset:', error);
   return Astro.redirect('/assets/fixed');
 }
+
+// Who is accountable for this asset (PAR/ICS)
+const activeIssuance = await propertyService.getActiveIssuance(parseInt(id)).catch(() => null);
 
 const categoriesJson = JSON.stringify(categories);
 
@@ -217,8 +221,16 @@ const currentAccumulatedDepreciation = latestSchedule ? latestSchedule.accumulat
               <dd class="mt-1 text-sm text-gray-900">{asset.location || '-'}</dd>
             </div>
             <div>
-              <dt class="text-sm font-medium text-gray-500">Custodian</dt>
-              <dd class="mt-1 text-sm text-gray-900">{asset.custodian || '-'}</dd>
+              <dt class="text-sm font-medium text-gray-500">Accountable officer</dt>
+              <dd class="mt-1 text-sm text-gray-900">
+                {activeIssuance ? (
+                  <a href={`/assets/accountability/${activeIssuance.id}`} class="text-primary-600 hover:underline">
+                    {activeIssuance.issuedTo} · {activeIssuance.documentNo}
+                  </a>
+                ) : asset.status === 'active' ? (
+                  <a href={`/assets/accountability?issue=${asset.id}`} class="text-primary-600 hover:underline">Not issued — issue on PAR/ICS</a>
+                ) : (asset.custodian || '-')}
+              </dd>
             </div>
             {asset.serialNo && (
               <div>

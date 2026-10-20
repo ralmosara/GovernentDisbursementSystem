@@ -36,6 +36,7 @@ export const ACCESS_RULES: AccessRule[] = [
   { pattern: '/api/procurement/requests/*/decision', roles: ['director'], description: 'Approve or reject purchase requests' },
 
   // Accounting (General Ledger)
+  { pattern: '/api/accounting/year-end/*/reopen', roles: [], description: 'Reopen a closed fiscal year (administrators only)' },
   { pattern: '/api/accounting/nca', roles: ['budget_officer', 'accountant'], description: 'Record Notices of Cash Allocation (NCA) received from DBM' },
   { pattern: '/api/accounting/**', roles: ['accountant'], description: 'Journal entry vouchers, posting and reversals, chart of accounts' },
 

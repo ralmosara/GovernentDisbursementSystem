@@ -1,0 +1,217 @@
+---
+import MainLayout from '../../layouts/MainLayout.astro';
+import PageHeader from '../../components/ui/PageHeader.astro';
+import Banner from '../../components/ui/Banner.astro';
+import EmptyState from '../../components/ui/EmptyState.astro';
+import Lozenge from '../../components/ui/Lozenge.astro';
+import Modal from '../../components/ui/Modal.astro';
+import { ledgerService } from '../../lib/services/ledger.service';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const roles = user.roles ?? [];
+const canClose = roles.some(role => role === 'accountant' || role === 'administrator');
+const canReopen = roles.includes('administrator');
+
+const currentYear = new Date().getFullYear();
+const year = parseInt(Astro.url.searchParams.get('year') ?? '') || currentYear - 1;
+
+const [checks, preview, closing, closingEntries] = await Promise.all([
+  ledgerService.getClosingChecks(year),
+  ledgerService.getClosingPreview(year),
+  ledgerService.getYearClosing(year),
+  ledgerService.getClosingEntries(year),
+]);
+const readyToClose = checks.yearEnded && !checks.alreadyClosed && checks.unposted === 0 && checks.balanced;
+
+const peso = (value: number) => `₱${value.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const formatDate = (date: Date | string | null) =>
+  date ? new Date(date).toLocaleString('en-PH', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '—';
+const done = Astro.url.searchParams.get('done');
+
+const checklist = [
+  { ok: checks.yearEnded, label: `FY ${year} has ended`, help: checks.yearEnded ? undefined : `It can be closed from January ${year + 1}.` },
+  { ok: checks.unposted === 0, label: 'Every transaction is in the books', help: checks.unposted ? `${checks.unposted} transaction(s) still to post.` : undefined, href: checks.unposted ? '/accounting/journals' : undefined },
+  { ok: checks.balanced, label: 'The trial balance balances', href: `/accounting/trial-balance?asOf=${year}-12-31` },
+];
+---
+
+<MainLayout title={`Year-end closing FY ${year} - Philippine Government FMS`}>
+  <PageHeader
+    title="Year-end closing"
+    description="Close revenue and expense accounts to Accumulated Surplus/(Deficit) and lock the year against further entries."
+    breadcrumbs={[{ label: 'Accounting', href: '/accounting/journals' }, { label: 'Year-end closing' }]}
+  >
+    <nav slot="actions" class="flex gap-1" aria-label="Fiscal year">
+      {[currentYear, currentYear - 1, currentYear - 2].map(y => (
+        <a href={`/accounting/year-end?year=${y}`} class={`btn btn-sm ${y === year ? 'btn-secondary' : 'btn-subtle'}`} aria-current={y === year ? 'page' : undefined}>FY {y}</a>
+      ))}
+    </nav>
+  </PageHeader>
+
+  {done === 'closed' && <Banner appearance="success" title={`FY ${year} closed`} class="mb-6" role="status">The closing entries are posted and the year is locked.</Banner>}
+  {done === 'reopened' && <Banner appearance="info" title={`FY ${year} reopened`} class="mb-6" role="status">The closing entries were reversed. Close the year again once corrections are posted.</Banner>}
+
+  <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+    <div class="xl:col-span-2 space-y-6 min-w-0">
+      <section class="card" aria-labelledby="status-heading">
+        <div class="card-header">
+          <h2 id="status-heading" class="card-title">FY {year}</h2>
+          {checks.alreadyClosed ? <Lozenge status="closed" label="Closed" icon="pi-lock" /> : <Lozenge status="open" label="Open" />}
+        </div>
+        <div class="card-body">
+          {checks.alreadyClosed ? (
+            <div class="space-y-3">
+              <p class="text-sm text-gray-700">Closed on {formatDate(closing?.closedAt ?? null)}. No entries can be posted with a date in FY {year}.</p>
+              {closing?.remarks && <p class="text-sm text-gray-600">Remarks: {closing.remarks}</p>}
+              <ul class="text-sm space-y-1">
+                {closingEntries.filter(e => e.status === 'posted').map(e => (
+                  <li><a href={`/accounting/journals/${e.id}`} class="text-primary-600 hover:underline">Closing JEV {e.jevNo}</a></li>
+                ))}
+              </ul>
+              {canReopen && <button type="button" class="btn btn-secondary" data-open="reopen-dialog">Reopen FY {year}</button>}
+            </div>
+          ) : (
+            <>
+              <ul class="space-y-3">
+                {checklist.map(item => (
+                  <li class="flex items-start gap-2">
+                    <i class={`pi ${item.ok ? 'pi-check-circle text-green-600' : 'pi-times-circle text-red-600'} mt-0.5`} aria-hidden="true"></i>
+                    <span>
+                      <span class="sr-only">{item.ok ? 'Done: ' : 'Not done: '}</span>
+                      {item.href ? <a href={item.href} class="font-medium hover:underline">{item.label}</a> : <span class="font-medium">{item.label}</span>}
+                      {item.help && <span class="block text-sm text-gray-600">{item.help}</span>}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+              {canClose && (
+                <button type="button" class="btn btn-primary mt-5" data-open="close-dialog" disabled={!readyToClose}>
+                  <i class="pi pi-lock" aria-hidden="true"></i>
+                  Close FY {year}
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      </section>
+
+      <section class="card" aria-labelledby="preview-heading">
+        <div class="card-header">
+          <h2 id="preview-heading" class="card-title">{checks.alreadyClosed ? 'Balances left to close' : 'What closing will post'}</h2>
+        </div>
+        {preview.length === 0 ? (
+          <EmptyState
+            tone={checks.alreadyClosed ? 'success' : 'neutral'}
+            icon="pi-book"
+            title={checks.alreadyClosed ? 'All revenue and expense accounts are closed' : `No revenue or expenses recorded in FY ${year}`}
+          />
+        ) : (
+          preview.map(fund => (
+            <div class="border-b border-gray-200 last:border-0">
+              <p class="px-5 pt-4 font-semibold text-gray-800">Fund {fund.fundClusterCode} · {fund.fundClusterName}</p>
+              <div class="relative overflow-x-auto">
+                <table class="table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Account</th>
+                      <th scope="col">UACS</th>
+                      <th scope="col" class="!text-right">Balance closed</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {fund.accounts.map(account => (
+                      <tr>
+                        <td>{account.title}</td>
+                        <td class="tabular-nums text-gray-600">{account.code}</td>
+                        <td class="text-right tabular-nums">{peso(Math.abs(account.balance))} {account.balance < 0 ? 'Cr' : 'Dr'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr class="border-t-2 border-gray-200 font-semibold">
+                      <th scope="row" colspan="2" class="!text-sm !text-gray-800">
+                        {fund.surplus >= 0 ? 'Surplus' : 'Deficit'} to Accumulated Surplus/(Deficit)
+                      </th>
+                      <td class="text-right tabular-nums">{peso(Math.abs(fund.surplus))}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          ))
+        )}
+      </section>
+    </div>
+
+    <aside class="space-y-6">
+      <section class="card p-5 text-sm text-gray-700 space-y-2">
+        <h2 class="text-base font-semibold text-gray-800">How closing works</h2>
+        <p>Each fund cluster gets one closing entry dated 31 December. It debits revenue and credits expense accounts by their balances; the difference is the surplus or deficit for the year.</p>
+        <p>Asset, liability and equity balances carry into the new year automatically.</p>
+        <p>Once closed, nothing can be posted into the year. Only an administrator can reopen it, which reverses the closing entries.</p>
+      </section>
+    </aside>
+  </div>
+
+  {canClose && !checks.alreadyClosed && (
+    <Modal id="close-dialog" title={`Close FY ${year}?`} appearance="warning">
+      <form id="close-form" method="dialog" class="space-y-3">
+        <p class="text-sm text-gray-700">Closing posts the entries shown and locks FY {year}. Late transactions will have to be dated in the new year.</p>
+        <div>
+          <label for="close-remarks" class="form-label">Remarks</label>
+          <textarea id="close-remarks" name="remarks" rows="2" class="form-textarea"></textarea>
+        </div>
+        <p id="close-error" class="form-error hidden" role="alert"></p>
+      </form>
+      <Fragment slot="footer">
+        <button type="button" class="btn btn-subtle" data-modal-close>Cancel</button>
+        <button type="submit" form="close-form" class="btn btn-warning" id="close-submit">Close the year</button>
+      </Fragment>
+    </Modal>
+  )}
+
+  {canReopen && checks.alreadyClosed && (
+    <Modal id="reopen-dialog" title={`Reopen FY ${year}?`} appearance="danger">
+      <form id="reopen-form" method="dialog" class="space-y-3">
+        <p class="text-sm text-gray-700">Reopening reverses the closing entries and allows entries dated in FY {year} again. Statements already submitted will no longer match.</p>
+        <div>
+          <label for="reopen-reason" class="form-label form-label-required">Reason</label>
+          <textarea id="reopen-reason" name="reason" rows="3" class="form-textarea" required></textarea>
+        </div>
+        <p id="reopen-error" class="form-error hidden" role="alert"></p>
+      </form>
+      <Fragment slot="footer">
+        <button type="button" class="btn btn-subtle" data-modal-close>Cancel</button>
+        <button type="submit" form="reopen-form" class="btn btn-danger">Reopen the year</button>
+      </Fragment>
+    </Modal>
+  )}
+
+  <script define:vars={{ year }}>
+    document.querySelectorAll('[data-open]').forEach(button =>
+      button.addEventListener('click', () => document.getElementById(button.dataset.open)?.showModal())
+    );
+    function wire(kind, body) {
+      const form = document.getElementById(`${kind}-form`);
+      form?.addEventListener('submit', async event => {
+        event.preventDefault();
+        const error = document.getElementById(`${kind}-error`);
+        const response = await fetch(`/api/accounting/year-end/${year}/${kind === 'close' ? 'close' : 'reopen'}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body(form)),
+        });
+        const result = await response.json();
+        if (response.ok) window.location.href = `/accounting/year-end?year=${year}&done=${kind === 'close' ? 'closed' : 'reopened'}`;
+        else {
+          error.textContent = result.message;
+          error.classList.remove('hidden');
+        }
+      });
+    }
+    wire('close', form => ({ remarks: form.elements.remarks.value }));
+    wire('reopen', form => ({ reason: form.elements.reason.value }));
+  </script>
+</MainLayout>

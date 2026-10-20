@@ -169,7 +169,12 @@ Run `npm run db:migrate-gov` once per environment (safe to re-run), then open
   - Processing a payroll posts the salary expense, the government's share of contributions, and what is owed to BIR, GSIS, Pag-IBIG, PhilHealth and the employees.
   - **Record payout** releases net pay.
   - **Record payment** on a remittance clears what is owed to that agency. BIR is paid through the Tax Remittance Advice account.
-- **Manual JEVs still needed:** receivable write-offs.
+- **Receivable write-offs** post Dr Impairment Loss – Loans and Receivables, Cr Accounts Receivable.
+- **Year-end closing:**
+  - Closes revenue and expense accounts to Accumulated Surplus/(Deficit), with one entry per fund cluster dated 31 December.
+  - Locks the year against further posting.
+  - Requires that nothing is left unposted and the trial balance balances.
+  - Only administrators can reopen a closed year; reopening reverses the closing entries.
 
 ### Procurement (RA 12009)
 The chain runs purchase request → purchase order → obligation (ORS) → inspection and acceptance report (IAR) → disbursement voucher.
@@ -179,6 +184,12 @@ The chain runs purchase request → purchase order → obligation (ORS) → insp
 - **Obligation:** the ORS is raised from the purchase order, and its number is recorded on it.
 - **Deliveries:** each IAR accepts at most what is still undelivered, and marks the purchase order partly or fully delivered.
 - **Payment:** each IAR opens a voucher already filled in with the supplier, amount, ORS number and object of expenditure. An IAR can be paid by one voucher only.
+- **Stock:** supplies kept in stock are received from the IAR into inventory at the contract price. Each line can be received once.
+
+### Property accountability (PAR/ICS)
+- **Document type:** items costing ₱50,000 or more are issued on a Property Acknowledgment Receipt (PAR). Semi-expendable items below that go on an Inventory Custodian Slip (ICS), per COA Circular 2022-004.
+- **One accountable officer at a time:** each asset has a single holder. Transfers close one document and open the next, and returns send the item back to the supply office.
+- **Accountability page:** lists each officer's property for the physical count, and shows active assets that haven't been issued.
 
 ## Testing
 

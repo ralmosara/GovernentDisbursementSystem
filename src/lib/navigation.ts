@@ -56,6 +56,7 @@ export const navSections: NavSection[] = [
       { href: '/accounting/trial-balance', label: 'Trial balance', icon: 'pi-calculator' },
       { href: '/accounting/chart-of-accounts', label: 'Chart of accounts', icon: 'pi-sitemap' },
       { href: '/accounting/nca', label: 'NCA registry', icon: 'pi-wallet' },
+      { href: '/accounting/year-end', label: 'Year-end closing', icon: 'pi-lock' },
     ],
   },
   {
@@ -130,6 +131,7 @@ export const navSections: NavSection[] = [
       { href: '/assets', label: 'Overview', icon: 'pi-building' },
       { href: '/assets/categories', label: 'Categories', icon: 'pi-tags' },
       { href: '/assets/fixed', label: 'Fixed assets', icon: 'pi-box' },
+      { href: '/assets/accountability', label: 'Accountability (PAR/ICS)', icon: 'pi-id-card' },
       { href: '/assets/depreciation', label: 'Depreciation', icon: 'pi-chart-line' },
       { href: '/assets/disposals', label: 'Disposals', icon: 'pi-trash' },
     ],

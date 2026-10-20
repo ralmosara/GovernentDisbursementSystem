@@ -211,3 +211,70 @@ describe('payroll posting', () => {
     ]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Property accountability, write-offs and stock receipts
+// ---------------------------------------------------------------------------
+
+const { propertyService, documentTypeFor } = await import('../../src/lib/services/property.service');
+
+describe('property accountability', () => {
+  it('uses a PAR from ₱50,000 and an ICS below (COA Circular 2022-004)', () => {
+    expect(documentTypeFor(50000)).toBe('PAR');
+    expect(documentTypeFor(49999.99)).toBe('ICS');
+  });
+
+  it('refuses to issue an asset that someone already holds', async () => {
+    queuedResults.push(
+      [{ id: 3, assetNo: 'PPE-001', status: 'active', acquisitionCost: '85000.00' }],
+      [{ id: 9, issuedTo: 'Ana Reyes', documentNo: 'PAR-2026-10-0001', status: 'active' }]
+    );
+    await expect(propertyService.issue({ assetId: 3, issuedTo: 'Ben Cruz', issueDate: new Date() }, 1)).rejects.toThrow(/already issued to Ana Reyes/);
+  });
+
+  it('refuses to issue disposed property', async () => {
+    queuedResults.push([{ id: 3, assetNo: 'PPE-001', status: 'disposed', acquisitionCost: '85000.00' }]);
+    await expect(propertyService.issue({ assetId: 3, issuedTo: 'Ben Cruz', issueDate: new Date() }, 1)).rejects.toThrow(/disposed/);
+  });
+
+  it('refuses a transfer to the officer who already holds it', async () => {
+    queuedResults.push([{ id: 9, assetId: 3, issuedTo: 'Ana Reyes', documentNo: 'PAR-2026-10-0001', status: 'active' }]);
+    await expect(propertyService.transfer(9, { issuedTo: 'ana reyes', issueDate: new Date() }, 'reassignment', 1)).rejects.toThrow(/already with this officer/);
+  });
+});
+
+describe('receivable write-off', () => {
+  it('recognises the impairment loss and removes the receivable', async () => {
+    vi.spyOn(ledgerService, 'postArInvoice').mockResolvedValue({ id: 1, jevNo: 'x', created: false });
+    const post = vi.spyOn(ledgerService, 'post').mockResolvedValue({ id: 2, jevNo: 'y', created: true });
+    queuedResults.push(
+      [{ id: 4, arNo: 'AR-0004', status: 'written_off', balance: '1500.00', debtorName: 'Juan Dela Cruz', updatedAt: new Date('2026-10-20') }],
+      [{ id: 1 }]
+    );
+    await ledgerService.postArWriteOff(4, 1);
+    expect(post.mock.calls[0][0].lines).toEqual([
+      expect.objectContaining({ accountCode: ACCOUNTS.IMPAIRMENT_LOSS_RECEIVABLES, debit: 1500 }),
+      expect.objectContaining({ accountCode: ACCOUNTS.ACCOUNTS_RECEIVABLE, credit: 1500 }),
+    ]);
+  });
+});
+
+describe('receiving deliveries into stock', () => {
+  it('refuses fractional quantities, since stock is counted in whole units', async () => {
+    vi.spyOn(procurementService, 'getIar').mockResolvedValue({
+      id: 2, iarNo: 'IAR-2026-10-0002', dateReceived: new Date(), po: { supplierName: 'S', poNo: 'PO-1' },
+      items: [{ poItemId: 21, itemNo: 1, description: 'Bond paper', quantity: '2.50', unitCost: '480.00' }],
+    } as any);
+    vi.spyOn(procurementService, 'getStockReceipts').mockResolvedValue(new Map());
+    await expect(procurementService.receiveIntoStock(2, [{ poItemId: 21, inventoryItemId: 5 }], 1)).rejects.toThrow(/whole units/);
+  });
+
+  it('receives each line only once', async () => {
+    vi.spyOn(procurementService, 'getIar').mockResolvedValue({
+      id: 2, iarNo: 'IAR-2026-10-0002', dateReceived: new Date(), po: { supplierName: 'S', poNo: 'PO-1' },
+      items: [{ poItemId: 21, itemNo: 1, description: 'Bond paper', quantity: '10.00', unitCost: '480.00' }],
+    } as any);
+    vi.spyOn(procurementService, 'getStockReceipts').mockResolvedValue(new Map([['IAR-2026-10-0002/L1', { id: 1 } as any]]));
+    await expect(procurementService.receiveIntoStock(2, [{ poItemId: 21, inventoryItemId: 5 }], 1)).rejects.toThrow(/already received/);
+  });
+});

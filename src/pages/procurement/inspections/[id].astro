@@ -5,6 +5,9 @@ import Lozenge from '../../../components/ui/Lozenge.astro';
 import Banner from '../../../components/ui/Banner.astro';
 import { procurementService } from '../../../lib/services/procurement.service';
 import { getSetting } from '../../../lib/services/settings.service';
+import { db } from '../../../lib/db/connection';
+import { inventoryItems } from '../../../lib/db/schema';
+import { asc, eq } from 'drizzle-orm';
 
 const user = Astro.locals.user;
 if (!user) return Astro.redirect('/login');
@@ -13,7 +16,14 @@ const id = parseInt(Astro.params.id ?? '');
 const iar = id ? await procurementService.getIar(id) : null;
 if (!iar) return Astro.redirect('/procurement/orders?view=deliveries');
 
-const agencyName = await getSetting('agency_name').catch(() => '');
+const [agencyName, stockItems, stockReceipts] = await Promise.all([
+  getSetting('agency_name').catch(() => ''),
+  db.select({ id: inventoryItems.id, itemCode: inventoryItems.itemCode, itemName: inventoryItems.itemName, unit: inventoryItems.unit })
+    .from(inventoryItems).where(eq(inventoryItems.isActive, true)).orderBy(asc(inventoryItems.itemName)),
+  procurementService.getStockReceipts(iar.iarNo),
+]);
+const stockLines = iar.items.map(item => ({ ...item, receipt: stockReceipts.get(procurementService.stockReference(iar.iarNo, item.itemNo)) ?? null }));
+const canReceive = stockItems.length > 0 && stockLines.some(l => !l.receipt);
 const dvHref = iar.dvId ? `/disbursements/${iar.dvId}` : `/disbursements/create?${procurementService.dvPrefillForIar(iar)}`;
 const peso = (value: string | number) => `₱${parseFloat(String(value)).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const formatDate = (date: Date | string | null) => (date ? new Date(date).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' }) : '—');
@@ -108,4 +118,76 @@ const created = Astro.url.searchParams.get('created');
       </div>
     </div>
   </article>
+  <section class="card mt-6 no-print" aria-labelledby="stock-heading">
+    <div class="card-header">
+      <h2 id="stock-heading" class="card-title">Receive into stock</h2>
+      <span class="text-xs text-gray-500">For supplies kept in inventory; skip lines used straight away</span>
+    </div>
+    {stockItems.length === 0 ? (
+      <p class="px-5 py-4 text-sm text-gray-600">No stock items are set up. <a href="/inventory/items/create" class="text-primary-600 hover:underline">Add inventory items</a> to receive deliveries into stock.</p>
+    ) : (
+      <form id="stock-form">
+        <div class="relative overflow-x-auto">
+          <table class="table">
+            <thead>
+              <tr>
+                <th scope="col">Delivered item</th>
+                <th scope="col" class="!text-right">Qty</th>
+                <th scope="col">Stock item</th>
+              </tr>
+            </thead>
+            <tbody>
+              {stockLines.map(line => (
+                <tr data-po-item={line.poItemId}>
+                  <td>{line.description}<span class="block text-xs text-gray-500">{line.unit}</span></td>
+                  <td class="text-right tabular-nums">{parseFloat(line.quantity)}</td>
+                  <td>
+                    {line.receipt ? (
+                      <span class="flex items-center gap-2">
+                        <Lozenge status="completed" label="Received" />
+                        <a href={`/inventory/transactions/${line.receipt.id}`} class="text-sm text-primary-600 hover:underline">{line.receipt.transactionNo}</a>
+                      </span>
+                    ) : (
+                      <select class="form-select" data-field="inventoryItemId" aria-label={`Stock item for ${line.description}`}>
+                        <option value="">Don't receive into stock</option>
+                        {stockItems.map(s => <option value={s.id}>{s.itemCode} – {s.itemName} ({s.unit})</option>)}
+                      </select>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {canReceive && (
+          <div class="card-footer">
+            <p id="stock-error" class="form-error hidden mr-auto" role="alert"></p>
+            <button type="submit" class="btn btn-primary">Receive into stock</button>
+          </div>
+        )}
+      </form>
+    )}
+  </section>
+
+  <script define:vars={{ iarId: iar.id }}>
+    const stockForm = document.getElementById('stock-form');
+    stockForm?.addEventListener('submit', async event => {
+      event.preventDefault();
+      const error = document.getElementById('stock-error');
+      const lines = Array.from(stockForm.querySelectorAll('tr[data-po-item]'))
+        .map(row => ({ poItemId: row.dataset.poItem, inventoryItemId: row.querySelector('[data-field="inventoryItemId"]')?.value }))
+        .filter(line => line.inventoryItemId);
+      const response = await fetch(`/api/procurement/inspections/${iarId}/receive`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lines }),
+      });
+      const result = await response.json();
+      if (response.ok) window.location.reload();
+      else {
+        error.textContent = result.message;
+        error.classList.remove('hidden');
+      }
+    });
+  </script>
 </MainLayout>

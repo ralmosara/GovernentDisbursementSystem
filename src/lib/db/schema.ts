@@ -635,6 +635,7 @@ export const inventoryItems = mysqlTable('inventory_items', {
   minimumLevel: int('minimum_level').default(0),
   maximumLevel: int('maximum_level'),
   isActive: boolean('is_active').default(true),
+  createdBy: int('created_by'),
   createdAt: timestamp('created_at').defaultNow(),
 });
 
@@ -1394,4 +1395,33 @@ export const inspectionAcceptanceItems = mysqlTable('inspection_acceptance_items
   poItemId: int('po_item_id').notNull(),
   quantity: decimal('quantity', { precision: 12, scale: 2 }).notNull(),
   amount: decimal('amount', { precision: 15, scale: 2 }).notNull(),
+});
+
+/** A closed fiscal year: the ledger refuses entries dated in it */
+export const fiscalYearClosings = mysqlTable('fiscal_year_closings', {
+  id: int('id').primaryKey().autoincrement(),
+  fiscalYear: int('fiscal_year').unique().notNull(),
+  closedAt: timestamp('closed_at').defaultNow(),
+  closedBy: int('closed_by').notNull(),
+  remarks: text('remarks'),
+});
+
+/** PAR / ICS: who is accountable for each item of property (COA Circular 2022-004) */
+export const propertyIssuances = mysqlTable('property_issuances', {
+  id: int('id').primaryKey().autoincrement(),
+  documentNo: varchar('document_no', { length: 30 }).unique().notNull(),
+  documentType: mysqlEnum('document_type', ['PAR', 'ICS']).notNull(),
+  assetId: int('asset_id').notNull(),
+  issuedTo: varchar('issued_to', { length: 150 }).notNull(),
+  employeeId: int('employee_id'),
+  position: varchar('position', { length: 150 }),
+  office: varchar('office', { length: 150 }),
+  issueDate: datetime('issue_date').notNull(),
+  remarks: text('remarks'),
+  status: mysqlEnum('status', ['active', 'returned', 'transferred']).notNull().default('active'),
+  endedDate: datetime('ended_date'),
+  endReason: text('end_reason'),
+  transferredToId: int('transferred_to_id'),
+  createdBy: int('created_by').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
 });

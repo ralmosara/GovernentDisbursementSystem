@@ -1,5 +1,5 @@
 import type { APIRoute } from 'astro';
-import { procurementService } from '../../../lib/services/procurement.service';
+import { procurementService } from '../../../../lib/services/procurement.service';
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });

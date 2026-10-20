@@ -118,3 +118,16 @@ INSERT IGNORE INTO `chart_of_accounts` (`code`, `title`, `account_type`, `normal
 -- Every object of expenditure is an expense account
 INSERT IGNORE INTO `chart_of_accounts` (`code`, `title`, `account_type`, `normal_balance`)
   SELECT `code`, `name`, 'expense', 'debit' FROM `object_of_expenditure`;
+
+-- Year-end closing: no entry may be posted into a closed fiscal year
+CREATE TABLE IF NOT EXISTS `fiscal_year_closings` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `fiscal_year` INT NOT NULL UNIQUE,
+  `closed_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `closed_by` INT NOT NULL,
+  `remarks` TEXT NULL
+);
+
+-- Receivables written off as uncollectible
+INSERT IGNORE INTO `chart_of_accounts` (`code`, `title`, `account_type`, `normal_balance`) VALUES
+  ('5050301000', 'Impairment Loss - Loans and Receivables', 'expense', 'debit');

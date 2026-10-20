@@ -10,7 +10,9 @@ import {
   objectOfExpenditure,
   fundClusters,
   users,
+  inventoryTransactions,
 } from '../db/schema';
+import { assetService } from './asset.service';
 import { and, asc, desc, eq, inArray, isNull, like, ne, sql } from 'drizzle-orm';
 import { logAudit } from '../middleware/audit-logger';
 import { getSetting } from './settings.service';
@@ -500,6 +502,7 @@ export class ProcurementService {
 
     const items = await db
       .select({
+        poItemId: inspectionAcceptanceItems.poItemId,
         quantity: inspectionAcceptanceItems.quantity,
         amount: inspectionAcceptanceItems.amount,
         itemNo: purchaseOrderItems.itemNo,
@@ -554,6 +557,57 @@ export class ProcurementService {
     if (iar.po.supplierAddress) params.payeeAddress = iar.po.supplierAddress;
     if (objectExpenditureId) params.objectExpenditureId = String(objectExpenditureId);
     return new URLSearchParams(params);
+  }
+
+  /** Reference that ties an inventory receipt to one IAR line, so a line is received once */
+  stockReference(iarNo: string, itemNo: number) {
+    return `${iarNo}/L${itemNo}`;
+  }
+
+  /** Inventory receipts already recorded for an IAR's lines, keyed by reference */
+  async getStockReceipts(iarNo: string) {
+    const rows = await db
+      .select({ id: inventoryTransactions.id, transactionNo: inventoryTransactions.transactionNo, itemId: inventoryTransactions.itemId, reference: inventoryTransactions.reference })
+      .from(inventoryTransactions)
+      .where(and(eq(inventoryTransactions.transactionType, 'receipt'), like(inventoryTransactions.reference, `${iarNo}/L%`)));
+    return new Map(rows.map(r => [r.reference ?? '', r]));
+  }
+
+  /**
+   * Receive accepted supplies into stock: one inventory receipt per IAR line, at the
+   * contract unit cost. Each line can be received only once.
+   */
+  async receiveIntoStock(iarId: number, lines: { poItemId: number; inventoryItemId: number }[], userId: number) {
+    const iar = await this.getIar(iarId);
+    if (!iar) throw new Error('Inspection and acceptance report not found');
+    const received = await this.getStockReceipts(iar.iarNo);
+    const results: { reference: string; transactionNo: string }[] = [];
+
+    for (const line of lines.filter(l => l.inventoryItemId)) {
+      const item = iar.items.find(i => i.poItemId === line.poItemId);
+      if (!item) throw new Error('An item is not on this IAR');
+      const reference = this.stockReference(iar.iarNo, item.itemNo);
+      if (received.has(reference)) throw new Error(`"${item.description}" is already received into stock`);
+      const quantity = num(item.quantity);
+      if (!Number.isInteger(quantity)) throw new Error(`"${item.description}": stock is counted in whole units; ${quantity} can't be received`);
+
+      const result = await assetService.createInventoryTransaction(
+        {
+          itemId: line.inventoryItemId,
+          transactionDate: new Date(iar.dateReceived),
+          transactionType: 'receipt',
+          quantity,
+          unitCost: num(item.unitCost).toFixed(2),
+          reference,
+          remarks: `Delivered by ${iar.po.supplierName} per PO ${iar.po.poNo}`,
+        },
+        userId
+      );
+      results.push({ reference, transactionNo: result.transactionNo });
+    }
+    if (results.length === 0) throw new Error('Choose the stock item for at least one line');
+    await logAudit({ userId, action: 'CREATE', tableName: 'inventory_transactions', recordId: iarId, newValues: { iarNo: iar.iarNo, receipts: results } });
+    return results;
   }
 
   /** Record that a DV pays this IAR; an IAR can be paid only once */

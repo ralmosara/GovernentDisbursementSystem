@@ -788,6 +788,8 @@ export class RevenueService {
         oldValues: { status: ar[0].status, balance: ar[0].balance },
         newValues: { status: 'written_off', writeOffAmount: ar[0].balance, reason: reason.trim() },
       });
+
+      await ledgerService.tryPost(`receivable ${ar[0].arNo} write-off`, () => ledgerService.postArWriteOff(arId, userId));
     } catch (error) {
       throw new Error(`Failed to write off AR: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
