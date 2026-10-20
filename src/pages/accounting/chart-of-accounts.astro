@@ -1,0 +1,106 @@
+---
+import MainLayout from '../../layouts/MainLayout.astro';
+import PageHeader from '../../components/ui/PageHeader.astro';
+import DataTable from '../../components/ui/DataTable.astro';
+import Modal from '../../components/ui/Modal.astro';
+import { ledgerService } from '../../lib/services/ledger.service';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const canEdit = (user.roles ?? []).some(role => role === 'accountant' || role === 'administrator');
+const accounts = await ledgerService.getAccounts(false);
+const TYPE_LABELS = { asset: 'Asset', liability: 'Liability', equity: 'Equity', revenue: 'Revenue', expense: 'Expense' } as const;
+---
+
+<MainLayout title="Chart of accounts - Philippine Government FMS">
+  <PageHeader
+    title="Chart of accounts"
+    description="Revised Chart of Accounts (UACS). Expense accounts mirror the objects of expenditure used on DVs and allotments."
+    breadcrumbs={[{ label: 'Accounting', href: '/accounting/journals' }, { label: 'Chart of accounts' }]}
+  >
+    {canEdit && (
+      <button slot="actions" type="button" class="btn btn-primary" data-open="account-dialog">
+        <i class="pi pi-plus" aria-hidden="true"></i>
+        Add account
+      </button>
+    )}
+  </PageHeader>
+
+  <DataTable title="Accounts" count={accounts.length} quickFilter quickFilterLabel="Find by code or title" pageSize={50}>
+    <table class="table">
+      <thead>
+        <tr>
+          <th scope="col">UACS code</th>
+          <th scope="col">Account title</th>
+          <th scope="col">Type</th>
+          <th scope="col">Normal balance</th>
+          <th scope="col" data-nosort><span class="sr-only">Ledger</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        {accounts.map(account => (
+          <tr class="hover:bg-gray-50">
+            <td class="tabular-nums">{account.code}</td>
+            <td>{account.title}{!account.isActive && <span class="badge ml-2">Inactive</span>}</td>
+            <td class="text-gray-600">{TYPE_LABELS[account.accountType]}</td>
+            <td class="text-gray-600 capitalize">{account.normalBalance}</td>
+            <td class="text-right"><a href={`/accounting/general-ledger?account=${account.code}`} class="btn btn-subtle btn-sm">Ledger</a></td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </DataTable>
+
+  {canEdit && (
+    <Modal id="account-dialog" title="Add account" width="medium">
+      <form id="account-form" method="dialog" class="space-y-3">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label for="code" class="form-label form-label-required">UACS code</label>
+            <input id="code" name="code" class="form-input" inputmode="numeric" pattern="\d{8,10}" placeholder="e.g. 5020301000" required />
+          </div>
+          <div>
+            <label for="accountType" class="form-label form-label-required">Type</label>
+            <select id="accountType" name="accountType" class="form-select" required>
+              {Object.entries(TYPE_LABELS).map(([value, label]) => <option value={value}>{label}</option>)}
+            </select>
+          </div>
+        </div>
+        <div>
+          <label for="title" class="form-label form-label-required">Account title</label>
+          <input id="title" name="title" class="form-input" required />
+          <p class="form-help">Use the title from the COA Revised Chart of Accounts.</p>
+        </div>
+        <p id="account-error" class="form-error hidden" role="alert"></p>
+      </form>
+      <Fragment slot="footer">
+        <button type="button" class="btn btn-subtle" data-modal-close>Cancel</button>
+        <button type="submit" form="account-form" class="btn btn-primary">Add account</button>
+      </Fragment>
+    </Modal>
+  )}
+
+  <script>
+    document.querySelectorAll<HTMLElement>('[data-open]').forEach(button =>
+      button.addEventListener('click', () => (document.getElementById(button.dataset.open!) as HTMLDialogElement)?.showModal())
+    );
+    const form = document.getElementById('account-form') as HTMLFormElement | null;
+    form?.addEventListener('submit', async event => {
+      event.preventDefault();
+      const error = document.getElementById('account-error')!;
+      const response = await fetch('/api/accounting/accounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(Object.fromEntries(new FormData(form))),
+      });
+      const result = await response.json();
+      if (response.ok) {
+        window.location.reload();
+      } else {
+        error.textContent = result.message;
+        error.classList.remove('hidden');
+      }
+    });
+  </script>
+</MainLayout>

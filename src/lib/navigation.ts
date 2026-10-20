@@ -37,6 +37,18 @@ export const navSections: NavSection[] = [
     ],
   },
   {
+    id: 'accounting',
+    title: 'Accounting',
+    icon: 'pi-calculator',
+    items: [
+      { href: '/accounting/journals', label: 'Journal entries (JEV)', icon: 'pi-book' },
+      { href: '/accounting/general-ledger', label: 'General ledger', icon: 'pi-list' },
+      { href: '/accounting/trial-balance', label: 'Trial balance', icon: 'pi-calculator' },
+      { href: '/accounting/chart-of-accounts', label: 'Chart of accounts', icon: 'pi-sitemap' },
+      { href: '/accounting/nca', label: 'NCA registry', icon: 'pi-wallet' },
+    ],
+  },
+  {
     id: 'disbursements',
     title: 'Disbursements',
     icon: 'pi-file-edit',
@@ -129,6 +141,9 @@ export const navSections: NavSection[] = [
     items: [
       { href: '/reports', label: 'All reports', icon: 'pi-th-large' },
       { href: '/reports/insights', label: 'Process insights', icon: 'pi-stopwatch' },
+      { href: '/reports/bir/taxes-withheld', label: 'BIR: taxes withheld / 2307', icon: 'pi-percentage' },
+      { href: '/reports/cash/disbursements-issued', label: 'Checks & ADA issued (RCI/RADAI)', icon: 'pi-credit-card' },
+      { href: '/reports/cash/collections-deposits', label: 'Collections & deposits (RCD)', icon: 'pi-money-bill' },
       { href: '/reports/far', label: 'FAR reports', icon: 'pi-chart-bar' },
       { href: '/reports/bar', label: 'BAR reports', icon: 'pi-chart-line' },
       { href: '/reports/assets/listing', label: 'Asset listing', icon: 'pi-building' },

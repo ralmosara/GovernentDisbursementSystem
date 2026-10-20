@@ -2,6 +2,8 @@ import { db } from '../db/connection';
 import { payments, disbursementVouchers, fundClusters, checkDisbursementRecords, auditLogs } from '../db/schema';
 import { eq, and, desc, ne, isNotNull, sql } from 'drizzle-orm';
 import { generateCheckNumber } from '../utils/serial-generator';
+import { ledgerService } from './ledger.service';
+import { ncaService } from './nca.service';
 
 /**
  * Payment types
@@ -73,9 +75,15 @@ export class PaymentService {
       throw new Error('Payment already exists for this DV. Cancel existing payment first.');
     }
 
-    // 3. Validate amount matches DV amount
-    if (parseFloat(data.amount) !== parseFloat(dv[0].amount.toString())) {
-      throw new Error(`Payment amount (${data.amount}) must match DV amount (${dv[0].amount})`);
+    // 3. The payee receives the DV amount net of taxes withheld
+    const amountDue = dv[0].netAmount ?? dv[0].amount;
+    if (Math.round(parseFloat(data.amount) * 100) !== Math.round(parseFloat(amountDue.toString()) * 100)) {
+      throw new Error(`Payment amount (${data.amount}) must match the DV amount due (${amountDue})`);
+    }
+
+    // 3a. MDS checks and ADAs draw on the Notice of Cash Allocation for the fund cluster
+    if (data.paymentType === 'check_mds' || data.paymentType === 'ada') {
+      await ncaService.assertAvailable(dv[0].fundClusterId, dv[0].fiscalYear, parseFloat(data.amount));
     }
 
     // 4. Generate check number if payment type is check
@@ -154,6 +162,9 @@ export class PaymentService {
         updatedAt: new Date(),
       })
       .where(eq(payments.id, paymentId));
+
+    // Record the check/ADA in the books
+    await ledgerService.tryPost(`payment #${paymentId} issue`, () => ledgerService.postPaymentIssued(paymentId, userId));
 
     // Create audit log
     await db.insert(auditLogs).values({
@@ -272,6 +283,13 @@ export class PaymentService {
       })
       .where(eq(payments.id, paymentId));
 
+    // A cancelled check that was already issued restores the payable
+    if (payment.status === 'issued') {
+      await ledgerService.tryPost(`payment #${paymentId} cancel`, () =>
+        ledgerService.reversePayment(paymentId, userId, `Check cancelled: ${reason}`)
+      );
+    }
+
     // Create audit log
     await db.insert(auditLogs).values({
       userId,
@@ -315,6 +333,11 @@ export class PaymentService {
         updatedAt: new Date(),
       })
       .where(eq(payments.id, paymentId));
+
+    // A stale check is cancelled in the books and the payable restored
+    await ledgerService.tryPost(`payment #${paymentId} stale`, () =>
+      ledgerService.reversePayment(paymentId, userId, 'Stale check (not encashed within six months)')
+    );
 
     await db.insert(auditLogs).values({
       userId,
@@ -463,7 +486,10 @@ export class PaymentService {
         dvNo: disbursementVouchers.dvNo,
         dvDate: disbursementVouchers.dvDate,
         payeeName: disbursementVouchers.payeeName,
-        amount: disbursementVouchers.amount,
+        // The amount to pay is the DV amount net of taxes withheld
+        amount: sql<string>`COALESCE(${disbursementVouchers.netAmount}, ${disbursementVouchers.amount})`,
+        grossAmount: disbursementVouchers.amount,
+        totalTaxWithheld: disbursementVouchers.totalTaxWithheld,
         particulars: disbursementVouchers.particulars,
         fiscalYear: disbursementVouchers.fiscalYear,
         fundClusterId: disbursementVouchers.fundClusterId,

@@ -1,0 +1,197 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import PageHeader from '../../../components/ui/PageHeader.astro';
+import Banner from '../../../components/ui/Banner.astro';
+import { db } from '../../../lib/db/connection';
+import { fundClusters } from '../../../lib/db/schema';
+import { ledgerService, JOURNAL_LABELS } from '../../../lib/services/ledger.service';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const canPost = (user.roles ?? []).some(role => role === 'accountant' || role === 'administrator');
+const [accounts, clusters] = await Promise.all([
+  ledgerService.getAccounts(),
+  db.select({ id: fundClusters.id, code: fundClusters.code, name: fundClusters.name }).from(fundClusters),
+]);
+const today = new Date().toLocaleDateString('en-CA');
+const TYPE_LABELS = { asset: 'Assets', liability: 'Liabilities', equity: 'Equity', revenue: 'Revenue', expense: 'Expenses' } as const;
+---
+
+<MainLayout title="New journal entry - Philippine Government FMS">
+  <PageHeader
+    title="New journal entry"
+    description="Record an adjusting, correcting or closing entry. Routine transactions post automatically."
+    breadcrumbs={[{ label: 'Journal entries', href: '/accounting/journals' }, { label: 'New' }]}
+  />
+
+  {!canPost ? (
+    <Banner appearance="info">Only accountants can post journal entries.</Banner>
+  ) : (
+    <form id="jev-form" class="card max-w-5xl" novalidate>
+      <div class="card-body">
+        <div id="jev-error" class="alert alert-error mb-4 hidden" role="alert">
+          <i class="pi pi-times-circle" aria-hidden="true"></i>
+          <span id="jev-error-text"></span>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div class="form-group">
+            <label for="date" class="form-label form-label-required">Date</label>
+            <input type="date" id="date" name="date" class="form-input" value={today} required />
+          </div>
+          <div class="form-group">
+            <label for="fundClusterId" class="form-label form-label-required">Fund cluster</label>
+            <select id="fundClusterId" name="fundClusterId" class="form-select" required>
+              {clusters.map(c => <option value={c.id}>{c.code} – {c.name}</option>)}
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="journalType" class="form-label form-label-required">Journal</label>
+            <select id="journalType" name="journalType" class="form-select" required>
+              {Object.entries(JOURNAL_LABELS).map(([value, label]) => <option value={value}>{label}</option>)}
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label for="particulars" class="form-label form-label-required">Particulars</label>
+          <textarea id="particulars" name="particulars" rows="2" class="form-textarea" required placeholder="e.g. To record depreciation of office equipment for October 2026"></textarea>
+        </div>
+
+        <h2 class="section-title mt-6">Accounting entries</h2>
+        <datalist id="accounts">
+          {accounts.map(a => <option value={a.code}>{a.title} ({TYPE_LABELS[a.accountType]})</option>)}
+        </datalist>
+        <div class="relative overflow-x-auto">
+          <table class="table" id="lines-table">
+            <thead>
+              <tr>
+                <th scope="col" class="w-48">Account code</th>
+                <th scope="col">Account title</th>
+                <th scope="col" class="w-36">Payee / subsidiary</th>
+                <th scope="col" class="w-36 !text-right">Debit</th>
+                <th scope="col" class="w-36 !text-right">Credit</th>
+                <th scope="col" class="w-10"><span class="sr-only">Remove</span></th>
+              </tr>
+            </thead>
+            <tbody id="lines"></tbody>
+            <tfoot>
+              <tr class="border-t-2 border-gray-200">
+                <td colspan="3">
+                  <button type="button" class="btn btn-subtle btn-sm" id="add-line"><i class="pi pi-plus" aria-hidden="true"></i>Add line</button>
+                </td>
+                <td class="text-right font-semibold tabular-nums" id="total-debit">0.00</td>
+                <td class="text-right font-semibold tabular-nums" id="total-credit">0.00</td>
+                <td></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <p id="balance-status" class="mt-2 text-sm" aria-live="polite"></p>
+      </div>
+      <div class="card-footer">
+        <a href="/accounting/journals" class="btn btn-subtle">Cancel</a>
+        <button type="submit" class="btn btn-primary" id="jev-submit">Post entry</button>
+      </div>
+    </form>
+  )}
+
+  <script type="application/json" id="account-titles" set:html={JSON.stringify(Object.fromEntries(accounts.map(a => [a.code, a.title])))} />
+
+  <script>
+    const form = document.getElementById('jev-form') as HTMLFormElement | null;
+    if (form) {
+      const titles: Record<string, string> = JSON.parse(document.getElementById('account-titles')!.textContent || '{}');
+      const tbody = document.getElementById('lines')!;
+      const totalDebit = document.getElementById('total-debit')!;
+      const totalCredit = document.getElementById('total-credit')!;
+      const status = document.getElementById('balance-status')!;
+      const errorBox = document.getElementById('jev-error')!;
+      const errorText = document.getElementById('jev-error-text')!;
+      const submit = document.getElementById('jev-submit') as HTMLButtonElement;
+      const fmt = (centavos: number) => (centavos / 100).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const cents = (value: string) => Math.round((parseFloat(value) || 0) * 100);
+
+      function addLine() {
+        const row = document.createElement('tr');
+        const n = tbody.children.length + 1;
+        row.innerHTML = `
+          <td><input class="form-input" list="accounts" data-field="accountCode" aria-label="Account code, line ${n}" inputmode="numeric" /></td>
+          <td class="text-gray-600 text-sm" data-title>—</td>
+          <td><input class="form-input" data-field="subsidiary" aria-label="Payee or subsidiary, line ${n}" /></td>
+          <td><input class="form-input text-right" type="number" min="0" step="0.01" data-field="debit" aria-label="Debit, line ${n}" /></td>
+          <td><input class="form-input text-right" type="number" min="0" step="0.01" data-field="credit" aria-label="Credit, line ${n}" /></td>
+          <td><button type="button" class="btn btn-subtle btn-sm btn-icon" data-remove aria-label="Remove line ${n}"><i class="pi pi-times" aria-hidden="true"></i></button></td>`;
+        tbody.appendChild(row);
+        update();
+      }
+
+      function update() {
+        let debit = 0;
+        let credit = 0;
+        tbody.querySelectorAll('tr').forEach(row => {
+          const code = (row.querySelector('[data-field="accountCode"]') as HTMLInputElement).value.trim();
+          row.querySelector('[data-title]')!.textContent = titles[code] ?? (code ? 'Unknown account' : '—');
+          debit += cents((row.querySelector('[data-field="debit"]') as HTMLInputElement).value);
+          credit += cents((row.querySelector('[data-field="credit"]') as HTMLInputElement).value);
+        });
+        totalDebit.textContent = fmt(debit);
+        totalCredit.textContent = fmt(credit);
+        const balanced = debit > 0 && debit === credit;
+        status.textContent = debit === 0 && credit === 0
+          ? 'Enter at least one debit and one credit.'
+          : balanced
+            ? 'Debits equal credits.'
+            : `Out of balance by ₱${fmt(Math.abs(debit - credit))}.`;
+        status.className = `mt-2 text-sm ${balanced ? 'text-green-700' : 'text-gray-600'}`;
+      }
+
+      tbody.addEventListener('input', update);
+      tbody.addEventListener('click', event => {
+        const remove = (event.target as HTMLElement).closest('[data-remove]');
+        if (remove && tbody.children.length > 2) {
+          remove.closest('tr')!.remove();
+          update();
+        }
+      });
+      document.getElementById('add-line')!.addEventListener('click', addLine);
+      addLine();
+      addLine();
+
+      form.addEventListener('submit', async event => {
+        event.preventDefault();
+        errorBox.classList.add('hidden');
+        const data = new FormData(form);
+        const lines = Array.from(tbody.querySelectorAll('tr')).map(row => {
+          const get = (field: string) => (row.querySelector(`[data-field="${field}"]`) as HTMLInputElement).value;
+          return { accountCode: get('accountCode').trim(), subsidiary: get('subsidiary'), debit: get('debit'), credit: get('credit') };
+        });
+
+        submit.disabled = true;
+        submit.textContent = 'Posting…';
+        try {
+          const response = await fetch('/api/accounting/journals', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              date: data.get('date'),
+              fundClusterId: data.get('fundClusterId'),
+              journalType: data.get('journalType'),
+              particulars: data.get('particulars'),
+              lines,
+            }),
+          });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.message);
+          window.location.href = `/accounting/journals/${result.id}`;
+        } catch (error) {
+          errorText.textContent = (error as Error).message;
+          errorBox.classList.remove('hidden');
+          errorBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          submit.disabled = false;
+          submit.textContent = 'Post entry';
+        }
+      });
+    }
+  </script>
+</MainLayout>

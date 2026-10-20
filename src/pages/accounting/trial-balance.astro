@@ -1,0 +1,121 @@
+---
+import MainLayout from '../../layouts/MainLayout.astro';
+import PageHeader from '../../components/ui/PageHeader.astro';
+import FilterBar from '../../components/ui/FilterBar.astro';
+import EmptyState from '../../components/ui/EmptyState.astro';
+import Banner from '../../components/ui/Banner.astro';
+import { db } from '../../lib/db/connection';
+import { fundClusters } from '../../lib/db/schema';
+import { ledgerService } from '../../lib/services/ledger.service';
+import { getSetting } from '../../lib/services/settings.service';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const params = Astro.url.searchParams;
+const asOfParam = params.get('asOf');
+const asOf = asOfParam ? new Date(`${asOfParam}T23:59:59`) : new Date();
+const fundClusterId = parseInt(params.get('fund') ?? '') || undefined;
+
+const [tb, clusters, agencyName] = await Promise.all([
+  ledgerService.getTrialBalance(asOf, fundClusterId),
+  db.select({ id: fundClusters.id, code: fundClusters.code, name: fundClusters.name }).from(fundClusters),
+  getSetting('agency_name').catch(() => ''),
+]);
+
+const cluster = clusters.find(c => c.id === fundClusterId);
+const peso = (value: number) => (value ? value.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '');
+const asOfLabel = asOf.toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' });
+const GROUPS = [
+  { type: 'asset', label: 'Assets' },
+  { type: 'liability', label: 'Liabilities' },
+  { type: 'equity', label: 'Equity' },
+  { type: 'revenue', label: 'Revenue' },
+  { type: 'expense', label: 'Expenses' },
+] as const;
+---
+
+<MainLayout title="Trial balance - Philippine Government FMS">
+  <PageHeader
+    title="Trial balance"
+    description="Balances of every account with activity, from the posted journal entries."
+    breadcrumbs={[{ label: 'Accounting', href: '/accounting/journals' }, { label: 'Trial balance' }]}
+  >
+    <button slot="actions" type="button" class="btn btn-secondary" onclick="window.print()">
+      <i class="pi pi-print" aria-hidden="true"></i>
+      Print
+    </button>
+  </PageHeader>
+
+  <FilterBar action="/accounting/trial-balance" resetHref="/accounting/trial-balance" activeCount={[asOfParam, fundClusterId].filter(Boolean).length}>
+    <div class="form-group">
+      <label for="asOf" class="form-label">As of</label>
+      <input type="date" id="asOf" name="asOf" class="form-input" value={asOf.toLocaleDateString('en-CA')} />
+    </div>
+    <div class="form-group">
+      <label for="fund" class="form-label">Fund cluster</label>
+      <select id="fund" name="fund" class="form-select">
+        <option value="">All funds (consolidated)</option>
+        {clusters.map(c => <option value={c.id} selected={fundClusterId === c.id}>{c.code} – {c.name}</option>)}
+      </select>
+    </div>
+  </FilterBar>
+
+  {!tb.balanced && (
+    <Banner appearance="error" title="The trial balance does not balance" class="mb-6">
+      Debits and credits differ by ₱{Math.abs(tb.totalDebit - tb.totalCredit).toLocaleString('en-PH', { minimumFractionDigits: 2 })}.
+      Every posted entry is validated as balanced, so this points to a change made directly in the database.
+    </Banner>
+  )}
+
+  <article class="card" aria-label="Trial balance">
+    <header class="px-6 pt-6 pb-4 text-center border-b border-gray-200">
+      {agencyName && <p class="font-semibold text-gray-800">{agencyName}</p>}
+      <p class="text-lg font-semibold text-gray-800">TRIAL BALANCE</p>
+      <p class="text-sm text-gray-600">{cluster ? `Fund Cluster ${cluster.code} – ${cluster.name}` : 'All fund clusters'}</p>
+      <p class="text-sm text-gray-600">As of {asOfLabel}</p>
+    </header>
+
+    {tb.accounts.length === 0 ? (
+      <EmptyState icon="pi-book" title="No posted entries yet" description="Balances appear once journal entries are posted." />
+    ) : (
+      <div class="relative overflow-x-auto">
+        <table class="table">
+          <thead>
+            <tr>
+              <th scope="col">Account title</th>
+              <th scope="col">UACS code</th>
+              <th scope="col" class="!text-right">Debit</th>
+              <th scope="col" class="!text-right">Credit</th>
+            </tr>
+          </thead>
+          {GROUPS.map(group => {
+            const rows = tb.accounts.filter(a => a.accountType === group.type);
+            return rows.length ? (
+              <tbody>
+                <tr class="bg-gray-50"><th scope="rowgroup" colspan="4" class="!text-gray-800">{group.label}</th></tr>
+                {rows.map(account => (
+                  <tr>
+                    <td class="pl-6">
+                      <a href={`/accounting/general-ledger?account=${account.code}${fundClusterId ? `&fund=${fundClusterId}` : ''}`} class="hover:underline">{account.title}</a>
+                    </td>
+                    <td class="tabular-nums text-gray-600">{account.code}</td>
+                    <td class="text-right tabular-nums">{peso(account.debit)}</td>
+                    <td class="text-right tabular-nums">{peso(account.credit)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            ) : null;
+          })}
+          <tfoot>
+            <tr class="border-t-2 border-gray-200 font-semibold">
+              <th scope="row" colspan="2" class="!text-sm !text-gray-800">Total</th>
+              <td class="text-right tabular-nums">{peso(tb.totalDebit)}</td>
+              <td class="text-right tabular-nums">{peso(tb.totalCredit)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    )}
+  </article>
+</MainLayout>

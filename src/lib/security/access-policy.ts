@@ -32,6 +32,10 @@ export const ACCESS_RULES: AccessRule[] = [
   // Administration (endpoints also check this themselves)
   { pattern: '/api/admin/**', roles: ['administrator'], description: 'User, role and system settings management' },
 
+  // Accounting (General Ledger)
+  { pattern: '/api/accounting/nca', roles: ['budget_officer', 'accountant'], description: 'Record Notices of Cash Allocation (NCA) received from DBM' },
+  { pattern: '/api/accounting/**', roles: ['accountant'], description: 'Journal entry vouchers, posting and reversals, chart of accounts' },
+
   // Budget
   { pattern: '/api/budget/appropriations', roles: ['budget_officer'], description: 'Record appropriations' },
   { pattern: '/api/budget/allotments', roles: ['budget_officer'], description: 'Record allotments' },

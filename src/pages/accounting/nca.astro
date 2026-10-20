@@ -1,0 +1,180 @@
+---
+import MainLayout from '../../layouts/MainLayout.astro';
+import PageHeader from '../../components/ui/PageHeader.astro';
+import DataTable from '../../components/ui/DataTable.astro';
+import EmptyState from '../../components/ui/EmptyState.astro';
+import Modal from '../../components/ui/Modal.astro';
+import Banner from '../../components/ui/Banner.astro';
+import { db } from '../../lib/db/connection';
+import { fundClusters } from '../../lib/db/schema';
+import { ncaService } from '../../lib/services/nca.service';
+import { ledgerService } from '../../lib/services/ledger.service';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const canRecord = (user.roles ?? []).some(role => ['budget_officer', 'accountant', 'administrator'].includes(role));
+const currentYear = new Date().getFullYear();
+const fiscalYear = parseInt(Astro.url.searchParams.get('year') ?? '') || currentYear;
+
+const [ncas, balances, clusters] = await Promise.all([
+  ncaService.getNcas({ fiscalYear }),
+  ncaService.getBalances(fiscalYear),
+  db.select({ id: fundClusters.id, code: fundClusters.code, name: fundClusters.name }).from(fundClusters),
+]);
+const jevs = await Promise.all(ncas.map(n => ledgerService.findBySource('nca', n.id).catch(() => null)));
+
+const peso = (value: number | string) =>
+  `₱${parseFloat(String(value || 0)).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const formatDate = (date: Date | string) => new Date(date).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
+const recorded = Astro.url.searchParams.get('recorded');
+---
+
+<MainLayout title="NCA registry - Philippine Government FMS">
+  <PageHeader
+    title="Notices of Cash Allocation"
+    description="Cash authority received from DBM. MDS checks and ADAs cannot exceed the NCA remaining for their fund cluster."
+    breadcrumbs={[{ label: 'Accounting', href: '/accounting/journals' }, { label: 'NCA registry' }]}
+  >
+    <Fragment slot="actions">
+      <nav class="flex gap-1" aria-label="Fiscal year">
+        {[currentYear, currentYear - 1].map(y => (
+          <a href={`/accounting/nca?year=${y}`} class={`btn btn-sm ${y === fiscalYear ? 'btn-secondary' : 'btn-subtle'}`} aria-current={y === fiscalYear ? 'page' : undefined}>FY {y}</a>
+        ))}
+      </nav>
+      {canRecord && (
+        <button type="button" class="btn btn-primary" data-open="nca-dialog">
+          <i class="pi pi-plus" aria-hidden="true"></i>
+          Record NCA
+        </button>
+      )}
+    </Fragment>
+  </PageHeader>
+
+  {recorded && <Banner appearance="success" class="mb-6" role="status">NCA No. {recorded} recorded and posted to the books.</Banner>}
+
+  {balances.length > 0 && (
+    <section class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mb-6" aria-label="Cash allocation by fund cluster">
+      {balances.map(b => {
+        const used = b.received > 0 ? Math.min((b.utilized / b.received) * 100, 100) : 100;
+        const over = b.utilized > b.received;
+        return (
+          <div class="card p-4">
+            <p class="text-xs font-semibold text-gray-600">Fund {b.code} · {b.name}</p>
+            <p class="mt-1 text-2xl font-semibold text-gray-800 tabular-nums">{peso(b.available)}</p>
+            <p class="text-xs text-gray-500">remaining of {peso(b.received)} received</p>
+            <div class="mt-3 h-2 rounded bg-gray-100 overflow-hidden" role="img" aria-label={`${used.toFixed(0)}% of NCA used`}>
+              <div class={`h-full rounded ${over ? 'bg-red-600' : 'bg-primary-600'}`} style={`width: ${used}%`}></div>
+            </div>
+            <p class="mt-1 text-xs text-gray-600">{peso(b.utilized)} used by MDS checks and ADAs</p>
+            {b.ncaCount === 0 && (
+              <p class="mt-2 text-xs text-orange-700"><i class="pi pi-exclamation-triangle !text-[10px] mr-1" aria-hidden="true"></i>Payments made with no NCA recorded</p>
+            )}
+          </div>
+        );
+      })}
+    </section>
+  )}
+
+  {ncas.length === 0 ? (
+    <div class="card">
+      <EmptyState icon="pi-wallet" title={`No NCAs recorded for FY ${fiscalYear}`} description="Record each NCA as it is received so check and ADA issuance stays within the cash allocation." />
+    </div>
+  ) : (
+    <DataTable title="NCAs received" count={ncas.length}>
+      <table class="table">
+        <thead>
+          <tr>
+            <th scope="col">NCA no.</th>
+            <th scope="col">Date</th>
+            <th scope="col">Fund cluster</th>
+            <th scope="col" class="hidden md:table-cell">Purpose</th>
+            <th scope="col" class="!text-right">Amount</th>
+            <th scope="col">JEV</th>
+          </tr>
+        </thead>
+        <tbody>
+          {ncas.map((nca, i) => (
+            <tr>
+              <td class="font-medium whitespace-nowrap">{nca.ncaNo}</td>
+              <td class="whitespace-nowrap text-gray-600" data-sort-value={new Date(nca.ncaDate).getTime()}>{formatDate(nca.ncaDate)}</td>
+              <td class="text-gray-600">{nca.fundClusterCode}</td>
+              <td class="hidden md:table-cell max-w-[20rem]"><p class="truncate text-gray-600">{nca.purpose ?? '—'}</p></td>
+              <td class="text-right tabular-nums" data-sort-value={nca.amount}>{peso(nca.amount)}</td>
+              <td>{jevs[i] ? <a href={`/accounting/journals/${jevs[i]!.id}`} class="text-primary-600 hover:underline">{jevs[i]!.jevNo}</a> : <span class="badge badge-warning">Unposted</span>}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </DataTable>
+  )}
+
+  {canRecord && (
+    <Modal id="nca-dialog" title="Record NCA" width="medium">
+      <form id="nca-form" method="dialog" class="space-y-3">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div>
+            <label for="ncaNo" class="form-label form-label-required">NCA no.</label>
+            <input id="ncaNo" name="ncaNo" class="form-input" required />
+          </div>
+          <div>
+            <label for="ncaDate" class="form-label form-label-required">Date received</label>
+            <input type="date" id="ncaDate" name="ncaDate" class="form-input" value={new Date().toLocaleDateString('en-CA')} required />
+          </div>
+          <div>
+            <label for="fundClusterId" class="form-label form-label-required">Fund cluster</label>
+            <select id="fundClusterId" name="fundClusterId" class="form-select" required>
+              {clusters.map(c => <option value={c.id}>{c.code} – {c.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label for="amount" class="form-label form-label-required">Amount</label>
+            <input type="number" id="amount" name="amount" class="form-input" min="0.01" step="0.01" required />
+          </div>
+        </div>
+        <div>
+          <label for="mdsAccount" class="form-label">MDS sub-account</label>
+          <input id="mdsAccount" name="mdsAccount" class="form-input" placeholder="e.g. MDS-GSB Regular, LBP Branch" />
+        </div>
+        <div>
+          <label for="purpose" class="form-label">Purpose</label>
+          <textarea id="purpose" name="purpose" rows="2" class="form-textarea" placeholder="e.g. Regular MOOE, 4th quarter"></textarea>
+        </div>
+        <p class="form-help">Recording the NCA posts Dr Cash–MDS, Regular / Cr Subsidy from National Government.</p>
+        <p id="nca-error" class="form-error hidden" role="alert"></p>
+      </form>
+      <Fragment slot="footer">
+        <button type="button" class="btn btn-subtle" data-modal-close>Cancel</button>
+        <button type="submit" form="nca-form" class="btn btn-primary" id="nca-submit">Record NCA</button>
+      </Fragment>
+    </Modal>
+  )}
+
+  <script>
+    document.querySelectorAll<HTMLElement>('[data-open]').forEach(button =>
+      button.addEventListener('click', () => (document.getElementById(button.dataset.open!) as HTMLDialogElement)?.showModal())
+    );
+    const form = document.getElementById('nca-form') as HTMLFormElement | null;
+    form?.addEventListener('submit', async event => {
+      event.preventDefault();
+      const error = document.getElementById('nca-error')!;
+      const submit = document.getElementById('nca-submit') as HTMLButtonElement;
+      submit.disabled = true;
+      const data = Object.fromEntries(new FormData(form));
+      const response = await fetch('/api/accounting/nca', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      const result = await response.json();
+      if (response.ok) {
+        const year = String(data.ncaDate).slice(0, 4);
+        window.location.href = `/accounting/nca?year=${year}&recorded=${encodeURIComponent(String(data.ncaNo))}`;
+      } else {
+        error.textContent = result.message;
+        error.classList.remove('hidden');
+        submit.disabled = false;
+      }
+    });
+  </script>
+</MainLayout>

@@ -1,10 +1,12 @@
 import { db } from '../db/connection';
 import {
   disbursementVouchers,
+  dvTaxWithholdings,
   fundClusters,
   objectOfExpenditure,
   mfoPap,
 } from '../db/schema';
+import { computeWithholding, isTaxTreatment, type TaxTreatment, type PayeeType } from '../utils/withholding';
 import { eq, and, desc, like, gte, lte, or, sql } from 'drizzle-orm';
 import { generateDVNumber } from '../utils/serial-generator';
 import { approvalService } from './approval.service';
@@ -26,6 +28,9 @@ export interface CreateDVData {
   createdBy: number;
   /** DV numbers the preparer was warned about as possible duplicates and chose to proceed past */
   duplicateWarningAcknowledged?: string[];
+  /** How the payment is taxed; taxes are computed here, never taken from the client */
+  taxTreatment?: TaxTreatment;
+  payeeType?: PayeeType;
 }
 
 export interface UpdateDVData {
@@ -48,6 +53,11 @@ export class DisbursementService {
     // Generate DV number
     const dvNo = await generateDVNumber(data.fiscalYear);
 
+    // Taxes withheld from the payee (final VAT, EWT, percentage tax)
+    const taxTreatment: TaxTreatment = isTaxTreatment(data.taxTreatment) ? data.taxTreatment : 'none';
+    const payeeType: PayeeType = data.payeeType === 'individual' ? 'individual' : 'corporate';
+    const withholding = computeWithholding(Number(data.amount), taxTreatment, payeeType);
+
     // Create DV record
     const [result] = await db.insert(disbursementVouchers).values({
       dvNo,
@@ -62,8 +72,12 @@ export class DisbursementService {
       responsibilityCenter: data.responsibilityCenter,
       mfoPapId: data.mfoPapId,
       objectExpenditureId: data.objectExpenditureId,
-      amount: data.amount,
+      amount: Number(data.amount).toFixed(2),
       paymentMode: data.paymentMode,
+      taxTreatment,
+      payeeType,
+      totalTaxWithheld: withholding.totalTax.toFixed(2),
+      netAmount: withholding.netAmount.toFixed(2),
       status: 'draft',
       createdBy: data.createdBy,
       createdAt: new Date(),
@@ -71,6 +85,20 @@ export class DisbursementService {
     });
 
     const dvId = result.insertId;
+
+    if (withholding.lines.length > 0) {
+      await db.insert(dvTaxWithholdings).values(
+        withholding.lines.map(line => ({
+          dvId,
+          taxType: line.taxType,
+          atc: line.atc,
+          description: line.description,
+          taxBase: line.taxBase.toFixed(2),
+          rate: line.rate.toFixed(4),
+          amount: line.amount.toFixed(2),
+        }))
+      );
+    }
 
     // Initialize approval workflow
     await approvalService.initializeWorkflow(dvId);
@@ -85,11 +113,16 @@ export class DisbursementService {
     await logCreate(
       'disbursement_vouchers',
       dvId,
-      sanitizeData({ ...data, dvNo, status: 'pending_budget' }),
+      sanitizeData({ ...data, dvNo, status: 'pending_budget', taxTreatment, totalTaxWithheld: withholding.totalTax, netAmount: withholding.netAmount }),
       data.createdBy
     );
 
     return { id: dvId, dvNo };
+  }
+
+  /** Taxes withheld on a DV */
+  async getDVTaxes(dvId: number) {
+    return db.select().from(dvTaxWithholdings).where(eq(dvTaxWithholdings.dvId, dvId)).orderBy(dvTaxWithholdings.id);
   }
 
   /**
@@ -114,6 +147,10 @@ export class DisbursementService {
         objectExpenditureId: disbursementVouchers.objectExpenditureId,
         amount: disbursementVouchers.amount,
         paymentMode: disbursementVouchers.paymentMode,
+        taxTreatment: disbursementVouchers.taxTreatment,
+        payeeType: disbursementVouchers.payeeType,
+        totalTaxWithheld: disbursementVouchers.totalTaxWithheld,
+        netAmount: disbursementVouchers.netAmount,
         status: disbursementVouchers.status,
         jevNo: disbursementVouchers.jevNo,
         jevDate: disbursementVouchers.jevDate,
@@ -163,6 +200,11 @@ export class DisbursementService {
       objectExpenditureId: row.objectExpenditureId,
       amount: row.amount,
       paymentMode: row.paymentMode,
+      taxTreatment: row.taxTreatment,
+      payeeType: row.payeeType,
+      totalTaxWithheld: row.totalTaxWithheld,
+      // DVs from before withholding was recorded pay their full amount
+      netAmount: row.netAmount ?? row.amount,
       status: row.status,
       jevNo: row.jevNo,
       jevDate: row.jevDate,
@@ -305,13 +347,34 @@ export class DisbursementService {
       paymentMode: dv.paymentMode,
     });
 
-    await db
-      .update(disbursementVouchers)
-      .set({
-        ...data,
-        updatedAt: new Date(),
-      })
-      .where(eq(disbursementVouchers.id, id));
+    const { amount, ...rest } = data;
+    const changes: Partial<typeof disbursementVouchers.$inferInsert> = { ...rest, updatedAt: new Date() };
+
+    // A new amount changes the taxes withheld and the net payable
+    if (amount !== undefined) {
+      const treatment: TaxTreatment = isTaxTreatment(dv.taxTreatment) ? dv.taxTreatment : 'none';
+      const withholding = computeWithholding(Number(amount), treatment, dv.payeeType === 'individual' ? 'individual' : 'corporate');
+      changes.amount = Number(amount).toFixed(2);
+      changes.totalTaxWithheld = withholding.totalTax.toFixed(2);
+      changes.netAmount = withholding.netAmount.toFixed(2);
+
+      await db.delete(dvTaxWithholdings).where(eq(dvTaxWithholdings.dvId, id));
+      if (withholding.lines.length > 0) {
+        await db.insert(dvTaxWithholdings).values(
+          withholding.lines.map(line => ({
+            dvId: id,
+            taxType: line.taxType,
+            atc: line.atc,
+            description: line.description,
+            taxBase: line.taxBase.toFixed(2),
+            rate: line.rate.toFixed(4),
+            amount: line.amount.toFixed(2),
+          }))
+        );
+      }
+    }
+
+    await db.update(disbursementVouchers).set(changes).where(eq(disbursementVouchers.id, id));
 
     // Log audit trail
     await logUpdate(

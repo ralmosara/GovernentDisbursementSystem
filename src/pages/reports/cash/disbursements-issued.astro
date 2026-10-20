@@ -1,0 +1,135 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import PageHeader from '../../../components/ui/PageHeader.astro';
+import FilterBar from '../../../components/ui/FilterBar.astro';
+import EmptyState from '../../../components/ui/EmptyState.astro';
+import Lozenge from '../../../components/ui/Lozenge.astro';
+import { db } from '../../../lib/db/connection';
+import { fundClusters } from '../../../lib/db/schema';
+import { complianceReportsService } from '../../../lib/services/compliance-reports.service';
+import { getSetting } from '../../../lib/services/settings.service';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const params = Astro.url.searchParams;
+const kind = params.get('kind') === 'ada' ? 'ada' : 'checks';
+const now = new Date();
+const fromParam = params.get('from') || new Date(now.getFullYear(), now.getMonth(), 1).toLocaleDateString('en-CA');
+const toParam = params.get('to') || now.toLocaleDateString('en-CA');
+const fundClusterId = parseInt(params.get('fund') ?? '') || undefined;
+
+const [report, clusters, agencyName] = await Promise.all([
+  complianceReportsService.getDisbursementsIssued(
+    { from: new Date(`${fromParam}T00:00:00`), to: new Date(`${toParam}T23:59:59`) },
+    kind,
+    fundClusterId
+  ),
+  db.select({ id: fundClusters.id, code: fundClusters.code, name: fundClusters.name }).from(fundClusters),
+  getSetting('agency_name').catch(() => ''),
+]);
+
+const title = kind === 'checks' ? 'Report of Checks Issued' : 'Report of Advice to Debit Account Issued';
+const cluster = clusters.find(c => c.id === fundClusterId);
+const peso = (value: number) => value.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const formatDate = (date: Date | string) => new Date(date).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
+const tabHref = (k: string) => `/reports/cash/disbursements-issued?kind=${k}&from=${fromParam}&to=${toParam}${fundClusterId ? `&fund=${fundClusterId}` : ''}`;
+---
+
+<MainLayout title={`${kind === 'checks' ? 'RCI' : 'RADAI'} - Philippine Government FMS`}>
+  <PageHeader
+    title={kind === 'checks' ? 'Checks issued (RCI)' : 'ADAs issued (RADAI)'}
+    description="Every check or ADA issued in the period, including cancelled ones, for submission to COA."
+    breadcrumbs={[{ label: 'Reports', href: '/reports' }, { label: kind === 'checks' ? 'RCI' : 'RADAI' }]}
+  >
+    <button slot="actions" type="button" class="btn btn-secondary" onclick="window.print()">
+      <i class="pi pi-print" aria-hidden="true"></i>
+      Print
+    </button>
+  </PageHeader>
+
+  <nav class="flex gap-1 mb-4 no-print" aria-label="Report">
+    <a href={tabHref('checks')} class={`btn btn-sm ${kind === 'checks' ? 'btn-secondary' : 'btn-subtle'}`} aria-current={kind === 'checks' ? 'page' : undefined}>Checks (RCI)</a>
+    <a href={tabHref('ada')} class={`btn btn-sm ${kind === 'ada' ? 'btn-secondary' : 'btn-subtle'}`} aria-current={kind === 'ada' ? 'page' : undefined}>ADA (RADAI)</a>
+  </nav>
+
+  <FilterBar action="/reports/cash/disbursements-issued">
+    <input type="hidden" name="kind" value={kind} />
+    <div class="form-group">
+      <label for="from" class="form-label">From</label>
+      <input type="date" id="from" name="from" class="form-input" value={fromParam} />
+    </div>
+    <div class="form-group">
+      <label for="to" class="form-label">To</label>
+      <input type="date" id="to" name="to" class="form-input" value={toParam} />
+    </div>
+    <div class="form-group">
+      <label for="fund" class="form-label">Fund cluster</label>
+      <select id="fund" name="fund" class="form-select">
+        <option value="">All funds</option>
+        {clusters.map(c => <option value={c.id} selected={fundClusterId === c.id}>{c.code} – {c.name}</option>)}
+      </select>
+    </div>
+  </FilterBar>
+
+  <article class="card" aria-label={title}>
+    <header class="px-6 pt-6 pb-4 text-center border-b border-gray-200">
+      <p class="text-lg font-semibold text-gray-800">{title.toUpperCase()}</p>
+      {agencyName && <p class="text-sm text-gray-600">{agencyName}</p>}
+      <p class="text-sm text-gray-600">{cluster ? `Fund Cluster ${cluster.code}` : 'All fund clusters'} · {formatDate(fromParam)} to {formatDate(toParam)}</p>
+    </header>
+    {report.items.length === 0 ? (
+      <EmptyState icon="pi-credit-card" title={`No ${kind === 'checks' ? 'checks' : 'ADAs'} issued in this period`} />
+    ) : (
+      <div class="relative overflow-x-auto">
+        <table class="table">
+          <thead>
+            <tr>
+              <th scope="col">Date</th>
+              <th scope="col">{kind === 'checks' ? 'Check no.' : 'ADA no.'}</th>
+              <th scope="col">DV no.</th>
+              <th scope="col">ORS/BURS no.</th>
+              <th scope="col">Payee</th>
+              <th scope="col" class="hidden lg:table-cell">UACS</th>
+              <th scope="col" class="hidden xl:table-cell">Nature of payment</th>
+              <th scope="col" class="!text-right">Amount</th>
+              <th scope="col">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {report.items.map(item => (
+              <tr class={item.status === 'cancelled' ? 'text-gray-500' : ''}>
+                <td class="whitespace-nowrap">{formatDate(item.paymentDate)}</td>
+                <td class="whitespace-nowrap tabular-nums">{kind === 'checks' ? item.checkNo ?? '—' : item.adaReference ?? '—'}</td>
+                <td class="whitespace-nowrap"><a href={`/disbursements/${item.dvId}`} class="text-primary-600 hover:underline">{item.dvNo}</a></td>
+                <td class="whitespace-nowrap text-gray-600">{item.orsBursNo}</td>
+                <td>{item.payeeName}</td>
+                <td class="hidden lg:table-cell tabular-nums text-gray-600">{item.uacsCode ?? '—'}</td>
+                <td class="hidden xl:table-cell max-w-[18rem]"><p class="truncate text-gray-600" title={item.particulars}>{item.particulars}</p></td>
+                <td class="text-right tabular-nums">{item.status === 'cancelled' ? <s>{peso(item.amount)}</s> : peso(item.amount)}</td>
+                <td><Lozenge status={item.status} /></td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr class="border-t-2 border-gray-200 font-semibold">
+              <th scope="row" colspan="7" class="!text-sm !text-gray-800">Total (excluding cancelled)</th>
+              <td class="text-right tabular-nums">{peso(report.total)}</td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    )}
+    <div class="grid grid-cols-2 gap-8 px-6 pt-10 pb-6 text-sm">
+      <div>
+        <p class="form-label">Certified correct</p>
+        <div class="mt-8 border-t border-gray-400 pt-1 text-gray-600">Disbursing Officer</div>
+      </div>
+      <div>
+        <p class="form-label">Received by</p>
+        <div class="mt-8 border-t border-gray-400 pt-1 text-gray-600">Accounting Unit</div>
+      </div>
+    </div>
+  </article>
+</MainLayout>

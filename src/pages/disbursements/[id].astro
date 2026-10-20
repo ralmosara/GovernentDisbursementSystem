@@ -11,6 +11,8 @@ import { approvalService } from '../../lib/services/approval.service';
 import { paymentService } from '../../lib/services/payment.service';
 import { workQueueService, STAGE_LABELS } from '../../lib/services/work-queue.service';
 import { insightsService } from '../../lib/services/insights.service';
+import { ledgerService } from '../../lib/services/ledger.service';
+import { TAX_TREATMENTS } from '../../lib/utils/withholding';
 
 const user = Astro.locals.user;
 
@@ -31,7 +33,9 @@ if (!dv) {
   return Astro.redirect('/disbursements');
 }
 
-const [approvalHistory, currentStage, obligation, myQueue] = await Promise.all([
+const [taxes, liabilityJev, approvalHistory, currentStage, obligation, myQueue] = await Promise.all([
+  disbursementService.getDVTaxes(dvId),
+  ledgerService.findBySource('dv_approval', dvId).catch(() => null),
   approvalService.getApprovalHistory(dvId),
   approvalService.getCurrentStage(dvId),
   insightsService.getObligationByReference(dv.orsBursNo).catch(() => null),
@@ -249,6 +253,36 @@ const PAYMENT_MODES: Record<string, string> = {
             </div>
           )}
         </dl>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <h2 class="card-title">Amount due</h2>
+          {liabilityJev && (
+            <a href={`/accounting/journals/${liabilityJev.id}`} class="text-sm font-medium text-primary-600 hover:underline">JEV {liabilityJev.jevNo}</a>
+          )}
+        </div>
+        <div class="card-body">
+          <p class="text-sm text-gray-600 mb-3">
+            {TAX_TREATMENTS.find(t => t.value === dv.taxTreatment)?.label ?? 'Taxes not recorded (voucher created before withholding was tracked)'}
+          </p>
+          <dl class="space-y-2 text-sm">
+            <div class="flex justify-between gap-4">
+              <dt class="text-gray-600">Gross amount</dt>
+              <dd class="tabular-nums">{peso(dv.amount)}</dd>
+            </div>
+            {taxes.map(tax => (
+              <div class="flex justify-between gap-4">
+                <dt class="text-gray-600">Less: {tax.description}{tax.atc ? ` · ${tax.atc}` : ''}</dt>
+                <dd class="tabular-nums">({peso(tax.amount)})</dd>
+              </div>
+            ))}
+            <div class="flex justify-between gap-4 pt-2 border-t border-gray-200 font-semibold text-gray-800">
+              <dt>Net amount payable</dt>
+              <dd class="tabular-nums">{peso(dv.netAmount)}</dd>
+            </div>
+          </dl>
+        </div>
       </section>
 
       {obligation && (

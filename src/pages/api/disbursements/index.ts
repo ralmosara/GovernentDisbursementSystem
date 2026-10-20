@@ -69,6 +69,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
       amount: data.amount,
       paymentMode: data.paymentMode,
       createdBy: user.id,
+      taxTreatment: data.taxTreatment,
+      payeeType: data.payeeType,
       duplicateWarningAcknowledged: duplicates.length > 0 ? duplicates.map(d => d.dvNo) : undefined,
     });
 

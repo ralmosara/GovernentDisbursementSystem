@@ -3,6 +3,7 @@ import { approvalWorkflows, disbursementVouchers, userRoles, roles, users } from
 import { eq, and } from 'drizzle-orm';
 import { logApprove, logReject } from '../middleware/audit-logger';
 import { getSetting } from './settings.service';
+import { ledgerService } from './ledger.service';
 
 /** DV statuses in which the approval workflow may still act */
 const PENDING_DV_STATUSES: string[] = ['draft', 'pending_budget', 'pending_accounting', 'pending_director'];
@@ -247,6 +248,11 @@ export class ApprovalService {
       comments,
       workflowId: currentStage.id,
     });
+
+    // Fully approved: recognise the expense and liability in the books
+    if (!outcome.nextStage) {
+      await ledgerService.tryPost(`DV #${dvId} approval`, () => ledgerService.postDvApproval(dvId, userId));
+    }
 
     if (outcome.nextStage) {
       return {

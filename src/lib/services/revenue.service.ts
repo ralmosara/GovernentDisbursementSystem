@@ -15,6 +15,7 @@ import {
   generateCollectionNumber,
 } from '../utils/serial-generator';
 import { logAudit } from '../middleware/audit-logger';
+import { ledgerService } from './ledger.service';
 
 // ============================================
 // TYPE DEFINITIONS
@@ -511,6 +512,9 @@ export class RevenueService {
 
       const id = Number(result.insertId);
 
+      // Recognise the receivable and the revenue earned
+      await ledgerService.tryPost(`receivable ${arNo}`, () => ledgerService.postArInvoice(id, userId));
+
       return {
         id,
         arNo,
@@ -876,6 +880,8 @@ export class RevenueService {
 
         return Number(result.insertId);
       });
+
+      await ledgerService.tryPost(`collection ${collectionNo}`, () => ledgerService.postCollection(id, userId));
 
       return {
         id,

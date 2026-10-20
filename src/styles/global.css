@@ -1132,6 +1132,42 @@
       width: 100% !important;
       max-width: 100% !important;
     }
+
+    /* In-app pages print only their content: no navigation, scroll containers or colour */
+    header.h-topnav,
+    #app-sidebar,
+    #sidebar-backdrop,
+    #search-dialog,
+    astro-dev-toolbar,
+    [data-table-pager],
+    .filter-bar,
+    .page-actions {
+      display: none !important;
+    }
+
+    html,
+    body,
+    main#main-content {
+      height: auto !important;
+      overflow: visible !important;
+      background: #fff !important;
+      color: #000 !important;
+    }
+
+    .container-fluid {
+      max-width: none !important;
+      padding: 0 !important;
+    }
+
+    .card {
+      border-color: #999 !important;
+      break-inside: avoid;
+    }
+
+    a {
+      color: inherit !important;
+      text-decoration: none !important;
+    }
   }
 }
 
