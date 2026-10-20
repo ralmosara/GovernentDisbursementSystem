@@ -9,7 +9,10 @@ declare namespace App {
       email: string;
       firstName: string;
       lastName: string;
+      /** Primary role ('administrator' when the user has it) */
       role: string | null;
+      /** Every role assigned to the user */
+      roles: string[];
       isActive: boolean;
     } | null;
     session: import('lucia').Session | null;

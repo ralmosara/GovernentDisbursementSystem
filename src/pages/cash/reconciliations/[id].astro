@@ -1,0 +1,198 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import { cashService } from '../../../lib/services/cash.service';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+const id = parseInt(Astro.params.id as string);
+const recon = id ? await cashService.getBankReconciliationById(id) : null;
+
+if (!recon) {
+  return Astro.redirect('/cash/reconciliations');
+}
+
+type CheckItem = { checkNo?: string; payee?: string; amount: number | string };
+type DepositItem = { date?: string; reference?: string; amount: number | string };
+
+// JSON columns may arrive as strings depending on the MySQL/MariaDB driver
+const parseItems = <T,>(value: unknown): T[] => {
+  if (Array.isArray(value)) return value as T[];
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
+};
+
+const outstandingChecks = parseItems<CheckItem>(recon.outstandingChecks);
+const depositsInTransit = parseItems<DepositItem>(recon.depositsInTransit);
+
+const n = (v: unknown) => Number(v) || 0;
+const totalChecks = outstandingChecks.reduce((s, c) => s + n(c.amount), 0);
+const totalDeposits = depositsInTransit.reduce((s, d) => s + n(d.amount), 0);
+const difference = n(recon.adjustedBookBalance) - n(recon.adjustedBankBalance);
+const balanced = Math.round(difference * 100) === 0;
+
+const peso = (v: unknown) =>
+  `₱${n(v).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const period = new Date(recon.periodYear, recon.periodMonth - 1, 1).toLocaleDateString('en-PH', { month: 'long', year: 'numeric' });
+const formatDate = (d: Date | string | null) =>
+  d ? new Date(d).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' }) : '—';
+---
+
+<MainLayout title={`Bank Reconciliation – ${period}`}>
+  <div class="page-header mb-6">
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div>
+        <div class="flex items-center gap-3 mb-2">
+          <a href="/cash/reconciliations" class="text-gray-500 hover:text-gray-700" aria-label="Back to reconciliations">
+            <i class="pi pi-arrow-left"></i>
+          </a>
+          <h1 class="page-title">Bank Reconciliation Statement</h1>
+          <span class={`badge ${recon.status === 'completed' ? 'badge-success' : 'badge-warning'}`}>
+            {recon.status === 'completed' ? 'Completed' : 'Draft'}
+          </span>
+        </div>
+        <p class="page-description">
+          {recon.bankName} · {recon.accountName} ({recon.accountNumber}) · {period}
+        </p>
+      </div>
+      <div class="flex gap-3">
+        <button type="button" class="btn btn-secondary btn-md" onclick="window.print()">
+          <i class="pi pi-print mr-2" aria-hidden="true"></i>
+          Print
+        </button>
+        {recon.status === 'draft' && (
+          <button
+            type="button"
+            id="complete-btn"
+            class="btn btn-primary btn-md"
+            data-id={recon.id}
+            disabled={!balanced}
+            title={balanced ? 'Mark as completed' : 'Adjusted balances must agree before completing'}
+          >
+            <i class="pi pi-check mr-2" aria-hidden="true"></i>
+            Mark as Completed
+          </button>
+        )}
+      </div>
+    </div>
+  </div>
+
+  <div id="complete-error" class="hidden mb-6 p-4 rounded-md bg-red-50 border border-red-200 text-sm text-red-800" role="alert"></div>
+
+  {!balanced && (
+    <div class="mb-6 p-4 rounded-md bg-yellow-50 border border-yellow-200 text-sm text-yellow-900" role="alert">
+      <i class="pi pi-exclamation-triangle mr-2" aria-hidden="true"></i>
+      Adjusted balances differ by <strong>{peso(Math.abs(difference))}</strong>. Find and record the reconciling items before completing.
+    </div>
+  )}
+
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+    <!-- Book side -->
+    <div class="card">
+      <div class="card-header"><h2 class="text-lg font-semibold text-gray-900">Per Books</h2></div>
+      <div class="card-body">
+        <table class="w-full text-sm">
+          <tbody>
+            <tr><td class="py-2">Balance per books</td><td class="py-2 text-right font-mono">{peso(recon.bookBalance)}</td></tr>
+            <tr><td class="py-2">Add: Bank interest</td><td class="py-2 text-right font-mono">{peso(recon.bankInterest)}</td></tr>
+            <tr><td class="py-2">Less: Bank charges</td><td class="py-2 text-right font-mono">({peso(recon.bankCharges)})</td></tr>
+            <tr class="border-t-2 border-gray-300 font-semibold">
+              <td class="py-2">Adjusted book balance</td><td class="py-2 text-right font-mono">{peso(recon.adjustedBookBalance)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Bank side -->
+    <div class="card">
+      <div class="card-header"><h2 class="text-lg font-semibold text-gray-900">Per Bank Statement</h2></div>
+      <div class="card-body">
+        <table class="w-full text-sm">
+          <tbody>
+            <tr><td class="py-2">Balance per bank</td><td class="py-2 text-right font-mono">{peso(recon.bankBalance)}</td></tr>
+            <tr><td class="py-2">Add: Deposits in transit</td><td class="py-2 text-right font-mono">{peso(totalDeposits)}</td></tr>
+            <tr><td class="py-2">Less: Outstanding checks</td><td class="py-2 text-right font-mono">({peso(totalChecks)})</td></tr>
+            <tr class="border-t-2 border-gray-300 font-semibold">
+              <td class="py-2">Adjusted bank balance</td><td class="py-2 text-right font-mono">{peso(recon.adjustedBankBalance)}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+    <div class="card">
+      <div class="card-header"><h2 class="text-lg font-semibold text-gray-900">Outstanding Checks ({outstandingChecks.length})</h2></div>
+      <div class="card-body">
+        {outstandingChecks.length === 0 ? <p class="text-gray-500 text-sm">None</p> : (
+          <table class="table">
+            <thead><tr><th>Check No.</th><th>Payee</th><th class="text-right">Amount</th></tr></thead>
+            <tbody>
+              {outstandingChecks.map(c => (
+                <tr><td class="font-mono">{c.checkNo || '—'}</td><td>{c.payee || '—'}</td><td class="text-right font-mono">{peso(c.amount)}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><h2 class="text-lg font-semibold text-gray-900">Deposits in Transit ({depositsInTransit.length})</h2></div>
+      <div class="card-body">
+        {depositsInTransit.length === 0 ? <p class="text-gray-500 text-sm">None</p> : (
+          <table class="table">
+            <thead><tr><th>Date</th><th>Reference</th><th class="text-right">Amount</th></tr></thead>
+            <tbody>
+              {depositsInTransit.map(d => (
+                <tr><td>{d.date ? formatDate(d.date) : '—'}</td><td>{d.reference || '—'}</td><td class="text-right font-mono">{peso(d.amount)}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  </div>
+
+  <p class="text-sm text-gray-600">
+    Prepared by {[recon.preparedByFirstName, recon.preparedByLastName].filter(Boolean).join(' ') || '—'} on {formatDate(recon.preparedDate)}.
+  </p>
+
+  <script>
+    const button = document.getElementById('complete-btn') as HTMLButtonElement | null;
+    const errorBox = document.getElementById('complete-error') as HTMLElement;
+
+    button?.addEventListener('click', async () => {
+      if (!confirm('Mark this reconciliation as completed? Completed reconciliations cannot be edited.')) return;
+
+      button.disabled = true;
+      try {
+        const response = await fetch(`/api/cash/reconciliations/${button.dataset.id}/complete`, { method: 'POST' });
+        const result = await response.json();
+        if (response.ok) {
+          window.location.reload();
+        } else {
+          errorBox.textContent = result.error || 'Could not complete the reconciliation.';
+          errorBox.classList.remove('hidden');
+          button.disabled = false;
+        }
+      } catch {
+        errorBox.textContent = 'Could not reach the server. Check your connection and try again.';
+        errorBox.classList.remove('hidden');
+        button.disabled = false;
+      }
+    });
+  </script>
+</MainLayout>

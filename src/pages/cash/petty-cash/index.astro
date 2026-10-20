@@ -151,12 +151,12 @@ if (status) {
   .page-title {
     font-size: 2rem;
     font-weight: 700;
-    color: #1f2937;
+    color: var(--ds-text);
     margin-bottom: 0.5rem;
   }
 
   .page-description {
-    color: #6b7280;
+    color: var(--ds-text-subtlest);
   }
 
   .page-actions {
@@ -165,7 +165,7 @@ if (status) {
   }
 
   .card {
-    background: white;
+    background: var(--ds-surface-raised);
     border-radius: 0.5rem;
     box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
     padding: 1.5rem;
@@ -193,21 +193,21 @@ if (status) {
   .form-group label {
     font-size: 0.875rem;
     font-weight: 500;
-    color: #374151;
+    color: var(--ds-text-subtle);
     margin-bottom: 0.5rem;
   }
 
   .form-control {
     padding: 0.5rem 0.75rem;
-    border: 1px solid #d1d5db;
+    border: 1px solid var(--ds-border);
     border-radius: 0.375rem;
     font-size: 0.875rem;
   }
 
   .form-control:focus {
     outline: none;
-    border-color: #3b82f6;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    border-color: var(--ds-border-selected);
+    box-shadow: 0 0 0 3px rgba(56, 139, 255, 0.1);
   }
 
   .flex {
@@ -233,22 +233,22 @@ if (status) {
   }
 
   .btn-primary {
-    background-color: #3b82f6;
+    background-color: var(--ds-background-brand-bold);
     color: white;
   }
 
   .btn-primary:hover {
-    background-color: #2563eb;
+    background-color: var(--ds-background-brand-bold-hovered);
   }
 
   .btn-secondary {
-    background-color: white;
-    color: #374151;
-    border-color: #d1d5db;
+    background-color: var(--ds-surface-raised);
+    color: var(--ds-text-subtle);
+    border-color: var(--ds-border);
   }
 
   .btn-secondary:hover {
-    background-color: #f9fafb;
+    background-color: var(--ds-surface-sunken);
   }
 
   .btn-icon {
@@ -258,13 +258,13 @@ if (status) {
     width: 2rem;
     height: 2rem;
     border-radius: 0.375rem;
-    color: #3b82f6;
+    color: var(--ds-link);
     transition: background-color 0.15s;
     text-decoration: none;
   }
 
   .btn-icon:hover {
-    background-color: #dbeafe;
+    background-color: var(--ds-background-information);
   }
 
   .empty-state {
@@ -286,8 +286,8 @@ if (status) {
   }
 
   .table thead {
-    background-color: #f9fafb;
-    border-bottom: 1px solid #e5e7eb;
+    background-color: var(--ds-surface-sunken);
+    border-bottom: 1px solid var(--ds-border);
   }
 
   .table th {
@@ -297,18 +297,18 @@ if (status) {
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: #6b7280;
+    color: var(--ds-text-subtlest);
   }
 
   .table td {
     padding: 1rem;
-    border-bottom: 1px solid #e5e7eb;
+    border-bottom: 1px solid var(--ds-border);
     font-size: 0.875rem;
-    color: #1f2937;
+    color: var(--ds-text);
   }
 
   .table tbody tr:hover {
-    background-color: #f9fafb;
+    background-color: var(--ds-surface-sunken);
   }
 
   .text-right {
@@ -329,21 +329,21 @@ if (status) {
   }
 
   .badge-success {
-    background-color: #d1fae5;
-    color: #065f46;
+    background-color: var(--ds-background-success);
+    color: var(--ds-text-success);
   }
 
   .badge-secondary {
-    background-color: #f3f4f6;
-    color: #4b5563;
+    background-color: var(--ds-background-neutral);
+    color: var(--ds-text-subtle);
   }
 
   .text-primary-600 {
-    color: #2563eb;
+    color: var(--ds-link-pressed);
   }
 
   .text-primary-600:hover {
-    color: #1d4ed8;
+    color: var(--ds-link-pressed);
   }
 
   .font-medium {

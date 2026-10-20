@@ -303,7 +303,7 @@ if (cashAdvance.dueDateReturn && cashAdvance.status !== 'liquidated') {
 
       {liquidationDV ? (
         <div class="document-item">
-          <div class="document-icon bg-green-100 text-green-600">
+          <div class="document-icon badge-success">
             <i class="pi pi-check-circle"></i>
           </div>
           <div class="document-info">
@@ -391,12 +391,12 @@ if (cashAdvance.dueDateReturn && cashAdvance.status !== 'liquidated') {
     align-items: center;
     gap: 0.5rem;
     font-size: 0.875rem;
-    color: #6b7280;
+    color: var(--ds-text-subtlest);
     margin-bottom: 0.5rem;
   }
 
   .breadcrumb a {
-    color: #3b82f6;
+    color: var(--ds-link);
     text-decoration: none;
   }
 
@@ -407,7 +407,7 @@ if (cashAdvance.dueDateReturn && cashAdvance.status !== 'liquidated') {
   .page-title {
     font-size: 2rem;
     font-weight: 700;
-    color: #1f2937;
+    color: var(--ds-text);
   }
 
   .page-actions {
@@ -430,15 +430,15 @@ if (cashAdvance.dueDateReturn && cashAdvance.status !== 'liquidated') {
   }
 
   .alert-danger {
-    background-color: #fee2e2;
-    color: #991b1b;
-    border: 1px solid #fecaca;
+    background-color: var(--ds-background-danger);
+    color: var(--ds-text-danger);
+    border: 1px solid #FFD5D2;
   }
 
   .alert-warning {
-    background-color: #fef3c7;
-    color: #92400e;
-    border: 1px solid #fde68a;
+    background-color: var(--ds-background-warning);
+    color: var(--ds-text-warning);
+    border: 1px solid #F8E6A0;
   }
 
   .alert strong {
@@ -458,14 +458,14 @@ if (cashAdvance.dueDateReturn && cashAdvance.status !== 'liquidated') {
   }
 
   .card {
-    background: white;
+    background: var(--ds-surface-raised);
     border-radius: 0.5rem;
     box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
   }
 
   .card-header {
     padding: 1.5rem;
-    border-bottom: 1px solid #e5e7eb;
+    border-bottom: 1px solid var(--ds-border);
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -474,7 +474,7 @@ if (cashAdvance.dueDateReturn && cashAdvance.status !== 'liquidated') {
   .card-title {
     font-size: 1.125rem;
     font-weight: 600;
-    color: #1f2937;
+    color: var(--ds-text);
     margin: 0;
   }
 
@@ -486,7 +486,7 @@ if (cashAdvance.dueDateReturn && cashAdvance.status !== 'liquidated') {
     display: flex;
     justify-content: space-between;
     padding: 0.75rem 0;
-    border-bottom: 1px solid #f3f4f6;
+    border-bottom: 1px solid var(--ds-border);
   }
 
   .detail-row:last-child {
@@ -495,20 +495,20 @@ if (cashAdvance.dueDateReturn && cashAdvance.status !== 'liquidated') {
 
   .detail-label {
     font-size: 0.875rem;
-    color: #6b7280;
+    color: var(--ds-text-subtlest);
     font-weight: 500;
   }
 
   .detail-value {
     font-size: 0.875rem;
-    color: #1f2937;
+    color: var(--ds-text);
     text-align: right;
   }
 
   .detail-value.amount {
     font-size: 1.125rem;
     font-weight: 700;
-    color: #3b82f6;
+    color: var(--ds-link);
   }
 
   .document-item {
@@ -516,7 +516,7 @@ if (cashAdvance.dueDateReturn && cashAdvance.status !== 'liquidated') {
     gap: 1rem;
     padding: 1rem;
     border-radius: 0.5rem;
-    background-color: #f9fafb;
+    background-color: var(--ds-surface-sunken);
     margin-bottom: 1rem;
   }
 
@@ -528,8 +528,8 @@ if (cashAdvance.dueDateReturn && cashAdvance.status !== 'liquidated') {
     width: 3rem;
     height: 3rem;
     border-radius: 0.5rem;
-    background-color: #dbeafe;
-    color: #2563eb;
+    background-color: var(--ds-background-information);
+    color: var(--ds-link-pressed);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -544,20 +544,20 @@ if (cashAdvance.dueDateReturn && cashAdvance.status !== 'liquidated') {
   .document-title {
     font-size: 0.9375rem;
     font-weight: 600;
-    color: #1f2937;
+    color: var(--ds-text);
     margin: 0 0 0.25rem 0;
   }
 
   .document-meta {
     font-size: 0.8125rem;
-    color: #6b7280;
+    color: var(--ds-text-subtlest);
     margin: 0;
   }
 
   .no-data {
     text-align: center;
     padding: 2rem 1rem;
-    color: #6b7280;
+    color: var(--ds-text-subtlest);
   }
 
   .btn {
@@ -575,31 +575,31 @@ if (cashAdvance.dueDateReturn && cashAdvance.status !== 'liquidated') {
   }
 
   .btn-primary {
-    background-color: #3b82f6;
+    background-color: var(--ds-background-brand-bold);
     color: white;
   }
 
   .btn-primary:hover {
-    background-color: #2563eb;
+    background-color: var(--ds-background-brand-bold-hovered);
   }
 
   .btn-success {
-    background-color: #10b981;
+    background-color: var(--ds-background-success-bold);
     color: white;
   }
 
   .btn-success:hover {
-    background-color: #059669;
+    background-color: var(--ds-background-success-bold);
   }
 
   .btn-secondary {
-    background-color: white;
-    color: #374151;
-    border-color: #d1d5db;
+    background-color: var(--ds-surface-raised);
+    color: var(--ds-text-subtle);
+    border-color: var(--ds-border);
   }
 
   .btn-secondary:hover {
-    background-color: #f9fafb;
+    background-color: var(--ds-surface-sunken);
   }
 
   .btn-sm {
@@ -616,23 +616,23 @@ if (cashAdvance.dueDateReturn && cashAdvance.status !== 'liquidated') {
   }
 
   .badge-success {
-    background-color: #d1fae5;
-    color: #065f46;
+    background-color: var(--ds-background-success);
+    color: var(--ds-text-success);
   }
 
   .badge-info {
-    background-color: #dbeafe;
-    color: #1e40af;
+    background-color: var(--ds-background-information);
+    color: var(--ds-link-pressed);
   }
 
   .badge-warning {
-    background-color: #fef3c7;
-    color: #92400e;
+    background-color: var(--ds-background-warning);
+    color: var(--ds-text-warning);
   }
 
   .badge-danger {
-    background-color: #fee2e2;
-    color: #991b1b;
+    background-color: var(--ds-background-danger);
+    color: var(--ds-text-danger);
   }
 
   .status-badge {
@@ -645,28 +645,28 @@ if (cashAdvance.dueDateReturn && cashAdvance.status !== 'liquidated') {
   }
 
   .status-draft {
-    background-color: #e5e7eb;
-    color: #374151;
+    background-color: var(--ds-background-neutral-hovered);
+    color: var(--ds-text-subtle);
   }
 
   .status-approved {
-    background-color: #dbeafe;
-    color: #1e40af;
+    background-color: var(--ds-background-information);
+    color: var(--ds-link-pressed);
   }
 
   .status-released {
-    background-color: #fef3c7;
-    color: #92400e;
+    background-color: var(--ds-background-warning);
+    color: var(--ds-text-warning);
   }
 
   .status-liquidated {
-    background-color: #d1fae5;
-    color: #065f46;
+    background-color: var(--ds-background-success);
+    color: var(--ds-text-success);
   }
 
   .status-returned {
-    background-color: #e0e7ff;
-    color: #3730a3;
+    background-color: var(--ds-background-information);
+    color: var(--ds-link-pressed);
   }
 
   .font-mono {
@@ -674,11 +674,11 @@ if (cashAdvance.dueDateReturn && cashAdvance.status !== 'liquidated') {
   }
 
   .bg-green-100 {
-    background-color: #d1fae5;
+    background-color: var(--ds-background-success);
   }
 
   .text-green-600 {
-    color: #059669;
+    color: var(--ds-text-success);
   }
 
   @media (max-width: 768px) {

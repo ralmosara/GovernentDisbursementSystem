@@ -1,0 +1,144 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import { assetService } from '../../../lib/services/asset.service';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+const id = parseInt(Astro.params.id as string);
+const txn = id ? await assetService.getInventoryTransactionById(id) : null;
+
+if (!txn) {
+  return Astro.redirect('/inventory/transactions');
+}
+
+const TYPE_LABELS: Record<string, { label: string; badge: string; effect: string }> = {
+  receipt: { label: 'Receipt (Stock In)', badge: 'badge-success', effect: 'Added to stock' },
+  issue: { label: 'Issue (Stock Out)', badge: 'badge-danger', effect: 'Removed from stock' },
+  transfer: { label: 'Transfer', badge: 'badge-info', effect: 'Moved out of this store' },
+  adjustment: { label: 'Adjustment', badge: 'badge-warning', effect: 'On-hand quantity set to the counted figure' },
+};
+const type = TYPE_LABELS[txn.transactionType] ?? { label: txn.transactionType, badge: 'badge-secondary', effect: '' };
+
+const peso = (v: unknown) =>
+  `₱${(Number(v) || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const formatDate = (d: Date | string | null) =>
+  d ? new Date(d).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' }) : '—';
+const canDelete = txn.transactionType !== 'adjustment';
+---
+
+<MainLayout title={`Transaction ${txn.transactionNo}`}>
+  <div class="page-header mb-6">
+    <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+      <div>
+        <div class="flex items-center gap-3 mb-2">
+          <a href="/inventory/transactions" class="text-gray-500 hover:text-gray-700" aria-label="Back to transactions">
+            <i class="pi pi-arrow-left"></i>
+          </a>
+          <h1 class="page-title font-mono">{txn.transactionNo}</h1>
+          <span class={`badge ${type.badge}`}>{type.label}</span>
+        </div>
+        <p class="page-description">{type.effect}</p>
+      </div>
+      {canDelete && (
+        <button type="button" id="delete-btn" data-id={txn.id} class="btn btn-danger btn-md">
+          <i class="pi pi-trash mr-2" aria-hidden="true"></i>
+          Delete &amp; Reverse Stock
+        </button>
+      )}
+    </div>
+  </div>
+
+  <div id="delete-error" class="hidden mb-6 p-4 rounded-md bg-red-50 border border-red-200 text-sm text-red-800" role="alert"></div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <div class="card lg:col-span-2">
+      <div class="card-header"><h2 class="text-lg font-semibold text-gray-900">Transaction Details</h2></div>
+      <div class="card-body">
+        <dl class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+          <div>
+            <dt class="text-sm font-medium text-gray-600">Date</dt>
+            <dd class="mt-1 text-gray-900">{formatDate(txn.transactionDate)}</dd>
+          </div>
+          <div>
+            <dt class="text-sm font-medium text-gray-600">Quantity</dt>
+            <dd class="mt-1 text-gray-900 font-semibold">{txn.quantity} {txn.item?.unit}</dd>
+          </div>
+          <div>
+            <dt class="text-sm font-medium text-gray-600">Unit Cost</dt>
+            <dd class="mt-1 text-gray-900 font-mono">{peso(txn.unitCost)}</dd>
+          </div>
+          <div>
+            <dt class="text-sm font-medium text-gray-600">Total Value</dt>
+            <dd class="mt-1 text-gray-900 font-mono font-semibold">{peso(txn.totalValue)}</dd>
+          </div>
+          <div>
+            <dt class="text-sm font-medium text-gray-600">Reference (PO / RIS / IAR)</dt>
+            <dd class="mt-1 text-gray-900">{txn.reference || '—'}</dd>
+          </div>
+          <div>
+            <dt class="text-sm font-medium text-gray-600">Requested By</dt>
+            <dd class="mt-1 text-gray-900">{txn.requestedBy || '—'}</dd>
+          </div>
+          <div class="sm:col-span-2">
+            <dt class="text-sm font-medium text-gray-600">Remarks</dt>
+            <dd class="mt-1 text-gray-900">{txn.remarks || '—'}</dd>
+          </div>
+          <div>
+            <dt class="text-sm font-medium text-gray-600">Recorded By</dt>
+            <dd class="mt-1 text-gray-900">{txn.createdBy?.name || '—'}</dd>
+          </div>
+          <div>
+            <dt class="text-sm font-medium text-gray-600">Recorded On</dt>
+            <dd class="mt-1 text-gray-900">{formatDate(txn.createdAt)}</dd>
+          </div>
+        </dl>
+      </div>
+    </div>
+
+    {txn.item && (
+      <div class="card">
+        <div class="card-header"><h2 class="text-lg font-semibold text-gray-900">Item</h2></div>
+        <div class="card-body space-y-3">
+          <div>
+            <p class="font-mono text-sm text-gray-500">{txn.item.itemCode}</p>
+            <p class="font-semibold text-gray-900">{txn.item.itemName}</p>
+            {txn.item.description && <p class="text-sm text-gray-600 mt-1">{txn.item.description}</p>}
+          </div>
+          <div class="p-3 bg-blue-50 rounded-md">
+            <p class="text-xs text-gray-600">Current Stock on Hand</p>
+            <p class="text-xl font-bold text-blue-800">{txn.item.quantityOnHand} {txn.item.unit}</p>
+          </div>
+          <a href={`/inventory/items/${txn.item.id}`} class="btn btn-secondary btn-sm w-full">View Item &amp; Stock Card</a>
+        </div>
+      </div>
+    )}
+  </div>
+
+  <script>
+    const button = document.getElementById('delete-btn') as HTMLButtonElement | null;
+    const errorBox = document.getElementById('delete-error') as HTMLElement;
+
+    button?.addEventListener('click', async () => {
+      if (!confirm('Delete this transaction and reverse its effect on stock? This cannot be undone.')) return;
+      button.disabled = true;
+      try {
+        const response = await fetch(`/api/inventory/transactions/${button.dataset.id}`, { method: 'DELETE' });
+        if (response.ok) {
+          window.location.href = '/inventory/transactions';
+          return;
+        }
+        const result = await response.json().catch(() => ({}));
+        errorBox.textContent = result.error || 'Could not delete the transaction.';
+        errorBox.classList.remove('hidden');
+      } catch {
+        errorBox.textContent = 'Could not reach the server. Check your connection and try again.';
+        errorBox.classList.remove('hidden');
+      }
+      button.disabled = false;
+    });
+  </script>
+</MainLayout>

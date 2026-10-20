@@ -163,31 +163,31 @@ function formatCurrency(value: number): string {
               <table class="min-w-full divide-y divide-gray-200">
                 <thead class="bg-gray-50">
                   <tr>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">
                       Date
                     </th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">
                       Transaction No.
                     </th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">
                       Type
                     </th>
-                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th class="px-4 py-3 text-left text-xs font-semibold text-gray-600">
                       Reference
                     </th>
-                    <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th class="px-4 py-3 text-right text-xs font-semibold text-gray-600">
                       Receipt
                     </th>
-                    <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th class="px-4 py-3 text-right text-xs font-semibold text-gray-600">
                       Issue
                     </th>
-                    <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th class="px-4 py-3 text-right text-xs font-semibold text-gray-600">
                       Balance
                     </th>
-                    <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th class="px-4 py-3 text-right text-xs font-semibold text-gray-600">
                       Unit Cost
                     </th>
-                    <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <th class="px-4 py-3 text-right text-xs font-semibold text-gray-600">
                       Total Value
                     </th>
                   </tr>
@@ -216,11 +216,11 @@ function formatCurrency(value: number): string {
                           {txn.transactionNo}
                         </td>
                         <td class="px-4 py-3 whitespace-nowrap text-sm">
-                          <span class={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                            txn.transactionType === 'receipt' ? 'bg-green-100 text-green-800' :
-                            txn.transactionType === 'issue' ? 'bg-red-100 text-red-800' :
-                            txn.transactionType === 'adjustment' ? 'bg-orange-100 text-orange-800' :
-                            'bg-blue-100 text-blue-800'
+                          <span class={`badge ${
+                            txn.transactionType === 'receipt' ? 'badge-success' :
+                            txn.transactionType === 'issue' ? 'badge-danger' :
+                            txn.transactionType === 'adjustment' ? 'badge-warning' :
+                            'badge-info'
                           }`}>
                             {txn.transactionType}
                           </span>

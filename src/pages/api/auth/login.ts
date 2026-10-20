@@ -68,18 +68,9 @@ export const POST: APIRoute = async ({ request, cookies }) => {
       );
     }
 
-    // Step 4: Check if user is active
-    if (!user.isActive) {
-      // Don't record as failed attempt - account is legitimately disabled
-      return new Response(
-        JSON.stringify({ error: 'Your account has been deactivated. Please contact an administrator.' }),
-        { status: 403, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
-
-    // Step 5: Verify password
+    // Step 4: Verify password (before revealing anything about the account's state)
     const validPassword = await verifyPassword(password, user.passwordHash);
-    if (!validPassword) {
+    if (!validPassword || user.deletedAt) {
       // Record failed attempt for invalid password
       recordFailedAttempt(clientIP, username.toLowerCase());
       return new Response(
@@ -88,6 +79,14 @@ export const POST: APIRoute = async ({ request, cookies }) => {
           remainingAttempts: rateLimitCheck.remainingAttempts! - 1
         }),
         { status: 401, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Step 5: Check if user is active (only disclosed to someone who knows the password)
+    if (!user.isActive) {
+      return new Response(
+        JSON.stringify({ error: 'Your account has been deactivated. Please contact an administrator.' }),
+        { status: 403, headers: { 'Content-Type': 'application/json' } }
       );
     }
 

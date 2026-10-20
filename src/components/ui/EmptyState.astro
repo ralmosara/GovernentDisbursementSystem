@@ -1,0 +1,21 @@
+---
+interface Props {
+  title: string;
+  description?: string;
+  icon?: string;
+  /** success shows a green check, for "all caught up" moments */
+  tone?: 'neutral' | 'success';
+}
+
+const { title, description, icon = 'pi-inbox', tone = 'neutral' } = Astro.props;
+const success = tone === 'success';
+---
+
+<div class="empty-state">
+  <span class={`flex items-center justify-center w-12 h-12 mb-3 rounded-full ${success ? 'bg-green-100' : 'bg-gray-100'}`}>
+    <i class={`pi ${success ? 'pi-check' : icon} text-lg ${success ? 'text-green-600' : 'text-gray-500'}`} aria-hidden="true"></i>
+  </span>
+  <p class="font-semibold text-gray-800">{title}</p>
+  {description && <p class="mt-1 text-sm max-w-md">{description}</p>}
+  {Astro.slots.has('default') && <div class="mt-4 flex flex-wrap justify-center gap-2"><slot /></div>}
+</div>

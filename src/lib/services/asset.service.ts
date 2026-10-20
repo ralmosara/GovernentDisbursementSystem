@@ -909,7 +909,7 @@ export class AssetService {
         } : null,
         approvedBy: row.users ? {
           id: row.users.id,
-          name: row.users.name,
+          name: `${row.users.firstName} ${row.users.lastName}`,
         } : null,
         createdAt: row.asset_disposals.createdAt,
       }));
@@ -957,7 +957,7 @@ export class AssetService {
         } : null,
         approvedBy: row.users ? {
           id: row.users.id,
-          name: row.users.name,
+          name: `${row.users.firstName} ${row.users.lastName}`,
         } : null,
         createdAt: row.asset_disposals.createdAt,
       };
@@ -1108,7 +1108,7 @@ export class AssetService {
         ),
         createdBy: row.users ? {
           id: row.users.id,
-          name: row.users.name,
+          name: `${row.users.firstName} ${row.users.lastName}`,
         } : null,
         createdAt: row.inventory_items.createdAt,
       }));
@@ -1151,7 +1151,7 @@ export class AssetService {
         ),
         createdBy: row.users ? {
           id: row.users.id,
-          name: row.users.name,
+          name: `${row.users.firstName} ${row.users.lastName}`,
         } : null,
         createdAt: row.inventory_items.createdAt,
       };
@@ -1207,35 +1207,46 @@ export class AssetService {
   async adjustInventoryQuantity(
     itemId: number,
     quantity: number,
-    operation: 'add' | 'subtract' | 'set'
-  ): Promise<void> {
-    try {
-      const item = await this.getInventoryItemById(itemId);
-      if (!item) {
-        throw new Error('Item not found');
-      }
-
-      let newQuantity = item.quantityOnHand;
-
-      if (operation === 'add') {
-        newQuantity += quantity;
-      } else if (operation === 'subtract') {
-        newQuantity -= quantity;
-        if (newQuantity < 0) {
-          throw new Error('Insufficient quantity on hand');
-        }
-      } else if (operation === 'set') {
-        newQuantity = quantity;
-      }
-
-      await db
-        .update(inventoryItems)
-        .set({ quantityOnHand: newQuantity })
-        .where(eq(inventoryItems.id, itemId));
-    } catch (error) {
-      console.error('Error adjusting inventory quantity:', error);
-      throw error;
+    operation: 'add' | 'subtract' | 'set',
+    tx?: Parameters<Parameters<typeof db.transaction>[0]>[0]
+  ): Promise<{ previousQuantity: number; newQuantity: number }> {
+    if (!tx) {
+      return db.transaction((innerTx) => this.adjustInventoryQuantity(itemId, quantity, operation, innerTx));
     }
+
+    // Lock the item row so concurrent issues cannot both pass the stock check
+    const rows = await tx
+      .select({ quantityOnHand: inventoryItems.quantityOnHand })
+      .from(inventoryItems)
+      .where(eq(inventoryItems.id, itemId))
+      .limit(1)
+      .for('update');
+
+    if (!rows[0]) {
+      throw new Error('Item not found');
+    }
+
+    const previousQuantity = rows[0].quantityOnHand ?? 0;
+    let newQuantity = previousQuantity;
+
+    if (operation === 'add') {
+      newQuantity += quantity;
+    } else if (operation === 'subtract') {
+      newQuantity -= quantity;
+    } else if (operation === 'set') {
+      newQuantity = quantity;
+    }
+
+    if (newQuantity < 0) {
+      throw new Error(`Insufficient quantity on hand (available: ${previousQuantity})`);
+    }
+
+    await tx
+      .update(inventoryItems)
+      .set({ quantityOnHand: newQuantity })
+      .where(eq(inventoryItems.id, itemId));
+
+    return { previousQuantity, newQuantity };
   }
 
   async getLowStockItems(): Promise<Array<any>> {
@@ -1299,6 +1310,10 @@ export class AssetService {
 
   async createInventoryTransaction(data: CreateInventoryTransactionData, userId: number): Promise<{ id: number; transactionNo: string }> {
     try {
+      if (!Number.isInteger(data.quantity) || data.quantity < 0 || (data.quantity === 0 && data.transactionType !== 'adjustment')) {
+        throw new Error('Quantity must be a positive whole number');
+      }
+
       // Generate transaction number
       const transactionNo = await generateInventoryTransactionNumber();
 
@@ -1308,38 +1323,36 @@ export class AssetService {
         throw new Error('Item not found');
       }
 
-      // Validate quantity for issue transactions
-      if (data.transactionType === 'issue' && item.quantityOnHand < data.quantity) {
-        throw new Error('Insufficient quantity on hand');
-      }
+      // Receipts add stock; issues and transfers move stock out; an adjustment sets
+      // the on-hand quantity to the counted figure
+      const operation: 'add' | 'subtract' | 'set' =
+        data.transactionType === 'receipt' ? 'add'
+          : data.transactionType === 'adjustment' ? 'set'
+            : 'subtract';
 
-      // Insert transaction record
-      const [result] = await db.insert(inventoryTransactions).values({
-        transactionNo,
-        itemId: data.itemId,
-        transactionDate: data.transactionDate,
-        transactionType: data.transactionType,
-        quantity: data.quantity,
-        unitCost: data.unitCost || item.unitCost,
-        reference: data.reference,
-        requestedBy: data.requestedBy,
-        remarks: data.remarks,
-        createdBy: userId,
+      // Stock change and register entry commit together
+      const transactionId = await db.transaction(async (tx) => {
+        const { previousQuantity } = await this.adjustInventoryQuantity(data.itemId, data.quantity, operation, tx);
+
+        const remarks = data.transactionType === 'adjustment'
+          ? [`Adjusted from ${previousQuantity} to ${data.quantity}`, data.remarks].filter(Boolean).join('. ')
+          : data.remarks;
+
+        const [result] = await tx.insert(inventoryTransactions).values({
+          transactionNo,
+          itemId: data.itemId,
+          transactionDate: data.transactionDate,
+          transactionType: data.transactionType,
+          quantity: data.quantity,
+          unitCost: data.unitCost || item.unitCost,
+          reference: data.reference,
+          requestedBy: data.requestedBy,
+          remarks,
+          createdBy: userId,
+        });
+
+        return Number(result.insertId);
       });
-
-      const transactionId = Number(result.insertId);
-
-      // Update inventory quantity based on transaction type
-      let operation: 'add' | 'subtract' | 'set' = 'set';
-      if (data.transactionType === 'receipt') {
-        operation = 'add';
-      } else if (data.transactionType === 'issue') {
-        operation = 'subtract';
-      } else if (data.transactionType === 'adjustment') {
-        operation = 'set';
-      }
-
-      await this.adjustInventoryQuantity(data.itemId, data.quantity, operation);
 
       return { id: transactionId, transactionNo };
     } catch (error) {
@@ -1399,7 +1412,7 @@ export class AssetService {
         } : null,
         createdBy: row.users ? {
           id: row.users.id,
-          name: row.users.name,
+          name: `${row.users.firstName} ${row.users.lastName}`,
         } : null,
         createdAt: row.inventory_transactions.createdAt,
       }));
@@ -1445,7 +1458,7 @@ export class AssetService {
         } : null,
         createdBy: row.users ? {
           id: row.users.id,
-          name: row.users.name,
+          name: `${row.users.firstName} ${row.users.lastName}`,
         } : null,
         createdAt: row.inventory_transactions.createdAt,
       };
@@ -1463,15 +1476,18 @@ export class AssetService {
         throw new Error('Transaction not found');
       }
 
-      // Reverse the transaction effect on inventory
-      if (transaction.transactionType === 'receipt') {
-        await this.adjustInventoryQuantity(transaction.item.id, transaction.quantity, 'subtract');
-      } else if (transaction.transactionType === 'issue') {
-        await this.adjustInventoryQuantity(transaction.item.id, transaction.quantity, 'add');
+      // An adjustment overwrote the count, so it cannot be undone by arithmetic;
+      // record a new adjustment instead
+      if (transaction.transactionType === 'adjustment') {
+        throw new Error('Adjustments cannot be deleted. Record a new adjustment with the correct count instead.');
       }
 
-      // Delete the transaction
-      await db.delete(inventoryTransactions).where(eq(inventoryTransactions.id, id));
+      // Reverse the transaction effect on inventory and delete it atomically
+      await db.transaction(async (tx) => {
+        const reverse = transaction.transactionType === 'receipt' ? 'subtract' : 'add';
+        await this.adjustInventoryQuantity(transaction.item.id, transaction.quantity, reverse, tx);
+        await tx.delete(inventoryTransactions).where(eq(inventoryTransactions.id, id));
+      });
     } catch (error) {
       console.error('Error deleting inventory transaction:', error);
       throw error;
@@ -1592,7 +1608,7 @@ export class AssetService {
         } : null,
         verifiedBy: row.users ? {
           id: row.users.id,
-          name: row.users.name,
+          name: `${row.users.firstName} ${row.users.lastName}`,
         } : null,
         createdAt: row.physical_inventory_count.createdAt,
       }));
@@ -1638,7 +1654,7 @@ export class AssetService {
         } : null,
         verifiedBy: row.users ? {
           id: row.users.id,
-          name: row.users.name,
+          name: `${row.users.firstName} ${row.users.lastName}`,
         } : null,
         createdAt: row.physical_inventory_count.createdAt,
       };

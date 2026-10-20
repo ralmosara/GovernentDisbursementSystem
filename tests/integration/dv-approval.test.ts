@@ -1,595 +1,352 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { getTableName } from 'drizzle-orm';
 
-// Mock the database and services
-vi.mock('../../src/lib/db/connection', () => ({
-  db: {
-    select: vi.fn(),
-    insert: vi.fn(),
-    update: vi.fn(),
-    transaction: vi.fn(),
-  },
-}));
+/**
+ * DV approval workflow scenarios against the real ApprovalService.
+ *
+ * The database is replaced by a query queue: each select/update consumes the next
+ * queued result, in the order the service issues them. Updates are recorded so tests
+ * can assert which rows changed and how.
+ */
+
+const queuedResults: unknown[][] = [];
+const recordedUpdates: { table: string; values: Record<string, unknown> }[] = [];
+
+function queryBuilder(table?: string) {
+  const result = queuedResults.shift() ?? [];
+  const builder: any = new Proxy(
+    {},
+    {
+      get(_target, prop) {
+        if (prop === 'then') {
+          return (resolve: (v: unknown) => void, reject: (e: unknown) => void) =>
+            Promise.resolve(result).then(resolve, reject);
+        }
+        if (prop === 'set') {
+          return (values: Record<string, unknown>) => {
+            recordedUpdates.push({ table: table ?? 'unknown', values });
+            return builder;
+          };
+        }
+        return () => builder;
+      },
+    }
+  );
+  return builder;
+}
+
+vi.mock('../../src/lib/db/connection', () => {
+  const db: any = {
+    select: vi.fn(() => queryBuilder()),
+    insert: vi.fn(() => queryBuilder()),
+    update: vi.fn((table: any) => queryBuilder(getTableName(table))),
+  };
+  db.transaction = vi.fn((fn: (tx: unknown) => unknown) => fn(db));
+  return { db };
+});
 
 vi.mock('../../src/lib/middleware/audit-logger', () => ({
   logCreate: vi.fn(),
   logUpdate: vi.fn(),
   logApprove: vi.fn(),
   logReject: vi.fn(),
+  sanitizeData: (d: unknown) => d,
 }));
+
+let enforceSoD = true;
+vi.mock('../../src/lib/services/settings.service', () => ({
+  getSetting: vi.fn(async (key: string) => (key === 'enforce_segregation_of_duties' ? enforceSoD : undefined)),
+}));
+
+// Role IDs as seeded
+const ROLE = { admin: 1, director: 2, accountant: 3, budget: 4, division: 6 };
+const PREPARER = 10;
+const BUDGET_OFFICER = 20;
+const ACCOUNTANT = 30;
+const DIRECTOR = 40;
+const ADMIN = 99;
+
+type Stage = 'division' | 'budget' | 'accounting' | 'director';
+const STAGE_ROLE: Record<Stage, number> = {
+  division: ROLE.division,
+  budget: ROLE.budget,
+  accounting: ROLE.accountant,
+  director: ROLE.director,
+};
+const STAGE_ORDER: Record<Stage, number> = { division: 1, budget: 2, accounting: 3, director: 4 };
+
+function stageRow(stage: Stage, status = 'pending', approverUserId: number | null = null) {
+  return {
+    id: STAGE_ORDER[stage],
+    dvId: 1,
+    stage,
+    stageOrder: STAGE_ORDER[stage],
+    approverRoleId: STAGE_ROLE[stage],
+    approverUserId,
+    status,
+  };
+}
+
+/**
+ * Queue the reads issued while authorizing a stage action.
+ */
+function queueAuthorization(opts: {
+  dvStatus: string;
+  current?: Stage | null;
+  userRoleIds: number[];
+  priorApprovals?: { stage: Stage; userId: number }[];
+  createdBy?: number;
+}) {
+  queuedResults.push([{ status: opts.dvStatus, createdBy: opts.createdBy ?? PREPARER }]);
+
+  if (!['draft', 'pending_budget', 'pending_accounting', 'pending_director'].includes(opts.dvStatus)) {
+    return;
+  }
+
+  queuedResults.push(opts.current ? [stageRow(opts.current)] : []);
+  if (!opts.current) return;
+
+  queuedResults.push(opts.userRoleIds.map(roleId => ({ userId: 0, roleId })));
+  queuedResults.push([{ id: ROLE.admin, name: 'administrator' }]);
+
+  if (enforceSoD) {
+    queuedResults.push((opts.priorApprovals ?? []).map(p => stageRow(p.stage, 'approved', p.userId)));
+  }
+}
+
+/** Queue the reads/writes of a successful approve transaction */
+function queueApproveTransaction(next: Stage | null, affectedRows = 1) {
+  queuedResults.push([{ affectedRows }]); // stage update
+  if (affectedRows === 0) return;
+  queuedResults.push(next ? [stageRow(next)] : []); // next pending stage
+  queuedResults.push([{ affectedRows: 1 }]); // DV status update
+}
+
+async function service() {
+  const { ApprovalService } = await import('../../src/lib/services/approval.service');
+  return new ApprovalService();
+}
+
+const dvStatusUpdates = () =>
+  recordedUpdates.filter(u => u.table === 'disbursement_vouchers').map(u => u.values.status);
 
 describe('DV Approval Workflow Integration Tests', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  afterEach(() => {
+    queuedResults.length = 0;
+    recordedUpdates.length = 0;
+    enforceSoD = true;
     vi.clearAllMocks();
   });
 
   describe('Complete Approval Flow', () => {
-    it('should complete full DV approval workflow from creation to director approval', async () => {
-      const { db } = await import('../../src/lib/db/connection');
-      const { DisbursementService } = await import('../../src/lib/services/disbursement.service');
-      const { ApprovalService } = await import('../../src/lib/services/approval.service');
+    it('should move a DV through all four stages to approved', async () => {
+      const approvals = await service();
+      const prior: { stage: Stage; userId: number }[] = [];
 
-      // Mock DV creation
-      vi.mocked(db.insert).mockReturnValue({
-        values: vi.fn().mockResolvedValue({ insertId: 1 }),
-      } as any);
+      const steps: { stage: Stage; user: number; role: number; next: Stage | null; status: string }[] = [
+        { stage: 'division', user: 11, role: ROLE.division, next: 'budget', status: 'pending_budget' },
+        { stage: 'budget', user: BUDGET_OFFICER, role: ROLE.budget, next: 'accounting', status: 'pending_accounting' },
+        { stage: 'accounting', user: ACCOUNTANT, role: ROLE.accountant, next: 'director', status: 'pending_director' },
+        { stage: 'director', user: DIRECTOR, role: ROLE.director, next: null, status: 'approved' },
+      ];
 
-      vi.mocked(db.select).mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            orderBy: vi.fn().mockReturnValue({
-              limit: vi.fn().mockResolvedValue([]),
-            }),
-          }),
-        }),
-      } as any);
+      let dvStatus = 'pending_budget';
+      for (const step of steps) {
+        queueAuthorization({ dvStatus, current: step.stage, userRoleIds: [step.role], priorApprovals: [...prior] });
+        queueApproveTransaction(step.next);
 
-      const disbursementService = new DisbursementService();
+        const result = await approvals.approveStage(1, step.user, `${step.stage} ok`);
 
-      // Step 1: Create DV
-      const dvData = {
-        payeeName: 'Test Supplier',
-        payeeAddress: '123 Test St',
-        particulars: 'Office Supplies',
-        amount: 50000,
-        fundClusterId: 1,
-        objectOfExpenditureId: 1,
-        responsibilityCenter: 'Admin',
-        mfoPapCode: 'MFO-001',
-        certificationA: true,
-        certificationB: true,
-        certificationC: true,
-        certificationD: true,
-        certificationE: true,
-      };
+        expect(result.success).toBe(true);
+        expect(result.nextStage).toBe(step.next ?? undefined);
+        prior.push({ stage: step.stage, userId: step.user });
+        dvStatus = step.status;
+      }
 
-      const createdDV = await disbursementService.createDV(dvData, 1);
-
-      expect(createdDV.id).toBe(1);
-      expect(createdDV.dvNo).toBeDefined();
-
-      // Step 2: Budget Officer Approval
-      const approvalService = new ApprovalService();
-
-      // Mock workflow query for budget stage
-      vi.mocked(db.select).mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([
-              {
-                id: 1,
-                dvId: 1,
-                stage: 'budget',
-                status: 'pending',
-                userId: null,
-              },
-            ]),
-          }),
-        }),
-      } as any);
-
-      // Mock DV query
-      vi.mocked(db.select).mockReturnValueOnce({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([
-              {
-                id: 1,
-                dvNo: '0001-01-2024',
-                status: 'pending_budget',
-                fundClusterId: 1,
-              },
-            ]),
-          }),
-        }),
-      } as any);
-
-      vi.mocked(db.update).mockReturnValue({
-        set: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue({}),
-        }),
-      } as any);
-
-      await approvalService.approveDV(1, 'budget', 2, 'Approved - Budget available');
-
-      // Verify budget approval was logged
-      const { logApprove } = await import('../../src/lib/middleware/audit-logger');
-      expect(logApprove).toHaveBeenCalledWith(
-        'disbursement_vouchers',
-        1,
-        2,
-        expect.objectContaining({
-          stage: 'budget',
-          status: 'approved',
-        }),
-        undefined,
-        undefined
-      );
-
-      // Step 3: Accounting Approval
-      vi.mocked(db.select).mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([
-              {
-                id: 2,
-                dvId: 1,
-                stage: 'accounting',
-                status: 'pending',
-                userId: null,
-              },
-            ]),
-          }),
-        }),
-      } as any);
-
-      await approvalService.approveDV(1, 'accounting', 3, 'Approved - All certifications verified');
-
-      expect(logApprove).toHaveBeenCalledTimes(2);
-
-      // Step 4: Director Approval
-      vi.mocked(db.select).mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([
-              {
-                id: 3,
-                dvId: 1,
-                stage: 'director',
-                status: 'pending',
-                userId: null,
-              },
-            ]),
-          }),
-        }),
-      } as any);
-
-      await approvalService.approveDV(1, 'director', 4, 'Final approval granted');
-
-      expect(logApprove).toHaveBeenCalledTimes(3);
-
-      // Verify final DV status
-      vi.mocked(db.select).mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([
-              {
-                id: 1,
-                dvNo: '0001-01-2024',
-                status: 'approved',
-              },
-            ]),
-          }),
-        }),
-      } as any);
-
-      const finalDV = await disbursementService.getDVById(1);
-      expect(finalDV.status).toBe('approved');
+      expect(dvStatusUpdates()).toEqual(['pending_budget', 'pending_accounting', 'pending_director', 'approved']);
     });
 
-    it('should handle rejection at any stage', async () => {
-      const { db } = await import('../../src/lib/db/connection');
-      const { ApprovalService } = await import('../../src/lib/services/approval.service');
+    it('should record approver, comments and timestamp on the stage', async () => {
+      const approvals = await service();
+      queueAuthorization({ dvStatus: 'pending_budget', current: 'budget', userRoleIds: [ROLE.budget] });
+      queueApproveTransaction('accounting');
 
-      const approvalService = new ApprovalService();
+      await approvals.approveStage(1, BUDGET_OFFICER, 'Funds available — ORS 2026-01-0001');
 
-      // Mock workflow at accounting stage
-      vi.mocked(db.select).mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([
-              {
-                id: 2,
-                dvId: 1,
-                stage: 'accounting',
-                status: 'pending',
-                userId: null,
-              },
-            ]),
-          }),
-        }),
-      } as any);
-
-      // Mock DV query
-      vi.mocked(db.select).mockReturnValueOnce({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([
-              {
-                id: 1,
-                dvNo: '0001-01-2024',
-                status: 'pending_accounting',
-              },
-            ]),
-          }),
-        }),
-      } as any);
-
-      vi.mocked(db.update).mockReturnValue({
-        set: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue({}),
-        }),
-      } as any);
-
-      // Reject at accounting stage
-      await approvalService.rejectDV(1, 'accounting', 3, 'Missing supporting documents');
-
-      const { logReject } = await import('../../src/lib/middleware/audit-logger');
-      expect(logReject).toHaveBeenCalledWith(
-        'disbursement_vouchers',
-        1,
-        3,
-        expect.objectContaining({
-          stage: 'accounting',
-          status: 'rejected',
-          comments: 'Missing supporting documents',
-        }),
-        undefined,
-        undefined
-      );
-
-      // Verify DV status changed to rejected
-      vi.mocked(db.select).mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([
-              {
-                id: 1,
-                dvNo: '0001-01-2024',
-                status: 'rejected',
-              },
-            ]),
-          }),
-        }),
-      } as any);
-
-      const { DisbursementService } = await import('../../src/lib/services/disbursement.service');
-      const disbursementService = new DisbursementService();
-      const rejectedDV = await disbursementService.getDVById(1);
-
-      expect(rejectedDV.status).toBe('rejected');
-    });
-
-    it('should prevent approval out of sequence', async () => {
-      const { db } = await import('../../src/lib/db/connection');
-      const { ApprovalService } = await import('../../src/lib/services/approval.service');
-
-      const approvalService = new ApprovalService();
-
-      // Mock DV at budget stage
-      vi.mocked(db.select).mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([
-              {
-                id: 1,
-                dvNo: '0001-01-2024',
-                status: 'pending_budget',
-              },
-            ]),
-          }),
-        }),
-      } as any);
-
-      // Try to approve at director stage (skipping budget and accounting)
-      await expect(
-        approvalService.approveDV(1, 'director', 4, 'Trying to skip stages')
-      ).rejects.toThrow();
-    });
-
-    it('should track approval history with timestamps', async () => {
-      const { db } = await import('../../src/lib/db/connection');
-      const { ApprovalService } = await import('../../src/lib/services/approval.service');
-
-      const approvalService = new ApprovalService();
-
-      // Mock workflow history
-      vi.mocked(db.select).mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          leftJoin: vi.fn().mockReturnValue({
-            where: vi.fn().mockReturnValue({
-              orderBy: vi.fn().mockResolvedValue([
-                {
-                  id: 1,
-                  stage: 'budget',
-                  status: 'approved',
-                  userId: 2,
-                  approvedAt: new Date('2024-01-15T10:00:00Z'),
-                  comments: 'Budget approved',
-                  user: { username: 'budget_officer' },
-                },
-                {
-                  id: 2,
-                  stage: 'accounting',
-                  status: 'approved',
-                  userId: 3,
-                  approvedAt: new Date('2024-01-15T14:00:00Z'),
-                  comments: 'Accounting verified',
-                  user: { username: 'accountant' },
-                },
-              ]),
-            }),
-          }),
-        }),
-      } as any);
-
-      const history = await approvalService.getApprovalHistory(1);
-
-      expect(history).toHaveLength(2);
-      expect(history[0].stage).toBe('budget');
-      expect(history[0].status).toBe('approved');
-      expect(history[0].user.username).toBe('budget_officer');
-      expect(history[1].stage).toBe('accounting');
+      const stageUpdate = recordedUpdates.find(u => u.table === 'approval_workflows');
+      expect(stageUpdate?.values).toMatchObject({
+        status: 'approved',
+        approverUserId: BUDGET_OFFICER,
+        comments: 'Funds available — ORS 2026-01-0001',
+      });
+      expect(stageUpdate?.values.actionDate).toBeInstanceOf(Date);
     });
   });
 
-  describe('Budget Availability Check During Approval', () => {
-    it('should check budget availability before accounting approval', async () => {
-      const { db } = await import('../../src/lib/db/connection');
-      const { ApprovalService } = await import('../../src/lib/services/approval.service');
+  describe('Rejection', () => {
+    it('should reject the DV and skip all later stages', async () => {
+      const approvals = await service();
+      queueAuthorization({ dvStatus: 'pending_accounting', current: 'accounting', userRoleIds: [ROLE.accountant] });
+      queuedResults.push([{ affectedRows: 1 }], [{ affectedRows: 1 }], [{ affectedRows: 1 }]);
 
-      // Mock DV with amount
-      vi.mocked(db.select).mockReturnValueOnce({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([
-              {
-                id: 1,
-                dvNo: '0001-01-2024',
-                status: 'pending_accounting',
-                amount: '100000',
-                fundClusterId: 1,
-              },
-            ]),
-          }),
-        }),
-      } as any);
+      const result = await approvals.rejectStage(1, ACCOUNTANT, 'Missing supporting documents');
 
-      // Mock budget availability - insufficient
-      vi.mocked(db.select).mockReturnValueOnce({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            leftJoin: vi.fn().mockReturnValue({
-              groupBy: vi.fn().mockResolvedValue([
-                {
-                  allotmentAmount: '500000',
-                  totalObligations: '450000', // Only 50,000 available
-                },
-              ]),
-            }),
-          }),
-        }),
-      } as any);
-
-      const approvalService = new ApprovalService();
-
-      // Should throw error due to insufficient budget
-      await expect(
-        approvalService.approveDV(1, 'accounting', 3, 'Attempting approval')
-      ).rejects.toThrow('Insufficient budget');
+      expect(result.success).toBe(true);
+      const workflowUpdates = recordedUpdates.filter(u => u.table === 'approval_workflows').map(u => u.values.status);
+      expect(workflowUpdates).toEqual(['rejected', 'skipped']);
+      expect(dvStatusUpdates()).toEqual(['rejected']);
     });
 
-    it('should allow approval when budget is available', async () => {
-      const { db } = await import('../../src/lib/db/connection');
-      const { ApprovalService } = await import('../../src/lib/services/approval.service');
+    it('should require comments for rejection', async () => {
+      const approvals = await service();
 
-      // Mock DV with amount
-      vi.mocked(db.select).mockReturnValueOnce({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([
-              {
-                id: 1,
-                dvNo: '0001-01-2024',
-                status: 'pending_accounting',
-                amount: '100000',
-                fundClusterId: 1,
-              },
-            ]),
-          }),
-        }),
-      } as any);
+      const result = await approvals.rejectStage(1, ACCOUNTANT, '   ');
 
-      // Mock budget availability - sufficient
-      vi.mocked(db.select).mockReturnValueOnce({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            leftJoin: vi.fn().mockReturnValue({
-              groupBy: vi.fn().mockResolvedValue([
-                {
-                  allotmentAmount: '1000000',
-                  totalObligations: '500000', // 500,000 available
-                },
-              ]),
-            }),
-          }),
-        }),
-      } as any);
+      expect(result.success).toBe(false);
+      expect(result.message).toMatch(/comments are required/i);
+      expect(recordedUpdates).toHaveLength(0);
+    });
 
-      // Mock workflow
-      vi.mocked(db.select).mockReturnValueOnce({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([
-              {
-                id: 2,
-                dvId: 1,
-                stage: 'accounting',
-                status: 'pending',
-              },
-            ]),
-          }),
-        }),
-      } as any);
+    it('should not allow a rejected DV to be approved by the next stage', async () => {
+      const approvals = await service();
+      queueAuthorization({ dvStatus: 'rejected', userRoleIds: [ROLE.director] });
 
-      vi.mocked(db.update).mockReturnValue({
-        set: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue({}),
-        }),
-      } as any);
+      const result = await approvals.approveStage(1, DIRECTOR);
 
-      const approvalService = new ApprovalService();
+      expect(result.success).toBe(false);
+      expect(result.message).toMatch(/not awaiting approval/);
+      expect(recordedUpdates).toHaveLength(0);
+    });
 
-      // Should succeed
-      await expect(
-        approvalService.approveDV(1, 'accounting', 3, 'Budget available')
-      ).resolves.not.toThrow();
+    it.each(['approved', 'paid', 'cancelled'])('should not act on a DV that is %s', async (status) => {
+      const approvals = await service();
+      queueAuthorization({ dvStatus: status, userRoleIds: [ROLE.director] });
+
+      const result = await approvals.approveStage(1, DIRECTOR);
+
+      expect(result.success).toBe(false);
+      expect(recordedUpdates).toHaveLength(0);
+    });
+  });
+
+  describe('Permissions', () => {
+    it('should prevent approval by a user without the stage role', async () => {
+      const approvals = await service();
+      // Accountant tries to act while the DV is still at the budget stage
+      queueAuthorization({ dvStatus: 'pending_budget', current: 'budget', userRoleIds: [ROLE.accountant] });
+
+      const result = await approvals.approveStage(1, ACCOUNTANT);
+
+      expect(result.success).toBe(false);
+      expect(result.message).toMatch(/permission/);
+      expect(recordedUpdates).toHaveLength(0);
+    });
+
+    it('should let an administrator act on any stage', async () => {
+      const approvals = await service();
+      queueAuthorization({ dvStatus: 'pending_director', current: 'director', userRoleIds: [ROLE.admin] });
+      queueApproveTransaction(null);
+
+      const result = await approvals.approveStage(1, ADMIN);
+
+      expect(result.success).toBe(true);
+    });
+  });
+
+  describe('Segregation of Duties', () => {
+    it('should stop the preparer from approving their own DV', async () => {
+      const approvals = await service();
+      queueAuthorization({
+        dvStatus: 'pending_budget',
+        current: 'budget',
+        userRoleIds: [ROLE.budget],
+        createdBy: BUDGET_OFFICER,
+      });
+
+      const result = await approvals.approveStage(1, BUDGET_OFFICER);
+
+      expect(result.success).toBe(false);
+      expect(result.message).toMatch(/Segregation of duties/);
+      expect(recordedUpdates).toHaveLength(0);
+    });
+
+    it('should stop one person approving two stages of the same DV', async () => {
+      const approvals = await service();
+      queueAuthorization({
+        dvStatus: 'pending_director',
+        current: 'director',
+        userRoleIds: [ROLE.admin],
+        priorApprovals: [{ stage: 'accounting', userId: ADMIN }],
+      });
+
+      const result = await approvals.approveStage(1, ADMIN);
+
+      expect(result.success).toBe(false);
+      expect(result.message).toMatch(/already approved the accounting stage/);
+    });
+
+    it('should allow a single administrator to complete stages when the control is disabled', async () => {
+      enforceSoD = false;
+      const approvals = await service();
+      queueAuthorization({
+        dvStatus: 'pending_director',
+        current: 'director',
+        userRoleIds: [ROLE.admin],
+        createdBy: ADMIN,
+      });
+      queueApproveTransaction(null);
+
+      const result = await approvals.approveStage(1, ADMIN);
+
+      expect(result.success).toBe(true);
     });
   });
 
   describe('Concurrent Approval Attempts', () => {
-    it('should handle concurrent approval attempts gracefully', async () => {
-      const { db } = await import('../../src/lib/db/connection');
-      const { ApprovalService } = await import('../../src/lib/services/approval.service');
+    it('should fail cleanly when another approver already acted on the stage', async () => {
+      const approvals = await service();
+      queueAuthorization({ dvStatus: 'pending_budget', current: 'budget', userRoleIds: [ROLE.budget] });
+      queueApproveTransaction('accounting', 0); // conditional update matched no pending row
 
-      // Mock workflow at budget stage
-      vi.mocked(db.select).mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([
-              {
-                id: 1,
-                dvId: 1,
-                stage: 'budget',
-                status: 'pending',
-                userId: null,
-              },
-            ]),
-          }),
-        }),
-      } as any);
+      const result = await approvals.approveStage(1, BUDGET_OFFICER);
 
-      vi.mocked(db.select).mockReturnValueOnce({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([
-              {
-                id: 1,
-                dvNo: '0001-01-2024',
-                status: 'pending_budget',
-              },
-            ]),
-          }),
-        }),
-      } as any);
+      expect(result.success).toBe(false);
+      expect(result.message).toMatch(/just acted on by another user/);
+      // The DV status must not be touched by the losing request
+      expect(dvStatusUpdates()).toHaveLength(0);
+    });
 
-      vi.mocked(db.update).mockReturnValue({
-        set: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue({}),
-        }),
-      } as any);
+    it('should not write an audit approval for the losing request', async () => {
+      const { logApprove } = await import('../../src/lib/middleware/audit-logger');
+      const approvals = await service();
+      queueAuthorization({ dvStatus: 'pending_budget', current: 'budget', userRoleIds: [ROLE.budget] });
+      queueApproveTransaction('accounting', 0);
 
-      const approvalService = new ApprovalService();
+      await approvals.approveStage(1, BUDGET_OFFICER);
 
-      // First approval should succeed
-      await approvalService.approveDV(1, 'budget', 2, 'First approval');
-
-      // Second concurrent approval should fail (already approved)
-      vi.mocked(db.select).mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([
-              {
-                id: 1,
-                dvId: 1,
-                stage: 'budget',
-                status: 'approved', // Already approved
-                userId: 2,
-              },
-            ]),
-          }),
-        }),
-      } as any);
-
-      await expect(
-        approvalService.approveDV(1, 'budget', 3, 'Second attempt')
-      ).rejects.toThrow('already approved');
+      expect(logApprove).not.toHaveBeenCalled();
     });
   });
 
-  describe('Approval Comments and Documentation', () => {
-    it('should require comments for rejection', async () => {
-      const { ApprovalService } = await import('../../src/lib/services/approval.service');
+  describe('Missing records', () => {
+    it('should report a missing DV', async () => {
+      const approvals = await service();
+      queuedResults.push([]);
 
-      const approvalService = new ApprovalService();
+      const result = await approvals.approveStage(404, DIRECTOR);
 
-      // Try to reject without comments
-      await expect(
-        approvalService.rejectDV(1, 'budget', 2, '')
-      ).rejects.toThrow('Comments required');
+      expect(result.success).toBe(false);
+      expect(result.message).toMatch(/not found/);
     });
 
-    it('should store approval comments with proper encoding', async () => {
-      const { db } = await import('../../src/lib/db/connection');
-      const { ApprovalService } = await import('../../src/lib/services/approval.service');
+    it('should report when no stage is pending', async () => {
+      const approvals = await service();
+      queueAuthorization({ dvStatus: 'pending_director', current: null, userRoleIds: [ROLE.director] });
 
-      // Mock workflow
-      vi.mocked(db.select).mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([
-              {
-                id: 1,
-                dvId: 1,
-                stage: 'budget',
-                status: 'pending',
-              },
-            ]),
-          }),
-        }),
-      } as any);
+      const result = await approvals.approveStage(1, DIRECTOR);
 
-      vi.mocked(db.select).mockReturnValueOnce({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([
-              {
-                id: 1,
-                dvNo: '0001-01-2024',
-                status: 'pending_budget',
-              },
-            ]),
-          }),
-        }),
-      } as any);
-
-      vi.mocked(db.update).mockReturnValue({
-        set: vi.fn().mockReturnValue({
-          where: vi.fn().mockResolvedValue({}),
-        }),
-      } as any);
-
-      const approvalService = new ApprovalService();
-
-      const specialCharsComment = "Approved with conditions: <script>alert('test')</script>";
-
-      await approvalService.approveDV(1, 'budget', 2, specialCharsComment);
-
-      // Verify comment was stored (would be sanitized in real implementation)
-      expect(vi.mocked(db.update)).toHaveBeenCalled();
+      expect(result.success).toBe(false);
+      expect(result.message).toMatch(/No pending approval stage/);
     });
   });
 });

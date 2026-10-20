@@ -127,25 +127,25 @@ const methodLabels: Record<string, string> = Object.fromEntries(
           <table class="min-w-full divide-y divide-gray-200">
             <thead class="bg-gray-50">
               <tr>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">
                   Disposal No.
                 </th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">
                   Asset
                 </th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">
                   Method
                 </th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">
                   Disposal Date
                 </th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">
                   Buyer/Recipient
                 </th>
-                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-right text-xs font-semibold text-gray-600">
                   Disposal Value
                 </th>
-                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-right text-xs font-semibold text-gray-600">
                   Actions
                 </th>
               </tr>
@@ -165,7 +165,7 @@ const methodLabels: Record<string, string> = Object.fromEntries(
                     ) : '-'}
                   </td>
                   <td class="px-6 py-4 whitespace-nowrap text-sm">
-                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                    <span class="badge badge-discovery">
                       {methodLabels[disposal.disposalMethod] || disposal.disposalMethod}
                     </span>
                   </td>

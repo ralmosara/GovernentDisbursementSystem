@@ -1,0 +1,159 @@
+---
+// ADS dynamic table. Wrap a plain <table>: headers become sortable (unless they carry
+// `data-nosort`), rows are paginated client-side and an optional quick filter searches
+// the rows on the page. Cells may set `data-sort-value` for numeric or date sorting.
+interface Props {
+  title?: string;
+  /** Total shown beside the title */
+  count?: number;
+  pageSize?: number;
+  /** Adds a filter box that searches the rows already on the page */
+  quickFilter?: boolean;
+  quickFilterLabel?: string;
+  id?: string;
+}
+
+const { title, count, pageSize = 25, quickFilter = false, quickFilterLabel = 'Filter rows', id } = Astro.props;
+const hasHeader = Boolean(title) || quickFilter || Astro.slots.has('toolbar');
+---
+
+<section class="card data-table" data-table data-page-size={pageSize} id={id}>
+  {hasHeader && (
+    <div class="card-header">
+      <div class="flex items-center gap-2">
+        {title && <h2 class="card-title">{title}</h2>}
+        {count !== undefined && <span class="badge">{count}</span>}
+      </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <slot name="toolbar" />
+        {quickFilter && (
+          <label class="relative">
+            <span class="sr-only">{quickFilterLabel}</span>
+            <i class="pi pi-search absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-500" aria-hidden="true"></i>
+            <input type="search" data-table-filter class="form-input !min-h-0 !h-8 !py-1 !pl-7 w-56" placeholder={quickFilterLabel} />
+          </label>
+        )}
+      </div>
+    </div>
+  )}
+  <div class="relative overflow-x-auto">
+    <slot />
+  </div>
+  <p data-table-nomatch class="hidden px-5 py-6 text-center text-sm text-gray-600">No rows match your filter.</p>
+  <div data-table-pager class="hidden card-footer !justify-between text-sm text-gray-600">
+    <span data-table-range aria-live="polite"></span>
+    <div class="flex items-center gap-1">
+      <button type="button" class="btn btn-subtle btn-sm btn-icon" data-table-prev aria-label="Previous page">
+        <i class="pi pi-chevron-left" aria-hidden="true"></i>
+      </button>
+      <button type="button" class="btn btn-subtle btn-sm btn-icon" data-table-next aria-label="Next page">
+        <i class="pi pi-chevron-right" aria-hidden="true"></i>
+      </button>
+    </div>
+  </div>
+</section>
+
+<script>
+  function enhance(root: HTMLElement) {
+    if (root.dataset.enhanced) return;
+    root.dataset.enhanced = 'true';
+
+    const table = root.querySelector('table');
+    const tbody = table?.tBodies[0];
+    if (!table || !tbody) return;
+
+    const pageSize = Number(root.dataset.pageSize) || 25;
+    // Rows marked data-table-static (e.g. an empty-state row) are left alone
+    let allRows = Array.from(tbody.rows).filter(row => !row.hasAttribute('data-table-static'));
+    let rows = allRows;
+    let page = 0;
+
+    const pager = root.querySelector<HTMLElement>('[data-table-pager]')!;
+    const range = root.querySelector<HTMLElement>('[data-table-range]')!;
+    const prev = root.querySelector<HTMLButtonElement>('[data-table-prev]')!;
+    const next = root.querySelector<HTMLButtonElement>('[data-table-next]')!;
+    const noMatch = root.querySelector<HTMLElement>('[data-table-nomatch]')!;
+
+    function render() {
+      const pages = Math.max(1, Math.ceil(rows.length / pageSize));
+      page = Math.min(page, pages - 1);
+      const visible = new Set(rows.slice(page * pageSize, (page + 1) * pageSize));
+      allRows.forEach(row => (row.hidden = !visible.has(row)));
+      pager.classList.toggle('hidden', rows.length <= pageSize);
+      noMatch.classList.toggle('hidden', rows.length > 0 || allRows.length === 0);
+      range.textContent = rows.length
+        ? `${page * pageSize + 1}–${Math.min((page + 1) * pageSize, rows.length)} of ${rows.length}`
+        : '';
+      prev.disabled = page === 0;
+      next.disabled = page >= pages - 1;
+    }
+
+    prev.addEventListener('click', () => { page--; render(); });
+    next.addEventListener('click', () => { page++; render(); });
+
+    // Sortable headers
+    const headers = Array.from(table.tHead?.rows[0]?.cells ?? []);
+    const sortValue = (row: HTMLTableRowElement, index: number) => {
+      const cell = row.cells[index];
+      const raw = cell?.dataset.sortValue ?? cell?.textContent?.trim() ?? '';
+      const numeric = Number(raw.replace(/[₱,\s%]/g, ''));
+      return raw !== '' && Number.isFinite(numeric) ? numeric : raw.toLowerCase();
+    };
+
+    headers.forEach((th, index) => {
+      const text = th.textContent?.trim();
+      if (th.hasAttribute('data-nosort') || !text) return;
+
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'th-sort';
+      const label = document.createElement('span');
+      label.textContent = text;
+      const icon = document.createElement('i');
+      icon.className = 'pi pi-sort-alt';
+      icon.setAttribute('aria-hidden', 'true');
+      button.append(label, icon);
+      th.textContent = '';
+      th.appendChild(button);
+      th.setAttribute('aria-sort', 'none');
+
+      button.addEventListener('click', () => {
+        const ascending = th.getAttribute('aria-sort') !== 'ascending';
+        headers.forEach(h => {
+          if (h.hasAttribute('aria-sort')) h.setAttribute('aria-sort', 'none');
+          const i = h.querySelector('.th-sort i');
+          if (i) i.className = 'pi pi-sort-alt';
+        });
+        th.setAttribute('aria-sort', ascending ? 'ascending' : 'descending');
+        icon.className = `pi ${ascending ? 'pi-sort-amount-up-alt' : 'pi-sort-amount-down'}`;
+
+        const filtered = new Set(rows);
+        allRows = [...allRows].sort((a, b) => {
+          const va = sortValue(a, index);
+          const vb = sortValue(b, index);
+          const result = typeof va === 'number' && typeof vb === 'number'
+            ? va - vb
+            : String(va).localeCompare(String(vb), 'en', { numeric: true });
+          return ascending ? result : -result;
+        });
+        allRows.forEach(row => tbody.appendChild(row));
+        rows = allRows.filter(row => filtered.has(row));
+        render();
+      });
+    });
+
+    // Quick filter
+    root.querySelector<HTMLInputElement>('[data-table-filter]')?.addEventListener('input', event => {
+      const terms = (event.target as HTMLInputElement).value.toLowerCase().split(/\s+/).filter(Boolean);
+      rows = terms.length
+        ? allRows.filter(row => terms.every(term => row.textContent!.toLowerCase().includes(term)))
+        : allRows;
+      page = 0;
+      render();
+    });
+
+    render();
+  }
+
+  document.querySelectorAll<HTMLElement>('[data-table]').forEach(enhance);
+</script>

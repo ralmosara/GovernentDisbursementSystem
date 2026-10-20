@@ -547,7 +547,7 @@ onMounted(() => {
 
 <style scoped>
 .audit-viewer {
-  background-color: white;
+  background-color: var(--ds-surface-raised);
   border-radius: 0.5rem;
   box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
   padding: 1.5rem;
@@ -557,7 +557,7 @@ onMounted(() => {
 .audit-viewer__filters {
   margin-bottom: 1.5rem;
   padding-bottom: 1.5rem;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--ds-border);
 }
 
 .audit-viewer__filters-row {
@@ -575,14 +575,14 @@ onMounted(() => {
 .audit-viewer__label {
   font-size: 0.875rem;
   font-weight: 500;
-  color: #374151;
+  color: var(--ds-text-subtle);
   margin-bottom: 0.5rem;
 }
 
 .audit-viewer__select,
 .audit-viewer__input {
   padding: 0.5rem;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--ds-border);
   border-radius: 0.375rem;
   font-size: 0.875rem;
 }
@@ -590,8 +590,8 @@ onMounted(() => {
 .audit-viewer__select:focus,
 .audit-viewer__input:focus {
   outline: none;
-  border-color: #3b82f6;
-  ring: 2px solid rgba(59, 130, 246, 0.5);
+  border-color: var(--ds-border-selected);
+  ring: 2px solid rgba(56, 139, 255, 0.5);
 }
 
 .audit-viewer__filters-actions {
@@ -619,22 +619,22 @@ onMounted(() => {
 }
 
 .audit-viewer__btn--primary {
-  background-color: #3b82f6;
+  background-color: var(--ds-background-brand-bold);
   color: white;
 }
 
 .audit-viewer__btn--primary:hover {
-  background-color: #2563eb;
+  background-color: var(--ds-background-brand-bold-hovered);
 }
 
 .audit-viewer__btn--secondary {
-  background-color: white;
-  color: #374151;
-  border: 1px solid #d1d5db;
+  background-color: var(--ds-surface-raised);
+  color: var(--ds-text-subtle);
+  border: 1px solid var(--ds-border);
 }
 
 .audit-viewer__btn--secondary:hover {
-  background-color: #f9fafb;
+  background-color: var(--ds-surface-sunken);
 }
 
 /* Loading */
@@ -644,14 +644,14 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   padding: 4rem 2rem;
-  color: #6b7280;
+  color: var(--ds-text-subtlest);
 }
 
 .audit-viewer__spinner {
   width: 3rem;
   height: 3rem;
-  border: 4px solid #e5e7eb;
-  border-top-color: #3b82f6;
+  border: 4px solid var(--ds-border);
+  border-top-color: var(--ds-border-selected);
   border-radius: 50%;
   animation: spin 1s linear infinite;
   margin-bottom: 1rem;
@@ -675,18 +675,18 @@ onMounted(() => {
 }
 
 .audit-viewer__table th {
-  background-color: #f9fafb;
+  background-color: var(--ds-surface-sunken);
   padding: 0.75rem 1rem;
   text-align: left;
   font-weight: 600;
-  color: #374151;
-  border-bottom: 1px solid #e5e7eb;
+  color: var(--ds-text-subtle);
+  border-bottom: 1px solid var(--ds-border);
 }
 
 .audit-viewer__table td {
   padding: 0.75rem 1rem;
-  border-bottom: 1px solid #e5e7eb;
-  color: #1f2937;
+  border-bottom: 1px solid var(--ds-border);
+  color: var(--ds-text);
 }
 
 .audit-viewer__user {
@@ -700,11 +700,11 @@ onMounted(() => {
 
 .audit-viewer__user-username {
   font-size: 0.75rem;
-  color: #6b7280;
+  color: var(--ds-text-subtlest);
 }
 
 .audit-viewer__system {
-  color: #9ca3af;
+  color: var(--ds-text-subtlest);
   font-style: italic;
 }
 
@@ -718,28 +718,28 @@ onMounted(() => {
 }
 
 .audit-viewer__badge--green {
-  background-color: #d1fae5;
-  color: #065f46;
+  background-color: var(--ds-background-success);
+  color: var(--ds-text-success);
 }
 
 .audit-viewer__badge--blue {
-  background-color: #dbeafe;
-  color: #1e40af;
+  background-color: var(--ds-background-information);
+  color: var(--ds-link-pressed);
 }
 
 .audit-viewer__badge--red {
-  background-color: #fee2e2;
-  color: #991b1b;
+  background-color: var(--ds-background-danger);
+  color: var(--ds-text-danger);
 }
 
 .audit-viewer__badge--purple {
-  background-color: #e9d5ff;
-  color: #6b21a8;
+  background-color: var(--ds-background-discovery);
+  color: var(--ds-text-discovery);
 }
 
 .audit-viewer__badge--gray {
-  background-color: #f3f4f6;
-  color: #4b5563;
+  background-color: var(--ds-background-neutral);
+  color: var(--ds-text-subtle);
 }
 
 .audit-viewer__action-btn {
@@ -750,14 +750,14 @@ onMounted(() => {
   justify-content: center;
   border: none;
   background-color: transparent;
-  color: #3b82f6;
+  color: var(--ds-link);
   cursor: pointer;
   border-radius: 0.375rem;
   transition: background-color 0.2s;
 }
 
 .audit-viewer__action-btn:hover {
-  background-color: #dbeafe;
+  background-color: var(--ds-background-information);
 }
 
 .audit-viewer__action-btn svg {
@@ -772,14 +772,14 @@ onMounted(() => {
   align-items: center;
   margin-top: 1.5rem;
   padding-top: 1.5rem;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--ds-border);
 }
 
 .audit-viewer__pagination-btn {
   padding: 0.5rem 1rem;
-  background-color: white;
-  color: #374151;
-  border: 1px solid #d1d5db;
+  background-color: var(--ds-surface-raised);
+  color: var(--ds-text-subtle);
+  border: 1px solid var(--ds-border);
   border-radius: 0.375rem;
   font-weight: 500;
   font-size: 0.875rem;
@@ -788,7 +788,7 @@ onMounted(() => {
 }
 
 .audit-viewer__pagination-btn:hover:not(:disabled) {
-  background-color: #f9fafb;
+  background-color: var(--ds-surface-sunken);
 }
 
 .audit-viewer__pagination-btn:disabled {
@@ -797,7 +797,7 @@ onMounted(() => {
 }
 
 .audit-viewer__pagination-info {
-  color: #6b7280;
+  color: var(--ds-text-subtlest);
   font-size: 0.875rem;
 }
 
@@ -808,7 +808,7 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   padding: 4rem 2rem;
-  color: #9ca3af;
+  color: var(--ds-text-subtlest);
 }
 
 .audit-viewer__empty svg {
@@ -833,7 +833,7 @@ onMounted(() => {
 }
 
 .audit-viewer__modal {
-  background-color: white;
+  background-color: var(--ds-surface-raised);
   border-radius: 0.5rem;
   max-width: 48rem;
   width: 100%;
@@ -852,13 +852,13 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: 1.5rem;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--ds-border);
 }
 
 .audit-viewer__modal-header h3 {
   font-size: 1.25rem;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--ds-text);
 }
 
 .audit-viewer__modal-close {
@@ -869,14 +869,14 @@ onMounted(() => {
   justify-content: center;
   border: none;
   background-color: transparent;
-  color: #6b7280;
+  color: var(--ds-text-subtlest);
   cursor: pointer;
   border-radius: 0.375rem;
   transition: background-color 0.2s;
 }
 
 .audit-viewer__modal-close:hover {
-  background-color: #f3f4f6;
+  background-color: var(--ds-background-neutral);
 }
 
 .audit-viewer__modal-close svg {
@@ -901,7 +901,7 @@ onMounted(() => {
 .audit-viewer__detail-section h4 {
   font-size: 1rem;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--ds-text);
   margin-bottom: 1rem;
 }
 
@@ -913,26 +913,26 @@ onMounted(() => {
 
 .audit-viewer__detail-list dt {
   font-weight: 500;
-  color: #6b7280;
+  color: var(--ds-text-subtlest);
 }
 
 .audit-viewer__detail-list dd {
-  color: #1f2937;
+  color: var(--ds-text);
 }
 
 .audit-viewer__user-agent {
   word-break: break-all;
   font-size: 0.75rem;
-  color: #6b7280;
+  color: var(--ds-text-subtlest);
 }
 
 .audit-viewer__json {
-  background-color: #f9fafb;
+  background-color: var(--ds-surface-sunken);
   padding: 1rem;
   border-radius: 0.375rem;
   overflow-x: auto;
   font-size: 0.875rem;
-  color: #1f2937;
+  color: var(--ds-text);
   font-family: 'Courier New', monospace;
 }
 
@@ -943,34 +943,34 @@ onMounted(() => {
 }
 
 .audit-viewer__changes-table th {
-  background-color: #f9fafb;
+  background-color: var(--ds-surface-sunken);
   padding: 0.5rem 0.75rem;
   text-align: left;
   font-weight: 600;
-  color: #374151;
-  border-bottom: 1px solid #e5e7eb;
+  color: var(--ds-text-subtle);
+  border-bottom: 1px solid var(--ds-border);
 }
 
 .audit-viewer__changes-table td {
   padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--ds-border);
 }
 
 .audit-viewer__old-value {
-  color: #ef4444;
-  background-color: #fee2e2;
+  color: var(--ds-text-danger);
+  background-color: var(--ds-background-danger);
 }
 
 .audit-viewer__new-value {
-  color: #10b981;
-  background-color: #d1fae5;
+  color: var(--ds-text-success);
+  background-color: var(--ds-background-success);
 }
 
 .audit-viewer__modal-footer {
   display: flex;
   justify-content: flex-end;
   padding: 1.5rem;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--ds-border);
 }
 
 /* Statistics */
@@ -982,23 +982,23 @@ onMounted(() => {
 }
 
 .audit-viewer__stat-card {
-  background-color: #f9fafb;
+  background-color: var(--ds-surface-sunken);
   padding: 1.5rem;
   border-radius: 0.5rem;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--ds-border);
 }
 
 .audit-viewer__stat-card h4 {
   font-size: 0.875rem;
   font-weight: 500;
-  color: #6b7280;
+  color: var(--ds-text-subtlest);
   margin-bottom: 0.5rem;
 }
 
 .audit-viewer__stat-value {
   font-size: 2rem;
   font-weight: 700;
-  color: #1f2937;
+  color: var(--ds-text);
 }
 
 .audit-viewer__stats-table {
@@ -1008,17 +1008,17 @@ onMounted(() => {
 }
 
 .audit-viewer__stats-table th {
-  background-color: #f9fafb;
+  background-color: var(--ds-surface-sunken);
   padding: 0.75rem 1rem;
   text-align: left;
   font-weight: 600;
-  color: #374151;
-  border-bottom: 1px solid #e5e7eb;
+  color: var(--ds-text-subtle);
+  border-bottom: 1px solid var(--ds-border);
 }
 
 .audit-viewer__stats-table td {
   padding: 0.75rem 1rem;
-  border-bottom: 1px solid #e5e7eb;
-  color: #1f2937;
+  border-bottom: 1px solid var(--ds-border);
+  color: var(--ds-text);
 }
 </style>

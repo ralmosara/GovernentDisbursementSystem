@@ -454,25 +454,25 @@ function handleCancel() {
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
           <label for="taxExemptionCode" class="block text-sm font-medium text-gray-700">
-            Tax Exemption Code
+            Withholding status
           </label>
           <select
             id="taxExemptionCode"
             v-model="formData.taxExemptionCode"
             class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500"
           >
-            <option value="S">S - Single</option>
-            <option value="S1">S1 - Single with 1 Dependent</option>
-            <option value="S2">S2 - Single with 2 Dependents</option>
-            <option value="S3">S3 - Single with 3 Dependents</option>
-            <option value="S4">S4 - Single with 4 Dependents</option>
-            <option value="ME">ME - Married Employee</option>
-            <option value="ME1">ME1 - Married Employee with 1 Dependent</option>
-            <option value="ME2">ME2 - Married Employee with 2 Dependents</option>
-            <option value="ME3">ME3 - Married Employee with 3 Dependents</option>
-            <option value="ME4">ME4 - Married Employee with 4 Dependents</option>
-            <option value="Z">Z - Zero Withholding</option>
+            <option value="S">Regular — graduated withholding rates</option>
+            <option value="Z">Zero withholding — exempt (e.g. minimum wage earner)</option>
+            <option
+              v-if="formData.taxExemptionCode && !['S', 'Z'].includes(formData.taxExemptionCode)"
+              :value="formData.taxExemptionCode"
+            >
+              {{ formData.taxExemptionCode }} (pre-TRAIN code, withheld as Regular)
+            </option>
           </select>
+          <p class="mt-1 text-xs text-gray-500">
+            Under the TRAIN Law (RA 10963), civil status and dependents no longer change the tax withheld.
+          </p>
         </div>
 
         <div>
@@ -487,7 +487,7 @@ function handleCancel() {
             max="4"
             class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500"
           />
-          <p class="mt-1 text-xs text-gray-500">Maximum of 4 dependents for tax exemption</p>
+          <p class="mt-1 text-xs text-gray-500">For HR records only; does not affect withholding tax</p>
         </div>
       </div>
     </div>

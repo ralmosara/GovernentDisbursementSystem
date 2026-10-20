@@ -476,7 +476,7 @@ const loadEmployees = async () => {
   try {
     const response = await fetch('/api/users?active=true');
     const data = await response.json();
-    employees.value = data.users || [];
+    employees.value = Array.isArray(data) ? data : [];
   } catch (error) {
     console.error('Error loading employees:', error);
   }
@@ -486,7 +486,7 @@ const loadFundClusters = async () => {
   try {
     const response = await fetch('/api/fund-clusters?active=true');
     const data = await response.json();
-    fundClusters.value = data.fundClusters || [];
+    fundClusters.value = Array.isArray(data) ? data : [];
   } catch (error) {
     console.error('Error loading fund clusters:', error);
   }

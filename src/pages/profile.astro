@@ -1,0 +1,196 @@
+---
+import MainLayout from '../layouts/MainLayout.astro';
+import { db } from '../lib/db/connection';
+import { users, userRoles, roles } from '../lib/db/schema';
+import { eq } from 'drizzle-orm';
+import { getSettingsGroup } from '../lib/services/settings.service';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+const [account, roleRows, policy] = await Promise.all([
+  db.query.users.findFirst({ where: eq(users.id, user.id) }),
+  db
+    .select({ displayName: roles.displayName })
+    .from(userRoles)
+    .innerJoin(roles, eq(userRoles.roleId, roles.id))
+    .where(eq(userRoles.userId, user.id)),
+  getSettingsGroup('security'),
+]);
+
+if (!account) {
+  return Astro.redirect('/logout');
+}
+
+const policyRules = [
+  `At least ${policy.password_min_length} characters`,
+  policy.password_require_uppercase && 'An uppercase letter',
+  policy.password_require_lowercase && 'A lowercase letter',
+  policy.password_require_number && 'A number',
+  policy.password_require_special && 'A special character',
+].filter(Boolean) as string[];
+
+const formatDateTime = (date: Date | string | null) =>
+  date
+    ? new Date(date).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })
+    : 'Never';
+
+const fullName = [account.firstName, account.middleName, account.lastName].filter(Boolean).join(' ');
+---
+
+<MainLayout title="My Profile">
+  <div class="page-header">
+    <h1 class="page-title">My Profile</h1>
+    <p class="page-description">Your account details and sign-in security</p>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <!-- Account details -->
+    <div class="card lg:col-span-2">
+      <div class="card-header">
+        <h2 class="text-lg font-semibold text-gray-900">Account Details</h2>
+      </div>
+      <div class="card-body">
+        <dl class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+          <div>
+            <dt class="text-sm font-medium text-gray-600">Full Name</dt>
+            <dd class="mt-1 text-gray-900">{fullName}</dd>
+          </div>
+          <div>
+            <dt class="text-sm font-medium text-gray-600">Employee No.</dt>
+            <dd class="mt-1 font-mono text-gray-900">{account.employeeNo}</dd>
+          </div>
+          <div>
+            <dt class="text-sm font-medium text-gray-600">Username</dt>
+            <dd class="mt-1 text-gray-900">@{account.username}</dd>
+          </div>
+          <div>
+            <dt class="text-sm font-medium text-gray-600">Email</dt>
+            <dd class="mt-1 text-gray-900 break-all">{account.email}</dd>
+          </div>
+          <div>
+            <dt class="text-sm font-medium text-gray-600">Position</dt>
+            <dd class="mt-1 text-gray-900">{account.position || '—'}</dd>
+          </div>
+          <div>
+            <dt class="text-sm font-medium text-gray-600">Division / Office</dt>
+            <dd class="mt-1 text-gray-900">{account.divisionOffice || '—'}</dd>
+          </div>
+          <div>
+            <dt class="text-sm font-medium text-gray-600">Roles</dt>
+            <dd class="mt-1 flex flex-wrap gap-2">
+              {roleRows.length > 0
+                ? roleRows.map(r => <span class="badge badge-info">{r.displayName}</span>)
+                : <span class="text-gray-500">No roles assigned</span>}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-sm font-medium text-gray-600">Last Sign-in</dt>
+            <dd class="mt-1 text-gray-900">{formatDateTime(account.lastLoginAt)}</dd>
+          </div>
+        </dl>
+        <p class="mt-6 text-sm text-gray-500">
+          To correct your name, position or office, ask a system administrator.
+        </p>
+      </div>
+    </div>
+
+    <!-- Change password -->
+    <div class="card">
+      <div class="card-header">
+        <h2 class="text-lg font-semibold text-gray-900">Change Password</h2>
+      </div>
+      <div class="card-body">
+        <div id="password-status" role="status" aria-live="polite" class="hidden mb-4 p-3 rounded-md text-sm"></div>
+
+        <form id="password-form" novalidate>
+          <div class="form-group">
+            <label for="currentPassword" class="form-label form-label-required">Current Password</label>
+            <input type="password" id="currentPassword" name="currentPassword" class="form-input"
+                   autocomplete="current-password" required aria-describedby="currentPassword-error" />
+            <p id="currentPassword-error" class="form-error" data-error-for="currentPassword"></p>
+          </div>
+
+          <div class="form-group">
+            <label for="newPassword" class="form-label form-label-required">New Password</label>
+            <input type="password" id="newPassword" name="newPassword" class="form-input"
+                   autocomplete="new-password" required aria-describedby="newPassword-error password-rules" />
+            <p id="newPassword-error" class="form-error" data-error-for="newPassword"></p>
+          </div>
+
+          <div class="form-group">
+            <label for="confirmPassword" class="form-label form-label-required">Confirm New Password</label>
+            <input type="password" id="confirmPassword" name="confirmPassword" class="form-input"
+                   autocomplete="new-password" required aria-describedby="confirmPassword-error" />
+            <p id="confirmPassword-error" class="form-error" data-error-for="confirmPassword"></p>
+          </div>
+
+          <div id="password-rules" class="mb-4 text-sm text-gray-600">
+            <p class="font-medium mb-1">Your new password needs:</p>
+            <ul class="list-disc list-inside space-y-0.5">
+              {policyRules.map(rule => <li>{rule}</li>)}
+            </ul>
+          </div>
+
+          <button type="submit" class="btn btn-primary btn-md w-full" id="password-submit">
+            <i class="pi pi-lock mr-2" aria-hidden="true"></i>
+            Change Password
+          </button>
+          <p class="mt-3 text-xs text-gray-500">Changing your password signs you out on all other devices.</p>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const form = document.getElementById('password-form') as HTMLFormElement;
+    const submit = document.getElementById('password-submit') as HTMLButtonElement;
+    const status = document.getElementById('password-status') as HTMLElement;
+
+    function showStatus(message: string, ok: boolean) {
+      status.textContent = message;
+      status.className = `mb-4 p-3 rounded-md text-sm ${ok ? 'bg-green-50 text-green-800 border border-green-200' : 'bg-red-50 text-red-800 border border-red-200'}`;
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      form.querySelectorAll<HTMLElement>('[data-error-for]').forEach(el => (el.textContent = ''));
+      form.querySelectorAll('input').forEach(input => input.removeAttribute('aria-invalid'));
+
+      const data = Object.fromEntries(new FormData(form));
+      submit.disabled = true;
+
+      try {
+        const response = await fetch('/api/profile/password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data),
+        });
+        const result = await response.json();
+
+        if (response.ok) {
+          form.reset();
+          showStatus(result.message, true);
+        } else {
+          let firstInvalid: HTMLInputElement | null = null;
+          for (const [field, message] of Object.entries<string>(result.errors || {})) {
+            const target = form.querySelector<HTMLElement>(`[data-error-for="${field}"]`);
+            if (target) target.textContent = message;
+            const input = form.querySelector<HTMLInputElement>(`#${field}`);
+            input?.setAttribute('aria-invalid', 'true');
+            firstInvalid ??= input;
+          }
+          showStatus(result.error || 'Could not change password.', false);
+          firstInvalid?.focus();
+        }
+      } catch {
+        showStatus('Could not reach the server. Check your connection and try again.', false);
+      } finally {
+        submit.disabled = false;
+      }
+    });
+  </script>
+</MainLayout>

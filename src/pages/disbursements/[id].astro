@@ -1,8 +1,16 @@
 ---
 import MainLayout from '../../layouts/MainLayout.astro';
+import PageHeader from '../../components/ui/PageHeader.astro';
+import ProgressTracker from '../../components/ui/ProgressTracker.astro';
+import type { Step } from '../../components/ui/types';
+import Lozenge from '../../components/ui/Lozenge.astro';
+import Banner from '../../components/ui/Banner.astro';
+import Modal from '../../components/ui/Modal.astro';
 import { disbursementService } from '../../lib/services/disbursement.service';
 import { approvalService } from '../../lib/services/approval.service';
 import { paymentService } from '../../lib/services/payment.service';
+import { workQueueService, STAGE_LABELS } from '../../lib/services/work-queue.service';
+import { insightsService } from '../../lib/services/insights.service';
 
 const user = Astro.locals.user;
 
@@ -16,520 +24,498 @@ if (!id || isNaN(parseInt(id))) {
   return Astro.redirect('/disbursements');
 }
 
-// Get DV details
-const dv = await disbursementService.getDVById(parseInt(id));
+const dvId = parseInt(id);
+const dv = await disbursementService.getDVById(dvId);
 
 if (!dv) {
   return Astro.redirect('/disbursements');
 }
 
-// Get approval workflow history
-const approvalHistory = await approvalService.getApprovalHistory(parseInt(id));
+const [approvalHistory, currentStage, obligation, myQueue] = await Promise.all([
+  approvalService.getApprovalHistory(dvId),
+  approvalService.getCurrentStage(dvId),
+  insightsService.getObligationByReference(dv.orsBursNo).catch(() => null),
+  workQueueService.getDvApprovals({ id: user.id, roles: user.roles ?? [] }),
+]);
 
-// Get payment information if DV is approved or paid
 let payment = null;
 if (dv.status === 'approved' || dv.status === 'paid') {
-  const payments = await paymentService.getPaymentsByDVId(parseInt(id));
+  const payments = await paymentService.getPaymentsByDVId(dvId);
   payment = payments[0] || null;
 }
 
-// Get current pending stage
-const currentStage = await approvalService.getCurrentStage(parseInt(id));
+// Can this user act on the current stage right now?
+const isOpen = ['draft', 'pending_budget', 'pending_accounting', 'pending_director'].includes(dv.status);
+const canAct = isOpen && myQueue.approvals.some(item => item.dvId === dvId);
+const blocked = isOpen ? myQueue.blocked.find(item => item.dvId === dvId) : undefined;
 
-// Format date
+// Result of an approve/reject action, carried over the reload in the query string
+const outcome = Astro.url.searchParams.get('outcome');
+const nextId = parseInt(Astro.url.searchParams.get('next') ?? '') || null;
+const nextNo = Astro.url.searchParams.get('nextNo') ?? '';
+const remaining = parseInt(Astro.url.searchParams.get('remaining') ?? '0') || 0;
+
+// ---------- Formatting ----------
 const formatDate = (date: Date | string | null) => {
-  if (!date) return 'N/A';
-  const d = typeof date === 'string' ? new Date(date) : date;
-  return d.toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' });
+  if (!date) return '—';
+  return new Date(date).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' });
 };
 
+const formatShortDate = (date: Date | string | null) =>
+  date ? new Date(date).toLocaleDateString('en-PH', { month: 'short', day: 'numeric' }) : '';
+
 const formatDateTime = (date: Date | string | null) => {
-  if (!date) return 'N/A';
-  const d = typeof date === 'string' ? new Date(date) : date;
-  return d.toLocaleString('en-PH', {
+  if (!date) return '—';
+  return new Date(date).toLocaleString('en-PH', {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
-    minute: '2-digit'
+    minute: '2-digit',
   });
 };
 
-// Status badge helper
-const getStatusBadge = (status: string) => {
-  switch (status) {
-    case 'draft':
-      return 'badge-secondary';
-    case 'pending_budget':
-    case 'pending_accounting':
-    case 'pending_director':
-      return 'badge-warning';
-    case 'approved':
-      return 'badge-success';
-    case 'paid':
-      return 'badge-primary';
-    case 'rejected':
-      return 'badge-danger';
-    case 'cancelled':
-      return 'badge-dark';
-    default:
-      return 'badge-secondary';
-  }
-};
+const peso = (value: number | string) =>
+  `₱${parseFloat(String(value)).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-const getStatusLabel = (status: string) => {
-  const labels: Record<string, string> = {
-    draft: 'Draft',
-    pending_budget: 'Pending Budget',
-    pending_accounting: 'Pending Accounting',
-    pending_director: 'Pending Director',
-    approved: 'Approved',
-    paid: 'Paid',
-    rejected: 'Rejected',
-    cancelled: 'Cancelled',
-  };
-  return labels[status] || status;
-};
+const approverName = (w: { approverFirstName?: string | null; approverLastName?: string | null }) =>
+  [w.approverFirstName, w.approverLastName].filter(Boolean).join(' ');
 
-const getWorkflowStatusBadge = (status: string) => {
-  switch (status) {
-    case 'pending':
-      return 'badge-warning';
-    case 'approved':
-      return 'badge-success';
-    case 'rejected':
-      return 'badge-danger';
-    case 'skipped':
-      return 'badge-secondary';
-    default:
-      return 'badge-secondary';
-  }
+// ---------- Journey: obligation → four approvals → payment ----------
+const rejected = dv.status === 'rejected' || dv.status === 'cancelled';
+const steps: Step[] = [
+  {
+    label: 'Obligation',
+    state: obligation?.status === 'approved' ? 'done' : obligation ? 'current' : 'done',
+    meta: obligation ? `${dv.orsBursNo}` : `${dv.orsBursNo} (not in registry)`,
+    href: obligation ? `/budget/obligations/${obligation.id}` : undefined,
+  },
+  ...approvalHistory.map(w => {
+    const state: Step['state'] =
+      w.status === 'approved' ? 'done'
+        : w.status === 'rejected' ? 'failed'
+          : w.status === 'skipped' ? 'skipped'
+            : !rejected && currentStage?.id === w.id ? 'current'
+              : 'todo';
+    const meta =
+      w.status === 'approved' || w.status === 'rejected'
+        ? `${approverName(w) || 'Approver'} · ${formatShortDate(w.actionDate)}`
+        : state === 'current' ? 'Waiting' : undefined;
+    return { label: STAGE_LABELS[w.stage] ?? w.stage, state, meta };
+  }),
+  {
+    label: 'Payment',
+    state: dv.status === 'paid' ? 'done' : dv.status === 'approved' ? 'current' : rejected ? 'skipped' : 'todo',
+    meta: payment?.checkNo ? `Check ${payment.checkNo}` : dv.status === 'approved' ? 'Ready to pay' : undefined,
+  },
+];
+
+const PAYMENT_MODES: Record<string, string> = {
+  mds_check: 'MDS check',
+  commercial_check: 'Commercial check',
+  ada: 'ADA',
+  other: 'Other',
 };
 ---
 
-<MainLayout title={`DV ${dv.dvNo}`}>
-  <div class="container-fluid py-6">
-    <!-- Page Header -->
-    <div class="page-header">
-      <div class="flex items-center gap-4 mb-2">
-        <a href="/disbursements" class="text-gray-600 hover:text-gray-900">
-          <i class="pi pi-arrow-left"></i>
+<MainLayout title={`${dv.dvNo} - Philippine Government FMS`}>
+  <PageHeader
+    title={dv.dvNo}
+    breadcrumbs={[{ label: 'Disbursement vouchers', href: '/disbursements' }, { label: dv.dvNo }]}
+  >
+    <p slot="meta" class="mt-1 flex flex-wrap items-center gap-2 text-sm text-gray-600">
+      <Lozenge status={dv.status} />
+      <span>{dv.payeeName}</span>
+      <span aria-hidden="true">·</span>
+      <span class="font-medium text-gray-800 tabular-nums">{peso(dv.amount)}</span>
+    </p>
+    <Fragment slot="actions">
+      {(dv.status === 'approved' || dv.status === 'paid') && (
+        <>
+          <a href={`/disbursements/${id}/print`} target="_blank" class="btn btn-secondary">
+            <i class="pi pi-print" aria-hidden="true"></i>
+            Print
+          </a>
+          <a href={`/api/disbursements/${id}/excel`} class="btn btn-secondary">
+            <i class="pi pi-file-excel" aria-hidden="true"></i>
+            Excel
+          </a>
+        </>
+      )}
+      {dv.status === 'approved' && !payment && (
+        <a href={`/payments/create?dvId=${dv.id}`} class="btn btn-primary">
+          <i class="pi pi-credit-card" aria-hidden="true"></i>
+          Create payment
         </a>
-        <h1 class="page-title">Disbursement Voucher: {dv.dvNo}</h1>
-      </div>
-      <div class="flex items-center justify-between">
-        <p class="page-description">View and manage disbursement voucher details</p>
-        <div class="flex items-center gap-3">
-          <span class={`badge ${getStatusBadge(dv.status)}`}>
-            {getStatusLabel(dv.status)}
-          </span>
-          {dv.status === 'approved' && (
-            <>
-              <a href={`/disbursements/${id}/print`} target="_blank" class="btn btn-secondary btn-sm">
-                <i class="pi pi-print mr-2"></i>
-                Print DV
-              </a>
-              <a href={`/api/disbursements/${id}/excel`} class="btn btn-success btn-sm">
-                <i class="pi pi-file-excel mr-2"></i>
-                Download Excel
-              </a>
-            </>
+      )}
+    </Fragment>
+  </PageHeader>
+
+  {outcome && (
+    <Banner
+      appearance={outcome === 'approved' ? 'success' : 'info'}
+      title={outcome === 'approved' ? 'Voucher approved' : 'Voucher rejected'}
+      class="mb-6"
+      role="status"
+    >
+      {outcome === 'approved'
+        ? dv.status === 'approved'
+          ? 'All four approvals are complete. It is ready for payment.'
+          : `It has moved to ${STAGE_LABELS[currentStage?.stage ?? ''] ?? 'the next'} approval.`
+        : 'The preparer can see your reason in the approval history.'}
+      <Fragment slot="actions">
+        {nextId ? (
+          <a href={`/disbursements/${nextId}`} class="text-primary-600 hover:underline">
+            Next in your queue: {nextNo} ({remaining} left) →
+          </a>
+        ) : (
+          <a href="/approvals" class="text-primary-600 hover:underline">Your queue is clear. Back to approvals</a>
+        )}
+      </Fragment>
+    </Banner>
+  )}
+
+  <!-- Where this voucher is -->
+  <section class="card p-5 mb-6" aria-label="Voucher progress">
+    <ProgressTracker steps={steps} label="Voucher progress" />
+  </section>
+
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <!-- Main content -->
+    <div class="lg:col-span-2 space-y-6 min-w-0">
+      <section class="card">
+        <div class="card-header"><h2 class="card-title">Payee</h2></div>
+        <dl class="card-body grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+          <div class="md:col-span-2">
+            <dt class="form-label">Payee name</dt>
+            <dd class="text-base font-semibold text-gray-800">{dv.payeeName}</dd>
+          </div>
+          <div>
+            <dt class="form-label">TIN</dt>
+            <dd>{dv.payeeTin || '—'}</dd>
+          </div>
+          <div>
+            <dt class="form-label">Address</dt>
+            <dd>{dv.payeeAddress || '—'}</dd>
+          </div>
+        </dl>
+      </section>
+
+      <section class="card">
+        <div class="card-header"><h2 class="card-title">Transaction</h2></div>
+        <dl class="card-body grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+          <div class="md:col-span-2">
+            <dt class="form-label">Particulars</dt>
+            <dd class="whitespace-pre-wrap">{dv.particulars}</dd>
+          </div>
+          <div>
+            <dt class="form-label">Amount</dt>
+            <dd class="text-xl font-semibold text-gray-800 tabular-nums">{peso(dv.amount)}</dd>
+          </div>
+          <div>
+            <dt class="form-label">Object of expenditure</dt>
+            <dd>{dv.objectOfExpenditure ? `${dv.objectOfExpenditure.code} – ${dv.objectOfExpenditure.name}` : '—'}</dd>
+          </div>
+          <div>
+            <dt class="form-label">ORS/BURS no.</dt>
+            <dd>
+              {obligation ? (
+                <a href={`/budget/obligations/${obligation.id}`} class="text-primary-600 hover:underline">{dv.orsBursNo}</a>
+              ) : dv.orsBursNo}
+            </dd>
+          </div>
+          <div>
+            <dt class="form-label">Fund cluster</dt>
+            <dd>{dv.fundCluster ? `${dv.fundCluster.code} – ${dv.fundCluster.name}` : '—'}</dd>
+          </div>
+          <div>
+            <dt class="form-label">Payment mode</dt>
+            <dd>{PAYMENT_MODES[dv.paymentMode] ?? dv.paymentMode}</dd>
+          </div>
+          <div>
+            <dt class="form-label">DV date · fiscal year</dt>
+            <dd>{formatDate(dv.dvDate)} · FY {dv.fiscalYear}</dd>
+          </div>
+          {dv.responsibilityCenter && (
+            <div>
+              <dt class="form-label">Responsibility center</dt>
+              <dd>{dv.responsibilityCenter}</dd>
+            </div>
           )}
-        </div>
-      </div>
-    </div>
+          {dv.mfoPap && (
+            <div>
+              <dt class="form-label">MFO/PAP</dt>
+              <dd>{dv.mfoPap.code} – {dv.mfoPap.description}</dd>
+            </div>
+          )}
+        </dl>
+      </section>
 
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <!-- Main Content -->
-      <div class="lg:col-span-2 space-y-6">
-        <!-- Basic Information -->
-        <div class="card">
+      {obligation && (
+        <section class="card">
           <div class="card-header">
-            <h3 class="text-lg font-semibold text-gray-900">Basic Information</h3>
+            <h2 class="card-title">Obligation balance</h2>
+            <Lozenge status={obligation.status} />
           </div>
           <div class="card-body">
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <dl class="grid grid-cols-3 gap-4">
               <div>
-                <label class="block text-sm font-medium text-gray-500 mb-1">DV Number</label>
-                <p class="text-lg font-bold text-primary-600">{dv.dvNo}</p>
+                <dt class="form-label">Obligated</dt>
+                <dd class="font-semibold tabular-nums">{peso(obligation.amount)}</dd>
               </div>
-
               <div>
-                <label class="block text-sm font-medium text-gray-500 mb-1">DV Date</label>
-                <p class="text-base text-gray-900">{formatDate(dv.dvDate)}</p>
+                <dt class="form-label">On vouchers ({obligation.voucherCount})</dt>
+                <dd class="font-semibold tabular-nums">{peso(obligation.committed)}</dd>
               </div>
-
               <div>
-                <label class="block text-sm font-medium text-gray-500 mb-1">Fiscal Year</label>
-                <p class="text-base text-gray-900">{dv.fiscalYear}</p>
+                <dt class="form-label">Remaining</dt>
+                <dd class={`font-semibold tabular-nums ${obligation.remaining < 0 ? 'text-red-700' : ''}`}>{peso(obligation.remaining)}</dd>
               </div>
+            </dl>
+            {obligation.remaining < 0 && (
+              <Banner appearance="warning" class="mt-4">
+                Vouchers against this ORS/BURS exceed the obligation by {peso(Math.abs(obligation.remaining))}.
+              </Banner>
+            )}
+          </div>
+        </section>
+      )}
 
-              <div>
-                <label class="block text-sm font-medium text-gray-500 mb-1">ORS/BURS Number</label>
-                <p class="text-base text-gray-900">{dv.orsBursNo}</p>
+      <!-- Approval history -->
+      <section class="card">
+        <div class="card-header"><h2 class="card-title">Approval history</h2></div>
+        <ol class="card-body space-y-4">
+          {approvalHistory.map(w => (
+            <li class="flex items-start gap-3">
+              <span class={`mt-0.5 flex items-center justify-center w-7 h-7 rounded-full shrink-0 ${
+                w.status === 'approved' ? 'badge-success'
+                  : w.status === 'rejected' ? 'badge-danger'
+                    : 'badge-secondary'
+              }`} aria-hidden="true">
+                <i class={`pi ${w.status === 'approved' ? 'pi-check' : w.status === 'rejected' ? 'pi-times' : w.status === 'skipped' ? 'pi-minus' : 'pi-clock'} text-xs`}></i>
+              </span>
+              <div class="min-w-0 flex-1">
+                <div class="flex flex-wrap items-center gap-2">
+                  <p class="font-medium text-gray-800">{STAGE_LABELS[w.stage] ?? w.stage} approval</p>
+                  <Lozenge status={w.status === 'pending' && currentStage?.id === w.id && !rejected ? 'in_progress' : w.status} label={w.status === 'pending' && currentStage?.id === w.id && !rejected ? 'Current' : undefined} />
+                </div>
+                {(w.status === 'approved' || w.status === 'rejected') && (
+                  <p class="text-sm text-gray-600">
+                    {approverName(w) || 'Approver'}{w.approverPosition ? `, ${w.approverPosition}` : ''} · {formatDateTime(w.actionDate)}
+                  </p>
+                )}
+                {w.comments && (
+                  <p class="mt-2 p-3 rounded bg-gray-50 text-sm text-gray-700 whitespace-pre-wrap">{w.comments}</p>
+                )}
               </div>
+            </li>
+          ))}
+        </ol>
+      </section>
 
-              <div>
-                <label class="block text-sm font-medium text-gray-500 mb-1">Fund Cluster</label>
-                <p class="text-base text-gray-900">
-                  {dv.fundCluster ? `${dv.fundCluster.code} - ${dv.fundCluster.name}` : 'N/A'}
+      <!-- Payment -->
+      {(dv.status === 'approved' || dv.status === 'paid') && (
+        <section class="card">
+          <div class="card-header"><h2 class="card-title">Payment</h2></div>
+          <div class="card-body">
+            {!payment ? (
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <p class="text-gray-700">This voucher is approved and ready for payment.</p>
+                <a href={`/payments/create?dvId=${dv.id}`} class="btn btn-primary">Create payment</a>
+              </div>
+            ) : (
+              <dl class="grid grid-cols-2 md:grid-cols-3 gap-4">
+                <div>
+                  <dt class="form-label">Type</dt>
+                  <dd class="capitalize">{payment.paymentType.replace(/_/g, ' ')}</dd>
+                </div>
+                <div>
+                  <dt class="form-label">Status</dt>
+                  <dd><Lozenge status={payment.status} /></dd>
+                </div>
+                {payment.checkNo && (
+                  <div>
+                    <dt class="form-label">Check no.</dt>
+                    <dd class="font-semibold">{payment.checkNo}</dd>
+                  </div>
+                )}
+                {payment.receivedBy && (
+                  <div>
+                    <dt class="form-label">Received by</dt>
+                    <dd>{payment.receivedBy} · {formatDate(payment.receivedDate)}</dd>
+                  </div>
+                )}
+                {payment.orNo && (
+                  <div>
+                    <dt class="form-label">Official receipt</dt>
+                    <dd>{payment.orNo}</dd>
+                  </div>
+                )}
+                {payment.clearedDate && (
+                  <div>
+                    <dt class="form-label">Cleared</dt>
+                    <dd>{formatDate(payment.clearedDate)}</dd>
+                  </div>
+                )}
+              </dl>
+            )}
+          </div>
+        </section>
+      )}
+    </div>
+
+    <!-- Side column -->
+    <aside class="space-y-6 min-w-0">
+      {isOpen && currentStage && (
+        <section class="card" aria-labelledby="decision-heading">
+          <div class="card-header">
+            <h2 id="decision-heading" class="card-title">Your decision</h2>
+            <span class="badge">{STAGE_LABELS[currentStage.stage]}</span>
+          </div>
+          <div class="card-body">
+            {canAct ? (
+              <>
+                <p class="text-sm text-gray-700 mb-4">
+                  This voucher is at <strong>{STAGE_LABELS[currentStage.stage].toLowerCase()}</strong> approval and waiting for you.
                 </p>
-              </div>
-
-              <div>
-                <label class="block text-sm font-medium text-gray-500 mb-1">Payment Mode</label>
-                <p class="text-base text-gray-900 uppercase">{dv.paymentMode.replace('_', ' ')}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Payee Information -->
-        <div class="card">
-          <div class="card-header">
-            <h3 class="text-lg font-semibold text-gray-900">Payee Information</h3>
-          </div>
-          <div class="card-body">
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div class="md:col-span-2">
-                <label class="block text-sm font-medium text-gray-500 mb-1">Payee Name</label>
-                <p class="text-lg font-semibold text-gray-900">{dv.payeeName}</p>
-              </div>
-
-              <div>
-                <label class="block text-sm font-medium text-gray-500 mb-1">TIN</label>
-                <p class="text-base text-gray-900">{dv.payeeTin || 'N/A'}</p>
-              </div>
-
-              <div>
-                <label class="block text-sm font-medium text-gray-500 mb-1">Address</label>
-                <p class="text-base text-gray-900">{dv.payeeAddress || 'N/A'}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Transaction Details -->
-        <div class="card">
-          <div class="card-header">
-            <h3 class="text-lg font-semibold text-gray-900">Transaction Details</h3>
-          </div>
-          <div class="card-body">
-            <div class="space-y-6">
-              <div>
-                <label class="block text-sm font-medium text-gray-500 mb-1">Particulars</label>
-                <p class="text-base text-gray-900 whitespace-pre-wrap">{dv.particulars}</p>
-              </div>
-
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label class="block text-sm font-medium text-gray-500 mb-1">Object of Expenditure</label>
-                  <p class="text-base text-gray-900">
-                    {dv.objectOfExpenditure ? `${dv.objectOfExpenditure.code} - ${dv.objectOfExpenditure.name}` : 'N/A'}
-                  </p>
+                <div class="flex flex-col gap-2">
+                  <button type="button" class="btn btn-primary w-full" data-open="approve-dialog">
+                    <i class="pi pi-check" aria-hidden="true"></i>
+                    Approve
+                  </button>
+                  <button type="button" class="btn btn-secondary w-full" data-open="reject-dialog">
+                    Reject
+                  </button>
                 </div>
-
-                <div>
-                  <label class="block text-sm font-medium text-gray-500 mb-1">Amount</label>
-                  <p class="text-2xl font-bold text-primary-600">
-                    ₱{parseFloat(dv.amount.toString()).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
-                  </p>
-                </div>
-
-                {dv.responsibilityCenter && (
-                  <div>
-                    <label class="block text-sm font-medium text-gray-500 mb-1">Responsibility Center</label>
-                    <p class="text-base text-gray-900">{dv.responsibilityCenter}</p>
-                  </div>
-                )}
-
-                {dv.mfoPap && (
-                  <div>
-                    <label class="block text-sm font-medium text-gray-500 mb-1">MFO/PAP</label>
-                    <p class="text-base text-gray-900">
-                      {dv.mfoPap.code} - {dv.mfoPap.description}
-                    </p>
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Approval Workflow History -->
-        <div class="card">
-          <div class="card-header">
-            <h3 class="text-lg font-semibold text-gray-900">Approval Workflow</h3>
-          </div>
-          <div class="card-body">
-            <div class="space-y-4">
-              {approvalHistory.map((workflow, index) => (
-                <div class="flex items-start gap-4">
-                  <div class="flex-shrink-0">
-                    <div class={`w-10 h-10 rounded-full flex items-center justify-center ${
-                      workflow.status === 'approved' ? 'bg-green-100 text-green-600' :
-                      workflow.status === 'rejected' ? 'bg-red-100 text-red-600' :
-                      workflow.status === 'pending' ? 'bg-yellow-100 text-yellow-600' :
-                      'bg-gray-100 text-gray-400'
-                    }`}>
-                      {workflow.status === 'approved' && <i class="pi pi-check"></i>}
-                      {workflow.status === 'rejected' && <i class="pi pi-times"></i>}
-                      {workflow.status === 'pending' && <i class="pi pi-clock"></i>}
-                      {workflow.status === 'skipped' && <i class="pi pi-minus"></i>}
-                    </div>
-                  </div>
-
-                  <div class="flex-1 min-w-0">
-                    <div class="flex items-center justify-between mb-1">
-                      <p class="text-sm font-semibold text-gray-900 capitalize">
-                        {workflow.stage} Approval
-                      </p>
-                      <span class={`badge ${getWorkflowStatusBadge(workflow.status)}`}>
-                        {workflow.status.toUpperCase()}
-                      </span>
-                    </div>
-
-                    {workflow.approverUserId && (
-                      <p class="text-sm text-gray-500">
-                        {workflow.status === 'approved' ? 'Approved' : 'Rejected'} on {formatDateTime(workflow.actionDate)}
-                      </p>
-                    )}
-
-                    {workflow.comments && (
-                      <p class="text-sm text-gray-700 mt-2 p-3 bg-gray-50 rounded-md">
-                        <i class="pi pi-comment mr-2"></i>
-                        {workflow.comments}
-                      </p>
-                    )}
-                  </div>
-
-                  {index < approvalHistory.length - 1 && (
-                    <div class="absolute left-5 top-14 w-0.5 h-full bg-gray-200"></div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
-        <!-- Payment Information -->
-        {(dv.status === 'approved' || dv.status === 'paid') && (
-          <div class="card">
-            <div class="card-header">
-              <h3 class="text-lg font-semibold text-gray-900">Payment Processing</h3>
-            </div>
-            <div class="card-body">
-              {!payment ? (
-                <div class="text-center py-8">
-                  <i class="pi pi-wallet text-4xl text-gray-300 mb-3"></i>
-                  <p class="text-gray-600 mb-4">This DV is approved and ready for payment</p>
-                  <a href={`/payments/create?dvId=${dv.id}`} class="btn btn-primary">
-                    <i class="pi pi-plus mr-2"></i>
-                    Create Payment
-                  </a>
-                </div>
-              ) : (
-                <div class="space-y-4">
-                  <div class="grid grid-cols-2 gap-4">
-                    <div>
-                      <p class="text-xs text-gray-500">Payment Type</p>
-                      <p class="font-semibold capitalize">{payment.paymentType.replace('_', ' ')}</p>
-                    </div>
-                    <div>
-                      <p class="text-xs text-gray-500">Status</p>
-                      <span class={`badge ${
-                        payment.status === 'pending' ? 'badge-warning' :
-                        payment.status === 'issued' ? 'badge-info' :
-                        payment.status === 'cleared' ? 'badge-success' :
-                        'badge-secondary'
-                      }`}>
-                        {payment.status.toUpperCase()}
-                      </span>
-                    </div>
-                  </div>
-
-                  {payment.checkNo && (
-                    <div>
-                      <p class="text-xs text-gray-500">Check Number</p>
-                      <p class="text-lg font-bold text-primary-600">{payment.checkNo}</p>
-                    </div>
-                  )}
-
-                  {payment.receivedBy && (
-                    <div>
-                      <p class="text-xs text-gray-500">Received By</p>
-                      <p class="font-semibold">{payment.receivedBy}</p>
-                      <p class="text-xs text-gray-500 mt-1">
-                        on {formatDate(payment.receivedDate)}
-                      </p>
-                    </div>
-                  )}
-
-                  {payment.orNo && (
-                    <div>
-                      <p class="text-xs text-gray-500">Official Receipt</p>
-                      <p class="font-semibold">{payment.orNo}</p>
-                    </div>
-                  )}
-
-                  {payment.clearedDate && (
-                    <div>
-                      <p class="text-xs text-gray-500">Cleared Date</p>
-                      <p class="font-semibold">{formatDate(payment.clearedDate)}</p>
-                    </div>
-                  )}
-
-                  <div class="pt-4">
-                    <a href={`/payments`} class="btn btn-ghost btn-sm w-full">
-                      <i class="pi pi-external-link mr-2"></i>
-                      View in Payment Queue
-                    </a>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
-
-      <!-- Sidebar -->
-      <div class="space-y-6">
-        <!-- Approval Actions -->
-        {currentStage && currentStage.status === 'pending' && (
-          <div class="card">
-            <div class="card-header">
-              <h3 class="text-lg font-semibold text-gray-900">Approval Actions</h3>
-            </div>
-            <div class="card-body">
-              <p class="text-sm text-gray-600 mb-4">
-                Current Stage: <span class="font-semibold capitalize">{currentStage.stage}</span>
+              </>
+            ) : blocked ? (
+              <p class="text-sm text-gray-700">
+                <strong>{blocked.blockedReason}</strong>, so segregation of duties requires another officer to approve this stage.
               </p>
+            ) : (
+              <p class="text-sm text-gray-700">
+                Waiting for a {STAGE_LABELS[currentStage.stage].toLowerCase()} approver. You'll be able to act here if it reaches a stage you approve.
+              </p>
+            )}
+          </div>
+        </section>
+      )}
 
-              <div class="space-y-3">
-                <button
-                  type="button"
-                  class="btn btn-success btn-md w-full"
-                  id="approve-btn"
-                >
-                  <i class="pi pi-check mr-2"></i>
-                  Approve
-                </button>
-
-                <button
-                  type="button"
-                  class="btn btn-danger btn-md w-full"
-                  id="reject-btn"
-                >
-                  <i class="pi pi-times mr-2"></i>
-                  Reject
-                </button>
-              </div>
+      <section class="card">
+        <div class="card-header"><h2 class="card-title">Details</h2></div>
+        <dl class="card-body space-y-3 text-sm">
+          <div class="flex justify-between gap-4">
+            <dt class="text-gray-600">Created</dt>
+            <dd class="text-right">{formatDateTime(dv.createdAt)}</dd>
+          </div>
+          {dv.updatedAt && (
+            <div class="flex justify-between gap-4">
+              <dt class="text-gray-600">Updated</dt>
+              <dd class="text-right">{formatDateTime(dv.updatedAt)}</dd>
             </div>
-          </div>
-        )}
-
-        <!-- DV Metadata -->
-        <div class="card">
-          <div class="card-header">
-            <h3 class="text-lg font-semibold text-gray-900">Record Information</h3>
-          </div>
-          <div class="card-body">
-            <div class="space-y-3">
-              <div>
-                <label class="block text-sm font-medium text-gray-500 mb-1">Created At</label>
-                <p class="text-sm text-gray-900">{formatDateTime(dv.createdAt)}</p>
-              </div>
-
-              {dv.updatedAt && (
-                <div>
-                  <label class="block text-sm font-medium text-gray-500 mb-1">Updated At</label>
-                  <p class="text-sm text-gray-900">{formatDateTime(dv.updatedAt)}</p>
-                </div>
-              )}
-
-              {dv.jevNo && (
-                <div>
-                  <label class="block text-sm font-medium text-gray-500 mb-1">JEV Number</label>
-                  <p class="text-sm text-gray-900">{dv.jevNo}</p>
-                </div>
-              )}
+          )}
+          {dv.jevNo && (
+            <div class="flex justify-between gap-4">
+              <dt class="text-gray-600">JEV no.</dt>
+              <dd class="text-right">{dv.jevNo}</dd>
             </div>
-          </div>
-        </div>
-      </div>
-    </div>
+          )}
+        </dl>
+      </section>
+    </aside>
   </div>
 
-  <script define:vars={{ dvId: parseInt(id) }}>
-    const approveBtn = document.getElementById('approve-btn');
-    const rejectBtn = document.getElementById('reject-btn');
+  {canAct && (
+    <>
+      <Modal id="approve-dialog" title={`Approve ${dv.dvNo}?`}>
+        <form id="approve-form" class="space-y-3" method="dialog">
+          <p class="text-sm text-gray-700">
+            {peso(dv.amount)} to {dv.payeeName}. It will move to
+            {currentStage?.stage === 'director' ? ' payment.' : ' the next approval stage.'}
+          </p>
+          <div>
+            <label for="approve-comments" class="form-label">Comments (optional)</label>
+            <textarea id="approve-comments" name="comments" rows="3" class="form-textarea"></textarea>
+          </div>
+          <p id="approve-error" class="form-error hidden" role="alert"></p>
+        </form>
+        <Fragment slot="footer">
+          <button type="button" class="btn btn-subtle" data-modal-close>Cancel</button>
+          <button type="submit" form="approve-form" class="btn btn-primary" id="approve-submit">Approve</button>
+        </Fragment>
+      </Modal>
 
-    // Approve DV
-    approveBtn?.addEventListener('click', async () => {
-      const comments = prompt('Optional comments for this approval:');
+      <Modal id="reject-dialog" title={`Reject ${dv.dvNo}?`} appearance="danger">
+        <form id="reject-form" class="space-y-3" method="dialog">
+          <p class="text-sm text-gray-700">Rejecting stops the voucher. The preparer will need to create a new one.</p>
+          <div>
+            <label for="reject-comments" class="form-label form-label-required">Reason</label>
+            <textarea id="reject-comments" name="comments" rows="3" class="form-textarea" required></textarea>
+            <p class="form-help">Say what needs to change so the preparer can fix it.</p>
+          </div>
+          <p id="reject-error" class="form-error hidden" role="alert"></p>
+        </form>
+        <Fragment slot="footer">
+          <button type="button" class="btn btn-subtle" data-modal-close>Cancel</button>
+          <button type="submit" form="reject-form" class="btn btn-danger" id="reject-submit">Reject voucher</button>
+        </Fragment>
+      </Modal>
+    </>
+  )}
 
-      approveBtn.disabled = true;
-      approveBtn.innerHTML = '<i class="pi pi-spin pi-spinner mr-2"></i> Approving...';
-
-      try {
-        const response = await fetch(`/api/disbursements/${dvId}/approve`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ comments })
-        });
-
-        if (response.ok) {
-          const result = await response.json();
-          alert(result.message);
-          window.location.reload();
-        } else {
-          const error = await response.json();
-          alert('Error: ' + (error.message || 'Failed to approve DV'));
-          approveBtn.disabled = false;
-          approveBtn.innerHTML = '<i class="pi pi-check mr-2"></i> Approve';
-        }
-      } catch (error) {
-        console.error('Error:', error);
-        alert('An error occurred. Please try again.');
-        approveBtn.disabled = false;
-        approveBtn.innerHTML = '<i class="pi pi-check mr-2"></i> Approve';
-      }
+  <script define:vars={{ dvId }}>
+    document.querySelectorAll('[data-open]').forEach(button => {
+      button.addEventListener('click', () => document.getElementById(button.dataset.open)?.showModal());
     });
 
-    // Reject DV
-    rejectBtn?.addEventListener('click', async () => {
-      const comments = prompt('Please enter reason for rejection (required):');
-      if (!comments) {
-        alert('Rejection reason is required');
-        return;
-      }
+    function wire(kind, label) {
+      const form = document.getElementById(`${kind}-form`);
+      const submit = document.getElementById(`${kind}-submit`);
+      const error = document.getElementById(`${kind}-error`);
+      if (!form || !submit) return;
 
-      rejectBtn.disabled = true;
-      rejectBtn.innerHTML = '<i class="pi pi-spin pi-spinner mr-2"></i> Rejecting...';
-
-      try {
-        const response = await fetch(`/api/disbursements/${dvId}/reject`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ comments })
-        });
-
-        if (response.ok) {
-          const result = await response.json();
-          alert(result.message);
-          window.location.reload();
-        } else {
-          const error = await response.json();
-          alert('Error: ' + (error.message || 'Failed to reject DV'));
-          rejectBtn.disabled = false;
-          rejectBtn.innerHTML = '<i class="pi pi-times mr-2"></i> Reject';
+      form.addEventListener('submit', async event => {
+        event.preventDefault();
+        const comments = form.elements.comments.value.trim();
+        if (kind === 'reject' && !comments) {
+          error.textContent = 'Enter a reason for rejecting.';
+          error.classList.remove('hidden');
+          return;
         }
-      } catch (error) {
-        console.error('Error:', error);
-        alert('An error occurred. Please try again.');
-        rejectBtn.disabled = false;
-        rejectBtn.innerHTML = '<i class="pi pi-times mr-2"></i> Reject';
-      }
-    });
+
+        submit.disabled = true;
+        submit.textContent = kind === 'approve' ? 'Approving…' : 'Rejecting…';
+        error.classList.add('hidden');
+
+        try {
+          const response = await fetch(`/api/disbursements/${dvId}/${kind}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ comments: comments || undefined }),
+          });
+          const result = await response.json().catch(() => ({}));
+
+          if (!response.ok) {
+            throw new Error(result.message || `Could not ${kind} this voucher.`);
+          }
+
+          const params = new URLSearchParams({ outcome: kind === 'approve' ? 'approved' : 'rejected' });
+          if (result.nextInQueue) {
+            params.set('next', result.nextInQueue.id);
+            params.set('nextNo', result.nextInQueue.dvNo);
+            params.set('remaining', result.remainingInQueue);
+          }
+          window.location.href = `/disbursements/${dvId}?${params}`;
+        } catch (e) {
+          error.textContent = e.message;
+          error.classList.remove('hidden');
+          submit.disabled = false;
+          submit.textContent = label;
+        }
+      });
+    }
+
+    wire('approve', 'Approve');
+    wire('reject', 'Reject voucher');
   </script>
 </MainLayout>

@@ -2,6 +2,18 @@ import { db } from '../db/connection';
 import { approvalWorkflows, disbursementVouchers, userRoles, roles, users } from '../db/schema';
 import { eq, and } from 'drizzle-orm';
 import { logApprove, logReject } from '../middleware/audit-logger';
+import { getSetting } from './settings.service';
+
+/** DV statuses in which the approval workflow may still act */
+const PENDING_DV_STATUSES: string[] = ['draft', 'pending_budget', 'pending_accounting', 'pending_director'];
+
+/** DV status to set when the given stage becomes the current pending stage */
+const STAGE_TO_DV_STATUS = {
+  division: 'pending_budget',
+  budget: 'pending_budget',
+  accounting: 'pending_accounting',
+  director: 'pending_director',
+} as const;
 
 /**
  * Approval workflow stages in order
@@ -116,6 +128,63 @@ export class ApprovalService {
   }
 
   /**
+   * Validate that a user may act on the DV's current stage.
+   * Returns the stage to act on, or a failure message.
+   */
+  private async authorizeStageAction(
+    dvId: number,
+    userId: number
+  ): Promise<{ ok: true; stage: WorkflowStageData } | { ok: false; message: string }> {
+    const dvRows = await db
+      .select({ status: disbursementVouchers.status, createdBy: disbursementVouchers.createdBy })
+      .from(disbursementVouchers)
+      .where(eq(disbursementVouchers.id, dvId))
+      .limit(1);
+
+    const dv = dvRows[0];
+    if (!dv) {
+      return { ok: false, message: 'Disbursement voucher not found' };
+    }
+
+    // A rejected, cancelled, approved or paid DV must never re-enter the workflow
+    if (!dv.status || !PENDING_DV_STATUSES.includes(dv.status)) {
+      return { ok: false, message: `This DV is not awaiting approval (status: ${dv.status})` };
+    }
+
+    const currentStage = await this.getCurrentStage(dvId);
+    if (!currentStage) {
+      return { ok: false, message: 'No pending approval stage found' };
+    }
+
+    const hasPermission = await this.userHasStagePermission(userId, currentStage.approverRoleId);
+    if (!hasPermission) {
+      return { ok: false, message: 'User does not have permission for this approval stage' };
+    }
+
+    if (await getSetting('enforce_segregation_of_duties')) {
+      if (dv.createdBy === userId) {
+        return {
+          ok: false,
+          message:
+            'Segregation of duties: you prepared this DV and cannot act on its approval. ' +
+            'For single-user test environments an administrator can disable this in Admin → Settings → Security.',
+        };
+      }
+
+      const stages = await this.getWorkflowStages(dvId);
+      const priorStage = stages.find(s => s.status === 'approved' && s.approverUserId === userId);
+      if (priorStage) {
+        return {
+          ok: false,
+          message: `Segregation of duties: you already approved the ${priorStage.stage} stage of this DV.`,
+        };
+      }
+    }
+
+    return { ok: true, stage: currentStage };
+  }
+
+  /**
    * Approve a workflow stage
    */
   async approveStage(
@@ -123,97 +192,74 @@ export class ApprovalService {
     userId: number,
     comments?: string
   ): Promise<{ success: boolean; nextStage?: string; message: string }> {
-    // Get current pending stage
-    const currentStage = await this.getCurrentStage(dvId);
-
-    if (!currentStage) {
-      return { success: false, message: 'No pending approval stage found' };
+    const auth = await this.authorizeStageAction(dvId, userId);
+    if (!auth.ok) {
+      return { success: false, message: auth.message };
     }
+    const currentStage = auth.stage;
 
-    // Verify user has permission for this stage
-    const hasPermission = await this.userHasStagePermission(userId, currentStage.approverRoleId);
-    if (!hasPermission) {
-      return { success: false, message: 'User does not have permission for this approval stage' };
+    const outcome = await db.transaction(async (tx) => {
+      // Only transition a stage that is still pending, so two approvers acting at the
+      // same moment cannot both succeed
+      const [updateResult] = await tx
+        .update(approvalWorkflows)
+        .set({
+          status: 'approved',
+          approverUserId: userId,
+          comments,
+          actionDate: new Date(),
+        })
+        .where(and(eq(approvalWorkflows.id, currentStage.id!), eq(approvalWorkflows.status, 'pending')));
+
+      if (updateResult.affectedRows === 0) {
+        return null;
+      }
+
+      const nextStageData = await tx
+        .select()
+        .from(approvalWorkflows)
+        .where(and(eq(approvalWorkflows.dvId, dvId), eq(approvalWorkflows.status, 'pending')))
+        .orderBy(approvalWorkflows.stageOrder)
+        .limit(1);
+
+      const nextStage = nextStageData[0]?.stage;
+      const dvStatus = nextStage ? STAGE_TO_DV_STATUS[nextStage] : 'approved';
+
+      await tx
+        .update(disbursementVouchers)
+        .set({ status: dvStatus })
+        .where(eq(disbursementVouchers.id, dvId));
+
+      return { nextStage };
+    });
+
+    if (!outcome) {
+      return {
+        success: false,
+        message: 'This approval stage was just acted on by another user. Refresh the page to see its current status.',
+      };
     }
-
-    // Update workflow stage to approved
-    await db
-      .update(approvalWorkflows)
-      .set({
-        status: 'approved',
-        approverUserId: userId,
-        comments,
-        actionDate: new Date(),
-      })
-      .where(eq(approvalWorkflows.id, currentStage.id!));
 
     // Log approval action for audit
-    await logApprove(
-      'disbursement_vouchers',
-      dvId,
-      userId,
-      {
-        stage: currentStage.stage,
-        status: 'approved',
-        comments,
-        workflowId: currentStage.id,
-      }
-    );
+    await logApprove('disbursement_vouchers', dvId, userId, {
+      stage: currentStage.stage,
+      status: 'approved',
+      comments,
+      workflowId: currentStage.id,
+    });
 
-    // Get next stage
-    const nextStageData = await db
-      .select()
-      .from(approvalWorkflows)
-      .where(
-        and(
-          eq(approvalWorkflows.dvId, dvId),
-          eq(approvalWorkflows.status, 'pending')
-        )
-      )
-      .orderBy(approvalWorkflows.stageOrder)
-      .limit(1);
-
-    // Update DV status
-    if (nextStageData.length > 0) {
-      const nextStage = nextStageData[0].stage;
-      let dvStatus: string;
-
-      switch (nextStage) {
-        case 'budget':
-          dvStatus = 'pending_budget';
-          break;
-        case 'accounting':
-          dvStatus = 'pending_accounting';
-          break;
-        case 'director':
-          dvStatus = 'pending_director';
-          break;
-        default:
-          dvStatus = 'pending_budget';
-      }
-
-      await db
-        .update(disbursementVouchers)
-        .set({ status: dvStatus as any })
-        .where(eq(disbursementVouchers.id, dvId));
-
+    if (outcome.nextStage) {
       return {
         success: true,
-        nextStage,
-        message: `Approved. Now pending ${nextStage} approval.`,
-      };
-    } else {
-      // All stages approved
-      await db
-        .update(disbursementVouchers)
-        .set({ status: 'approved' })
-        .where(eq(disbursementVouchers.id, dvId));
-
-      return {
-        success: true,
-        message: 'DV fully approved and ready for payment processing.',
+        nextStage: outcome.nextStage,
+        message: `Approved. Now pending ${outcome.nextStage} approval.`,
       };
     }
+
+    return {
+      success: true,
+      message: 'DV fully approved and ready for payment processing.',
+    };
   }
 
   /**
@@ -224,47 +270,54 @@ export class ApprovalService {
     userId: number,
     comments: string
   ): Promise<{ success: boolean; message: string }> {
-    // Get current pending stage
-    const currentStage = await this.getCurrentStage(dvId);
-
-    if (!currentStage) {
-      return { success: false, message: 'No pending approval stage found' };
-    }
-
-    // Verify user has permission
-    const hasPermission = await this.userHasStagePermission(userId, currentStage.approverRoleId);
-    if (!hasPermission) {
-      return { success: false, message: 'User does not have permission for this approval stage' };
-    }
-
     if (!comments || comments.trim() === '') {
       return { success: false, message: 'Rejection comments are required' };
     }
 
-    // Update workflow stage to rejected
-    await db
-      .update(approvalWorkflows)
-      .set({
-        status: 'rejected',
-        approverUserId: userId,
-        comments,
-        actionDate: new Date(),
-      })
-      .where(eq(approvalWorkflows.id, currentStage.id!));
+    const auth = await this.authorizeStageAction(dvId, userId);
+    if (!auth.ok) {
+      return { success: false, message: auth.message };
+    }
+    const currentStage = auth.stage;
+
+    const rejected = await db.transaction(async (tx) => {
+      const [updateResult] = await tx
+        .update(approvalWorkflows)
+        .set({
+          status: 'rejected',
+          approverUserId: userId,
+          comments: comments.trim(),
+          actionDate: new Date(),
+        })
+        .where(and(eq(approvalWorkflows.id, currentStage.id!), eq(approvalWorkflows.status, 'pending')));
+
+      if (updateResult.affectedRows === 0) {
+        return false;
+      }
+
+      // Close out the later stages so the rejected DV cannot be approved further
+      await tx
+        .update(approvalWorkflows)
+        .set({ status: 'skipped' })
+        .where(and(eq(approvalWorkflows.dvId, dvId), eq(approvalWorkflows.status, 'pending')));
+
+      await tx
+        .update(disbursementVouchers)
+        .set({ status: 'rejected' })
+        .where(eq(disbursementVouchers.id, dvId));
+
+      return true;
+    });
+
+    if (!rejected) {
+      return {
+        success: false,
+        message: 'This approval stage was just acted on by another user. Refresh the page to see its current status.',
+      };
+    }
 
     // Log rejection action for audit
-    await logReject(
-      'disbursement_vouchers',
-      dvId,
-      userId,
-      `${currentStage.stage}: ${comments}`
-    );
-
-    // Update DV status to rejected
-    await db
-      .update(disbursementVouchers)
-      .set({ status: 'rejected' })
-      .where(eq(disbursementVouchers.id, dvId));
+    await logReject('disbursement_vouchers', dvId, userId, `${currentStage.stage}: ${comments.trim()}`);
 
     return {
       success: true,

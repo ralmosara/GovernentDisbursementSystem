@@ -175,13 +175,17 @@ interface PettyCashFund {
 
 const props = defineProps<{
   pettyCashFunds: string;
+  /** Pre-select this fund (used on the fund detail page) */
+  initialFundId?: number;
+  /** Where to go after a successful disbursement */
+  redirectTo?: string;
 }>();
 
 const parsedFunds = JSON.parse(props.pettyCashFunds) as PettyCashFund[];
 const pettyCashFunds = ref<PettyCashFund[]>(parsedFunds);
 
 const formData = ref({
-  fundId: '',
+  fundId: props.initialFundId ? String(props.initialFundId) : '',
   transactionDate: new Date().toISOString().split('T')[0],
   amount: 0,
   payee: '',
@@ -286,7 +290,7 @@ const submitForm = async () => {
     alert(message);
 
     // Redirect or reset form
-    window.location.href = '/cash/petty-cash';
+    window.location.href = props.redirectTo || '/cash/petty-cash';
   } catch (error) {
     console.error('Error disbursing petty cash:', error);
     alert(`Error: ${error instanceof Error ? error.message : 'Failed to disburse petty cash'}`);

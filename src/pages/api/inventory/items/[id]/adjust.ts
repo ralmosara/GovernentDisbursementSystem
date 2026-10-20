@@ -42,13 +42,20 @@ export const POST: APIRoute = async ({ params, request, locals }) => {
       );
     }
 
-    await assetService.adjustInventoryQuantity(
-      id,
-      parseInt(data.quantity),
-      data.operation
+    // Every stock change goes through the transaction register so it is auditable
+    const transactionType = data.operation === 'add' ? 'receipt' : data.operation === 'subtract' ? 'issue' : 'adjustment';
+    const result = await assetService.createInventoryTransaction(
+      {
+        itemId: id,
+        transactionDate: new Date(),
+        transactionType,
+        quantity: parseInt(data.quantity),
+        remarks: data.remarks || 'Quick stock adjustment',
+      },
+      user.id
     );
 
-    return new Response(JSON.stringify({ success: true }), {
+    return new Response(JSON.stringify({ success: true, transactionNo: result.transactionNo }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });

@@ -79,12 +79,12 @@ const title = 'Travel Liquidation Reports';
           <table class="min-w-full divide-y divide-gray-200">
             <thead class="bg-gray-50">
               <tr>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">IoT No.</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Employee</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Destination</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Travel Period</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Cash Advance</th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">IoT No.</th>
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">Employee</th>
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">Destination</th>
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">Travel Period</th>
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">Cash Advance</th>
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">Actions</th>
               </tr>
             </thead>
             <tbody id="unliquidatedTableBody" class="bg-white divide-y divide-gray-200">
@@ -113,8 +113,8 @@ const title = 'Travel Liquidation Reports';
         const approvedCount = document.getElementById('approvedCount');
         const unliquidatedCount = document.getElementById('unliquidatedCount');
 
-        if (pendingCount) pendingCount.textContent = '0'; // TODO: Get actual pending liquidations count
-        if (approvedCount) approvedCount.textContent = '0'; // TODO: Get actual approved liquidations count
+        if (pendingCount) pendingCount.textContent = String(data.liquidationCounts?.pendingReview ?? 0);
+        if (approvedCount) approvedCount.textContent = String(data.liquidationCounts?.approved ?? 0);
         if (unliquidatedCount) unliquidatedCount.textContent = String(data.unliquidatedTravels?.length || 0);
 
         // Display unliquidated travels

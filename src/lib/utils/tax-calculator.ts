@@ -1,235 +1,132 @@
 /**
- * Philippine BIR Withholding Tax Calculator
- * Based on TRAIN Law (Tax Reform for Acceleration and Inclusion)
- * Updated tax tables effective January 1, 2023
+ * Philippine BIR withholding tax on compensation.
+ *
+ * Basis: RA 10963 (TRAIN Law) and RR 11-2018 as amended — the graduated table that
+ * took effect January 1, 2023.
+ *
+ * TRAIN abolished personal and additional (dependent) exemptions from 2018, so tax
+ * depends only on taxable compensation. The old status codes (S, ME1, …) are kept as a
+ * type because employee records still store them, but they no longer change the tax.
+ * Only 'Z' (zero withholding, e.g. minimum-wage earners) is honoured.
  */
 
-// Tax Exemption Status Codes
+/** @deprecated Exemption status codes no longer affect tax under TRAIN; kept for stored records. */
 export type TaxExemptionCode =
-  | 'S' // Single
-  | 'S1' // Single with 1 dependent
-  | 'S2' // Single with 2 dependents
-  | 'S3' // Single with 3 dependents
-  | 'S4' // Single with 4 dependents
-  | 'ME' // Married Employee
-  | 'ME1' // Married Employee with 1 dependent
-  | 'ME2' // Married Employee with 2 dependents
-  | 'ME3' // Married Employee with 3 dependents
-  | 'ME4' // Married Employee with 4 dependents
-  | 'Z'; // Zero withholding
+  | 'S'
+  | 'S1'
+  | 'S2'
+  | 'S3'
+  | 'S4'
+  | 'ME'
+  | 'ME1'
+  | 'ME2'
+  | 'ME3'
+  | 'ME4'
+  | 'Z'; // Zero withholding (exempt employees)
 
-// Monthly personal exemption per dependent (₱25,000 annually = ₱2,083.33 monthly)
-const MONTHLY_DEPENDENT_EXEMPTION = 2083.33;
+interface Bracket {
+  /** Tax applies to the amount in excess of this */
+  over: number;
+  /** Fixed tax for income up to `over` */
+  base: number;
+  rate: number;
+}
 
-// Maximum number of dependents for tax exemption
-const MAX_DEPENDENTS = 4;
-
-/**
- * 2023 Philippine Income Tax Table (Monthly)
- * Based on TRAIN Law graduated tax rates
- */
-const TAX_BRACKETS_MONTHLY = [
-  { min: 0, max: 20833, rate: 0, baseAmount: 0 }, // 0% for ₱250,000/year and below
-  { min: 20834, max: 33332, rate: 0.15, baseAmount: 0 }, // 15% of excess over ₱250,000
-  { min: 33333, max: 66666, rate: 0.2, baseAmount: 1875 }, // 20% of excess over ₱400,000 + ₱1,875
-  { min: 66667, max: 166666, rate: 0.25, baseAmount: 8541.8 }, // 25% of excess over ₱800,000 + ₱8,541.80
-  { min: 166667, max: 666666, rate: 0.3, baseAmount: 33541.8 }, // 30% of excess over ₱2,000,000 + ₱33,541.80
-  { min: 666667, max: Infinity, rate: 0.35, baseAmount: 183541.8 }, // 35% of excess over ₱8,000,000 + ₱183,541.80
+/** Monthly withholding table, January 1, 2023 onwards (RR 11-2018 Annex E) */
+const MONTHLY_BRACKETS: Bracket[] = [
+  { over: 0, base: 0, rate: 0 },
+  { over: 20833, base: 0, rate: 0.15 },
+  { over: 33333, base: 1875, rate: 0.2 },
+  { over: 66667, base: 8541.8, rate: 0.25 },
+  { over: 166667, base: 33541.8, rate: 0.3 },
+  { over: 666667, base: 183541.8, rate: 0.35 },
 ];
 
+/** Annual graduated rates, January 1, 2023 onwards (NIRC Sec. 24(A)(2) as amended by TRAIN) */
+const ANNUAL_BRACKETS: Bracket[] = [
+  { over: 0, base: 0, rate: 0 },
+  { over: 250000, base: 0, rate: 0.15 },
+  { over: 400000, base: 22500, rate: 0.2 },
+  { over: 800000, base: 102500, rate: 0.25 },
+  { over: 2000000, base: 402500, rate: 0.3 },
+  { over: 8000000, base: 2202500, rate: 0.35 },
+];
+
+/** 13th month pay and other benefits exempt up to this amount per year (TRAIN) */
+export const OTHER_BENEFITS_EXEMPTION = 90000;
+
+const round2 = (value: number) => Math.round(value * 100) / 100;
+
+function taxFromBrackets(taxable: number, brackets: Bracket[]): number {
+  if (!(taxable > 0)) return 0;
+  // Highest bracket whose threshold the income exceeds; continuous at every boundary,
+  // so fractional amounts never fall between brackets
+  const bracket = [...brackets].reverse().find(b => taxable > b.over) ?? brackets[0];
+  return round2(bracket.base + (taxable - bracket.over) * bracket.rate);
+}
+
 /**
- * Calculate monthly withholding tax based on taxable income
- * @param grossMonthlyIncome - Total monthly gross income
- * @param taxExemptionCode - Tax exemption status (S, S1, ME, ME1, etc.)
- * @param additionalExemptions - Additional dependents beyond code (optional)
- * @returns Monthly withholding tax amount
+ * Monthly withholding tax on taxable compensation (gross taxable pay less the employee's
+ * GSIS, PhilHealth and Pag-IBIG contributions).
+ *
+ * The second and third parameters are accepted for backward compatibility; dependents no
+ * longer reduce tax under TRAIN.
  */
 export function calculateWithholdingTax(
-  grossMonthlyIncome: number,
+  monthlyTaxableCompensation: number,
   taxExemptionCode: TaxExemptionCode = 'S',
-  additionalExemptions: number = 0
+  _additionalExemptions: number = 0
 ): number {
-  // Handle zero withholding
-  if (taxExemptionCode === 'Z') {
-    return 0;
-  }
-
-  // Calculate total exemptions
-  const dependentsFromCode = getDependentsFromCode(taxExemptionCode);
-  const totalDependents = Math.min(dependentsFromCode + additionalExemptions, MAX_DEPENDENTS);
-
-  // Calculate taxable income
-  const totalExemption = totalDependents * MONTHLY_DEPENDENT_EXEMPTION;
-  const taxableIncome = Math.max(grossMonthlyIncome - totalExemption, 0);
-
-  // Find applicable tax bracket
-  const bracket = TAX_BRACKETS_MONTHLY.find(
-    (b) => taxableIncome >= b.min && taxableIncome <= b.max
-  );
-
-  if (!bracket) {
-    return 0;
-  }
-
-  // Calculate tax
-  if (bracket.rate === 0) {
-    return 0;
-  }
-
-  const excessIncome = taxableIncome - bracket.min;
-  const tax = bracket.baseAmount + excessIncome * bracket.rate;
-
-  return Math.round(tax * 100) / 100; // Round to 2 decimal places
+  if (taxExemptionCode === 'Z') return 0;
+  return taxFromBrackets(monthlyTaxableCompensation, MONTHLY_BRACKETS);
 }
 
-/**
- * Calculate annual withholding tax
- * @param grossAnnualIncome - Total annual gross income
- * @param taxExemptionCode - Tax exemption status
- * @param additionalExemptions - Additional dependents
- * @returns Annual withholding tax amount
- */
+/** Annual income tax on taxable compensation, used for year-end annualization */
 export function calculateAnnualWithholdingTax(
-  grossAnnualIncome: number,
+  annualTaxableCompensation: number,
   taxExemptionCode: TaxExemptionCode = 'S',
-  additionalExemptions: number = 0
+  _additionalExemptions: number = 0
 ): number {
-  // Handle zero withholding
-  if (taxExemptionCode === 'Z') {
-    return 0;
-  }
-
-  // Calculate total exemptions (₱25,000 per dependent annually)
-  const dependentsFromCode = getDependentsFromCode(taxExemptionCode);
-  const totalDependents = Math.min(dependentsFromCode + additionalExemptions, MAX_DEPENDENTS);
-  const totalExemption = totalDependents * 25000;
-
-  // Calculate taxable income
-  const taxableIncome = Math.max(grossAnnualIncome - totalExemption, 0);
-
-  // Annual tax brackets
-  const annualBrackets = [
-    { min: 0, max: 250000, rate: 0, baseAmount: 0 },
-    { min: 250001, max: 400000, rate: 0.15, baseAmount: 0 },
-    { min: 400001, max: 800000, rate: 0.2, baseAmount: 22500 },
-    { min: 800001, max: 2000000, rate: 0.25, baseAmount: 102500 },
-    { min: 2000001, max: 8000000, rate: 0.3, baseAmount: 402500 },
-    { min: 8000001, max: Infinity, rate: 0.35, baseAmount: 2202500 },
-  ];
-
-  // Find applicable bracket
-  const bracket = annualBrackets.find(
-    (b) => taxableIncome >= b.min && taxableIncome <= b.max
-  );
-
-  if (!bracket || bracket.rate === 0) {
-    return 0;
-  }
-
-  const excessIncome = taxableIncome - bracket.min;
-  const tax = bracket.baseAmount + excessIncome * bracket.rate;
-
-  return Math.round(tax * 100) / 100;
+  if (taxExemptionCode === 'Z') return 0;
+  return taxFromBrackets(annualTaxableCompensation, ANNUAL_BRACKETS);
 }
 
 /**
- * Calculate 13th month pay tax (only excess over ₱90,000 is taxable)
- * @param thirteenthMonthAmount - 13th month pay amount
- * @param otherBenefits - Other de minimis benefits received
- * @returns Taxable 13th month pay amount
+ * Tax on 13th month pay and other benefits. Only the excess over ₱90,000 is taxable, and
+ * that excess is added to the employee's other taxable compensation for the year — so the
+ * tax is the increase in annual tax it causes, at the graduated rates (not a flat rate).
  */
 export function calculate13thMonthTax(
   thirteenthMonthAmount: number,
-  otherBenefits: number = 0
+  otherBenefits: number = 0,
+  annualTaxableCompensation: number = 0
 ): number {
-  const EXEMPTION_LIMIT = 90000; // ₱90,000 tax-free ceiling
-  const totalBenefits = thirteenthMonthAmount + otherBenefits;
-
-  // Only excess over ₱90,000 is taxable
-  if (totalBenefits <= EXEMPTION_LIMIT) {
-    return 0;
-  }
-
-  const taxableAmount = totalBenefits - EXEMPTION_LIMIT;
-
-  // Apply lowest tax bracket (15%) for the excess
-  const tax = taxableAmount * 0.15;
-
-  return Math.round(tax * 100) / 100;
+  const excess = Math.max(thirteenthMonthAmount + otherBenefits - OTHER_BENEFITS_EXEMPTION, 0);
+  if (excess === 0) return 0;
+  return round2(
+    taxFromBrackets(annualTaxableCompensation + excess, ANNUAL_BRACKETS) -
+      taxFromBrackets(annualTaxableCompensation, ANNUAL_BRACKETS)
+  );
 }
 
-/**
- * Get number of dependents from tax exemption code
- * @param code - Tax exemption code
- * @returns Number of dependents
- */
-function getDependentsFromCode(code: TaxExemptionCode): number {
-  const mapping: Record<TaxExemptionCode, number> = {
-    'S': 0,
-    'S1': 1,
-    'S2': 2,
-    'S3': 3,
-    'S4': 4,
-    'ME': 0,
-    'ME1': 1,
-    'ME2': 2,
-    'ME3': 3,
-    'ME4': 4,
-    'Z': 0,
-  };
-  return mapping[code] || 0;
-}
-
-/**
- * Format tax exemption code to readable string
- * @param code - Tax exemption code
- * @returns Formatted string
- */
+/** Format a stored exemption code for display */
 export function formatTaxExemptionCode(code: TaxExemptionCode): string {
-  const mapping: Record<TaxExemptionCode, string> = {
-    'S': 'Single',
-    'S1': 'Single with 1 Dependent',
-    'S2': 'Single with 2 Dependents',
-    'S3': 'Single with 3 Dependents',
-    'S4': 'Single with 4 Dependents',
-    'ME': 'Married Employee',
-    'ME1': 'Married Employee with 1 Dependent',
-    'ME2': 'Married Employee with 2 Dependents',
-    'ME3': 'Married Employee with 3 Dependents',
-    'ME4': 'Married Employee with 4 Dependents',
-    'Z': 'Zero Withholding',
-  };
-  return mapping[code] || code;
+  return code === 'Z' ? 'Zero withholding (exempt)' : 'Regular (TRAIN — no personal exemptions)';
 }
 
-/**
- * Get tax bracket description for a given monthly income
- * @param monthlyIncome - Monthly gross income
- * @returns Tax bracket information
- */
-export function getTaxBracket(monthlyIncome: number): {
+/** Describe the monthly bracket a taxable amount falls in */
+export function getTaxBracket(monthlyTaxable: number): {
   bracket: string;
   rate: number;
   annualEquivalent: string;
 } {
-  const bracket = TAX_BRACKETS_MONTHLY.find(
-    (b) => monthlyIncome >= b.min && monthlyIncome <= b.max
-  );
-
-  if (!bracket) {
-    return {
-      bracket: 'Unknown',
-      rate: 0,
-      annualEquivalent: 'Unknown',
-    };
-  }
-
-  const annualMin = bracket.min * 12;
-  const annualMax = bracket.max === Infinity ? 'above' : bracket.max * 12;
+  const bracket = [...MONTHLY_BRACKETS].reverse().find(b => monthlyTaxable > b.over) ?? MONTHLY_BRACKETS[0];
+  const next = MONTHLY_BRACKETS[MONTHLY_BRACKETS.indexOf(bracket) + 1];
+  const peso = (n: number) => `₱${n.toLocaleString('en-PH')}`;
 
   return {
-    bracket: `₱${bracket.min.toLocaleString()} - ₱${bracket.max === Infinity ? 'above' : bracket.max.toLocaleString()}`,
-    rate: bracket.rate * 100, // Convert to percentage
-    annualEquivalent: `₱${annualMin.toLocaleString()} - ${typeof annualMax === 'number' ? '₱' + annualMax.toLocaleString() : annualMax}`,
+    bracket: next ? `Over ${peso(bracket.over)} up to ${peso(next.over)}` : `Over ${peso(bracket.over)}`,
+    rate: bracket.rate * 100,
+    annualEquivalent: next ? `Over ${peso(bracket.over * 12)} up to ${peso(next.over * 12)}` : `Over ${peso(bracket.over * 12)}`,
   };
 }

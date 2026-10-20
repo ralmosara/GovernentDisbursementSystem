@@ -1,4 +1,4 @@
-import { Lucia } from 'lucia';
+import { Lucia, TimeSpan } from 'lucia';
 import { DrizzleMySQLAdapter } from '@lucia-auth/adapter-drizzle';
 import { db } from '../db/connection';
 import { sessions, users, userRoles, roles } from '../db/schema';
@@ -9,6 +9,8 @@ const adapter = new DrizzleMySQLAdapter(db, sessions, users);
 
 // Create Lucia instance
 export const lucia = new Lucia(adapter, {
+  // Sliding expiry: a session is extended while in use and ends after 8 idle hours
+  sessionExpiresIn: new TimeSpan(8, 'h'),
   sessionCookie: {
     attributes: {
       // Set to `true` when using HTTPS

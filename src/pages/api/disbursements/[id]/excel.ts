@@ -2,7 +2,14 @@ import type { APIRoute } from 'astro';
 import { disbursementService } from '../../../../lib/services/disbursement.service';
 import { generateDVExcel } from '../../../../lib/utils/excel-generator';
 
-export const GET: APIRoute = async ({ params }) => {
+export const GET: APIRoute = async ({ params, locals }) => {
+  if (!locals.user) {
+    return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+      status: 401,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+
   try {
     const id = parseInt(params.id || '0');
 

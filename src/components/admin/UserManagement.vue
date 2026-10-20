@@ -151,15 +151,17 @@
                 <input type="text" v-model="formData.divisionOffice" />
               </div>
 
-              <div v-if="!editingUser" class="form-group form-group--full">
-                <label>Password *</label>
+              <div class="form-group form-group--full">
+                <label>{{ editingUser ? 'Reset Password' : 'Password *' }}</label>
                 <input
                   type="password"
                   v-model="formData.password"
                   :required="!editingUser"
                   minlength="8"
+                  autocomplete="new-password"
                 />
-                <small>Minimum 8 characters</small>
+                <small v-if="editingUser">Leave blank to keep the current password. Resetting signs the user out everywhere.</small>
+                <small v-else>Must meet the password policy in Settings → Security</small>
               </div>
             </div>
 
@@ -292,6 +294,7 @@ async function loadUserRoles(userId: number) {
 
 async function saveUser() {
   saving.value = true;
+  const isEdit = Boolean(editingUser.value);
   try {
     const url = editingUser.value
       ? `/api/admin/users/${editingUser.value.id}`
@@ -312,7 +315,7 @@ async function saveUser() {
 
     await loadUsers();
     closeModal();
-    alert(editingUser.value ? 'User updated successfully' : 'User created successfully');
+    alert(isEdit ? 'User updated successfully' : 'User created successfully');
   } catch (error: any) {
     console.error('Error saving user:', error);
     alert(error.message || 'Failed to save user');
@@ -364,9 +367,19 @@ function formatRoleName(name: string): string {
   ).join(' ');
 }
 
-onMounted(() => {
-  loadUsers();
+onMounted(async () => {
   loadRoles();
+  await loadUsers();
+
+  // Support deep links from Settings: ?create=1 opens the form, ?status=active|inactive filters
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('create') === '1') {
+    showCreateModal.value = true;
+  }
+  const status = params.get('status');
+  if (status === 'active' || status === 'inactive') {
+    users.value = users.value.filter(u => Boolean(u.isActive) === (status === 'active'));
+  }
 });
 </script>
 
@@ -381,7 +394,7 @@ onMounted(() => {
 .user-management__header h2 {
   font-size: 1.5rem;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--ds-text);
 }
 
 .btn {
@@ -403,22 +416,22 @@ onMounted(() => {
 }
 
 .btn--primary {
-  background-color: #3b82f6;
+  background-color: var(--ds-background-brand-bold);
   color: white;
 }
 
 .btn--primary:hover {
-  background-color: #2563eb;
+  background-color: var(--ds-background-brand-bold-hovered);
 }
 
 .btn--secondary {
-  background-color: white;
-  color: #374151;
-  border: 1px solid #d1d5db;
+  background-color: var(--ds-surface-raised);
+  color: var(--ds-text-subtle);
+  border: 1px solid var(--ds-border);
 }
 
 .btn--secondary:hover {
-  background-color: #f9fafb;
+  background-color: var(--ds-surface-sunken);
 }
 
 /* Loading */
@@ -428,14 +441,14 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   padding: 4rem 2rem;
-  color: #6b7280;
+  color: var(--ds-text-subtlest);
 }
 
 .spinner {
   width: 3rem;
   height: 3rem;
-  border: 4px solid #e5e7eb;
-  border-top-color: #3b82f6;
+  border: 4px solid var(--ds-border);
+  border-top-color: var(--ds-border-selected);
   border-radius: 50%;
   animation: spin 1s linear infinite;
   margin-bottom: 1rem;
@@ -447,7 +460,7 @@ onMounted(() => {
 
 /* Table */
 .table-wrapper {
-  background-color: white;
+  background-color: var(--ds-surface-raised);
   border-radius: 0.5rem;
   box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
   overflow-x: auto;
@@ -460,18 +473,18 @@ onMounted(() => {
 }
 
 .table th {
-  background-color: #f9fafb;
+  background-color: var(--ds-surface-sunken);
   padding: 0.75rem 1rem;
   text-align: left;
   font-weight: 600;
-  color: #374151;
-  border-bottom: 1px solid #e5e7eb;
+  color: var(--ds-text-subtle);
+  border-bottom: 1px solid var(--ds-border);
 }
 
 .table td {
   padding: 0.75rem 1rem;
-  border-bottom: 1px solid #e5e7eb;
-  color: #1f2937;
+  border-bottom: 1px solid var(--ds-border);
+  color: var(--ds-text);
 }
 
 .roles {
@@ -483,8 +496,8 @@ onMounted(() => {
 .badge {
   display: inline-block;
   padding: 0.25rem 0.5rem;
-  background-color: #dbeafe;
-  color: #1e40af;
+  background-color: var(--ds-background-information);
+  color: var(--ds-link-pressed);
   border-radius: 0.25rem;
   font-size: 0.75rem;
   font-weight: 500;
@@ -499,13 +512,13 @@ onMounted(() => {
 }
 
 .status--active {
-  background-color: #d1fae5;
-  color: #065f46;
+  background-color: var(--ds-background-success);
+  color: var(--ds-text-success);
 }
 
 .status--inactive {
-  background-color: #fee2e2;
-  color: #991b1b;
+  background-color: var(--ds-background-danger);
+  color: var(--ds-text-danger);
 }
 
 .actions {
@@ -521,22 +534,22 @@ onMounted(() => {
   justify-content: center;
   border: none;
   background-color: transparent;
-  color: #3b82f6;
+  color: var(--ds-link);
   cursor: pointer;
   border-radius: 0.375rem;
   transition: background-color 0.2s;
 }
 
 .btn-icon:hover {
-  background-color: #dbeafe;
+  background-color: var(--ds-background-information);
 }
 
 .btn-icon--danger {
-  color: #ef4444;
+  color: var(--ds-text-danger);
 }
 
 .btn-icon--danger:hover {
-  background-color: #fee2e2;
+  background-color: var(--ds-background-danger);
 }
 
 .btn-icon svg {
@@ -551,7 +564,7 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   padding: 4rem 2rem;
-  color: #9ca3af;
+  color: var(--ds-text-subtlest);
 }
 
 .empty svg {
@@ -576,7 +589,7 @@ onMounted(() => {
 }
 
 .modal {
-  background-color: white;
+  background-color: var(--ds-surface-raised);
   border-radius: 0.5rem;
   max-width: 48rem;
   width: 100%;
@@ -591,13 +604,13 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: 1.5rem;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--ds-border);
 }
 
 .modal__header h3 {
   font-size: 1.25rem;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--ds-text);
 }
 
 .modal__close {
@@ -608,14 +621,14 @@ onMounted(() => {
   justify-content: center;
   border: none;
   background-color: transparent;
-  color: #6b7280;
+  color: var(--ds-text-subtlest);
   cursor: pointer;
   border-radius: 0.375rem;
   transition: background-color 0.2s;
 }
 
 .modal__close:hover {
-  background-color: #f3f4f6;
+  background-color: var(--ds-background-neutral);
 }
 
 .modal__close svg {
@@ -648,14 +661,14 @@ onMounted(() => {
 .form-group label {
   font-size: 0.875rem;
   font-weight: 500;
-  color: #374151;
+  color: var(--ds-text-subtle);
   margin-bottom: 0.5rem;
 }
 
 .form-group input,
 .form-group select {
   padding: 0.5rem;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--ds-border);
   border-radius: 0.375rem;
   font-size: 0.875rem;
 }
@@ -663,13 +676,13 @@ onMounted(() => {
 .form-group input:focus,
 .form-group select:focus {
   outline: none;
-  border-color: #3b82f6;
-  ring: 2px solid rgba(59, 130, 246, 0.5);
+  border-color: var(--ds-border-selected);
+  ring: 2px solid rgba(56, 139, 255, 0.5);
 }
 
 .form-group small {
   font-size: 0.75rem;
-  color: #6b7280;
+  color: var(--ds-text-subtlest);
   margin-top: 0.25rem;
 }
 
@@ -684,7 +697,7 @@ onMounted(() => {
   align-items: center;
   gap: 0.5rem;
   font-size: 0.875rem;
-  color: #374151;
+  color: var(--ds-text-subtle);
   cursor: pointer;
 }
 
@@ -700,11 +713,11 @@ onMounted(() => {
   gap: 0.75rem;
   margin-top: 1.5rem;
   padding-top: 1.5rem;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--ds-border);
 }
 
 .text-muted {
-  color: #9ca3af;
+  color: var(--ds-text-subtlest);
   font-style: italic;
 }
 </style>

@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro';
 import { disbursementService } from '../../../lib/services/disbursement.service';
+import { insightsService } from '../../../lib/services/insights.service';
 
 export const POST: APIRoute = async ({ request, locals }) => {
   try {
@@ -31,6 +32,28 @@ export const POST: APIRoute = async ({ request, locals }) => {
       );
     }
 
+    // Possible duplicate payment: require the preparer to have seen and acknowledged
+    // every match, so the warning can't be bypassed by calling the API directly
+    const duplicates = await insightsService.findPossibleDuplicates({
+      payeeName: data.payeeName,
+      amount: Number(data.amount),
+      orsBursNo: data.orsBursNo,
+    });
+    const acknowledged: string[] = Array.isArray(data.duplicateWarningAcknowledged)
+      ? data.duplicateWarningAcknowledged.map(String)
+      : [];
+    const unacknowledged = duplicates.filter(d => !acknowledged.includes(d.dvNo));
+    if (unacknowledged.length > 0) {
+      return new Response(
+        JSON.stringify({
+          message: 'This voucher looks like one that already exists. Review the matches before creating it.',
+          code: 'POSSIBLE_DUPLICATE',
+          duplicates: unacknowledged,
+        }),
+        { status: 409, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
+
     // Create DV
     const result = await disbursementService.createDV({
       fundClusterId: data.fundClusterId,
@@ -46,6 +69,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       amount: data.amount,
       paymentMode: data.paymentMode,
       createdBy: user.id,
+      duplicateWarningAcknowledged: duplicates.length > 0 ? duplicates.map(d => d.dvNo) : undefined,
     });
 
     return new Response(

@@ -147,7 +147,7 @@ const successMessage = ref('');
 
 async function loadFundClusters() {
   try {
-    const response = await fetch('/api/budget/fund-clusters');
+    const response = await fetch('/api/fund-clusters?active=true');
     if (response.ok) {
       fundClusters.value = await response.json();
     }
@@ -208,7 +208,7 @@ onMounted(() => {
 }
 
 .card {
-  background: white;
+  background: var(--ds-surface-raised);
   border-radius: 0.5rem;
   box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1);
   padding: 2rem;
@@ -225,10 +225,10 @@ onMounted(() => {
 .section-title {
   font-size: 1.125rem;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--ds-text);
   margin-bottom: 1.5rem;
   padding-bottom: 0.75rem;
-  border-bottom: 2px solid #e5e7eb;
+  border-bottom: 2px solid var(--ds-border);
 }
 
 .form-grid {
@@ -245,18 +245,18 @@ onMounted(() => {
 .form-label {
   font-size: 0.875rem;
   font-weight: 500;
-  color: #374151;
+  color: var(--ds-text-subtle);
   margin-bottom: 0.5rem;
 }
 
 .form-label.required::after {
   content: ' *';
-  color: #ef4444;
+  color: var(--ds-text-danger);
 }
 
 .form-control {
   padding: 0.625rem 0.875rem;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--ds-border);
   border-radius: 0.375rem;
   font-size: 0.875rem;
   transition: border-color 0.15s, box-shadow 0.15s;
@@ -264,17 +264,17 @@ onMounted(() => {
 
 .form-control:focus {
   outline: none;
-  border-color: #3b82f6;
-  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  border-color: var(--ds-border-selected);
+  box-shadow: 0 0 0 3px rgba(56, 139, 255, 0.1);
 }
 
 .form-control::placeholder {
-  color: #9ca3af;
+  color: var(--ds-text-subtlest);
 }
 
 .form-hint {
   font-size: 0.75rem;
-  color: #6b7280;
+  color: var(--ds-text-subtlest);
   margin-top: 0.25rem;
 }
 
@@ -291,15 +291,15 @@ textarea.form-control {
 }
 
 .alert-error {
-  background-color: #fee2e2;
-  color: #991b1b;
-  border: 1px solid #fecaca;
+  background-color: var(--ds-background-danger);
+  color: var(--ds-text-danger);
+  border: 1px solid #FFD5D2;
 }
 
 .alert-success {
-  background-color: #d1fae5;
-  color: #065f46;
-  border: 1px solid #a7f3d0;
+  background-color: var(--ds-background-success);
+  color: var(--ds-text-success);
+  border: 1px solid #BAF3DB;
 }
 
 .form-actions {
@@ -307,7 +307,7 @@ textarea.form-control {
   justify-content: flex-end;
   gap: 1rem;
   padding-top: 1.5rem;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--ds-border);
 }
 
 .btn {
@@ -330,22 +330,22 @@ textarea.form-control {
 }
 
 .btn-primary {
-  background-color: #3b82f6;
+  background-color: var(--ds-background-brand-bold);
   color: white;
 }
 
 .btn-primary:hover:not(:disabled) {
-  background-color: #2563eb;
+  background-color: var(--ds-background-brand-bold-hovered);
 }
 
 .btn-secondary {
-  background-color: white;
-  color: #374151;
-  border-color: #d1d5db;
+  background-color: var(--ds-surface-raised);
+  color: var(--ds-text-subtle);
+  border-color: var(--ds-border);
 }
 
 .btn-secondary:hover {
-  background-color: #f9fafb;
+  background-color: var(--ds-surface-sunken);
 }
 
 @media (max-width: 640px) {

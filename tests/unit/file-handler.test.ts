@@ -78,7 +78,7 @@ describe('File Handler', () => {
       const result = validateFile(invalidFile);
 
       expect(result.valid).toBe(false);
-      expect(result.error).toContain('file type');
+      expect(result.error?.toLowerCase()).toContain('file type');
     });
 
     it('should reject executable files', () => {
@@ -100,9 +100,10 @@ describe('File Handler', () => {
         type: 'application/pdf',
       } as File;
 
-      // Should validate based on MIME type, not extension
+      // Both MIME type and extension must be allow-listed: the extension decides
+      // how a stored file is served, so a missing one is rejected
       const result = validateFile(noExtFile);
-      expect(result.valid).toBe(true);
+      expect(result.valid).toBe(false);
     });
   });
 
@@ -232,7 +233,8 @@ describe('File Handler', () => {
 
     it('should have correct upload directory structure', () => {
       expect(UPLOAD_CONFIG.uploadBaseDir).toBeDefined();
-      expect(UPLOAD_CONFIG.uploadBaseDir).toContain('public');
+      // Uploads must never live in the web root; they are served only via the authenticated API
+      expect(UPLOAD_CONFIG.uploadBaseDir).not.toMatch(/(^|[\\/])public([\\/]|$)/);
     });
   });
 

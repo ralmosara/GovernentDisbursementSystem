@@ -194,25 +194,25 @@ function formatCurrency(value: number): string {
           <table class="min-w-full divide-y divide-gray-200">
             <thead class="bg-gray-50">
               <tr>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">
                   Asset No.
                 </th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">
                   Description
                 </th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">
                   Category
                 </th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">
                   Acquisition Cost
                 </th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">
                   Date
                 </th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">
                   Status
                 </th>
-                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-right text-xs font-semibold text-gray-600">
                   Actions
                 </th>
               </tr>
@@ -228,7 +228,7 @@ function formatCurrency(value: number): string {
                   </td>
                   <td class="px-6 py-4 whitespace-nowrap text-sm">
                     {asset.category ? (
-                      <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                      <span class="badge badge-info">
                         {asset.category}
                       </span>
                     ) : '-'}
@@ -241,17 +241,17 @@ function formatCurrency(value: number): string {
                   </td>
                   <td class="px-6 py-4 whitespace-nowrap text-sm">
                     {asset.status === 'active' ? (
-                      <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                      <span class="badge badge-success">
                         <i class="pi pi-check-circle mr-1"></i>
                         Active
                       </span>
                     ) : asset.status === 'disposed' ? (
-                      <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
+                      <span class="badge badge-danger">
                         <i class="pi pi-times-circle mr-1"></i>
                         Disposed
                       </span>
                     ) : (
-                      <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                      <span class="badge badge-secondary">
                         <i class="pi pi-ban mr-1"></i>
                         Written Off
                       </span>
@@ -290,7 +290,7 @@ function formatCurrency(value: number): string {
     <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
       <a
         href="/assets/fixed/create"
-        class="flex items-center justify-between p-6 bg-gradient-to-r from-blue-500 to-blue-600 rounded-lg shadow-md hover:shadow-lg transition-shadow text-white"
+        class="flex items-center justify-between p-6 bg-primary-600 hover:bg-primary-700 rounded-lg transition-shadow text-white"
       >
         <div>
           <h3 class="text-lg font-semibold">Add Fixed Asset</h3>
@@ -301,7 +301,7 @@ function formatCurrency(value: number): string {
 
       <a
         href="/assets/categories"
-        class="flex items-center justify-between p-6 bg-gradient-to-r from-purple-500 to-purple-600 rounded-lg shadow-md hover:shadow-lg transition-shadow text-white"
+        class="flex items-center justify-between p-6 bg-primary-600 hover:bg-primary-700 rounded-lg transition-shadow text-white"
       >
         <div>
           <h3 class="text-lg font-semibold">Manage Categories</h3>
@@ -312,7 +312,7 @@ function formatCurrency(value: number): string {
 
       <a
         href="/assets/fixed"
-        class="flex items-center justify-between p-6 bg-gradient-to-r from-green-500 to-green-600 rounded-lg shadow-md hover:shadow-lg transition-shadow text-white"
+        class="flex items-center justify-between p-6 bg-primary-600 hover:bg-primary-700 rounded-lg transition-shadow text-white"
       >
         <div>
           <h3 class="text-lg font-semibold">View All Assets</h3>

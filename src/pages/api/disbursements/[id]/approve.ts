@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro';
 import { approvalService } from '../../../../lib/services/approval.service';
+import { workQueueService } from '../../../../lib/services/work-queue.service';
 
 export const POST: APIRoute = async ({ params, request, locals }) => {
   try {
@@ -34,10 +35,17 @@ export const POST: APIRoute = async ({ params, request, locals }) => {
       );
     }
 
+    // Offer the approver the next voucher waiting for them
+    const { next, remaining } = await workQueueService
+      .getNextDv({ id: user.id, roles: user.roles ?? [] }, parseInt(id))
+      .catch(() => ({ next: null, remaining: 0 }));
+
     return new Response(
       JSON.stringify({
         message: result.message,
         nextStage: result.nextStage,
+        nextInQueue: next ? { id: next.dvId, dvNo: next.dvNo } : null,
+        remainingInQueue: remaining,
       }),
       { status: 200, headers: { 'Content-Type': 'application/json' } }
     );

@@ -22,3 +22,11 @@ pnpm-debug.log*
 
 # jetbrains setting folder
 .idea/
+
+# uploaded attachments (kept outside the web root)
+storage/
+public/uploads/
+
+# Playwright output
+test-results/
+playwright-report/

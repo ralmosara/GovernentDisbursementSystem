@@ -80,25 +80,25 @@ const categories = await assetService.getAssetCategories(isActive);
           <table class="min-w-full divide-y divide-gray-200">
             <thead class="bg-gray-50">
               <tr>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">
                   Code
                 </th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">
                   Name
                 </th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">
                   Useful Life
                 </th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">
                   Depreciation Method
                 </th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">
                   Cap. Threshold
                 </th>
-                <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">
                   Status
                 </th>
-                <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th class="px-6 py-3 text-right text-xs font-semibold text-gray-600">
                   Actions
                 </th>
               </tr>
@@ -117,7 +117,7 @@ const categories = await assetService.getAssetCategories(isActive);
                   </td>
                   <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                     {category.depreciationMethod ? (
-                      <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                      <span class="badge badge-info">
                         {category.depreciationMethod === 'straight_line' ? 'Straight Line' : 'Declining Balance'}
                       </span>
                     ) : '-'}
@@ -127,12 +127,12 @@ const categories = await assetService.getAssetCategories(isActive);
                   </td>
                   <td class="px-6 py-4 whitespace-nowrap text-sm">
                     {category.isActive ? (
-                      <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                      <span class="badge badge-success">
                         <i class="pi pi-check-circle mr-1"></i>
                         Active
                       </span>
                     ) : (
-                      <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                      <span class="badge badge-secondary">
                         <i class="pi pi-times-circle mr-1"></i>
                         Inactive
                       </span>

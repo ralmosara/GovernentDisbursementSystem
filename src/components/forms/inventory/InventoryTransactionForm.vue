@@ -3,6 +3,8 @@ import { ref, computed, onMounted } from 'vue';
 
 interface Props {
   itemId?: number;
+  /** Async submit handler; when given, the form re-enables itself once it settles */
+  submit?: (data: Record<string, unknown>) => Promise<void>;
 }
 
 const props = defineProps<Props>();
@@ -93,12 +95,22 @@ function validateForm(): boolean {
   return Object.keys(errors.value).length === 0;
 }
 
-function handleSubmit() {
+async function handleSubmit() {
   if (!validateForm()) {
     return;
   }
 
   loading.value = true;
+
+  if (props.submit) {
+    try {
+      await props.submit({ ...formData.value });
+    } finally {
+      loading.value = false;
+    }
+    return;
+  }
+
   emit('submit', formData.value);
 }
 
@@ -148,11 +160,11 @@ function handleCancel() {
         <div>
           <span class="text-blue-700">Stock Status:</span>
           <span
-            class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+            class="badge"
             :class="{
-              'bg-green-100 text-green-800': selectedItem.stockStatus === 'adequate',
-              'bg-orange-100 text-orange-800': selectedItem.stockStatus === 'low',
-              'bg-red-100 text-red-800': selectedItem.stockStatus === 'out',
+              'badge-success': selectedItem.stockStatus === 'adequate',
+              'badge-warning': selectedItem.stockStatus === 'low',
+              'badge-danger': selectedItem.stockStatus === 'out',
             }"
           >
             {{ selectedItem.stockStatus }}

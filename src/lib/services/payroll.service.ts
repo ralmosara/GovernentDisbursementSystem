@@ -81,6 +81,32 @@ async function generateEmployeeNumber(): Promise<string> {
   return `${prefix}${String(nextNumber).padStart(4, '0')}`;
 }
 
+/**
+ * Columns a caller may write. Request bodies are filtered through this list so that
+ * audit columns (createdBy, timestamps), identity (id, employeeNo after creation) and
+ * account links cannot be set by mass assignment.
+ */
+const EDITABLE_EMPLOYEE_FIELDS = [
+  'firstName', 'lastName', 'middleName', 'suffix', 'dateOfBirth', 'civilStatus', 'gender',
+  'position', 'salaryGrade', 'stepIncrement', 'appointmentStatus', 'employmentStatus',
+  'dateHired', 'dateRegularized', 'dateResigned',
+  'basicSalary', 'pera', 'additionalAllowance',
+  'tinNo', 'gsisNo', 'philhealthNo', 'pagibigNo',
+  'bankName', 'bankAccountNo', 'bankAccountName',
+  'mobileNo', 'email', 'address',
+  'taxExemptionCode', 'numberOfDependents',
+] as const;
+
+function pickEmployeeFields(data: Record<string, unknown>): Record<string, unknown> {
+  const picked: Record<string, unknown> = {};
+  for (const field of EDITABLE_EMPLOYEE_FIELDS) {
+    if (data[field] !== undefined) {
+      picked[field] = data[field];
+    }
+  }
+  return picked;
+}
+
 export async function createEmployee(
   data: CreateEmployeeData,
   createdBy: number
@@ -88,7 +114,8 @@ export async function createEmployee(
   const employeeNo = data.employeeNo || (await generateEmployeeNumber());
 
   const [newEmployee] = await db.insert(employees).values({
-    ...data,
+    ...(pickEmployeeFields(data as unknown as Record<string, unknown>) as typeof employees.$inferInsert),
+    userId: data.userId,
     employeeNo,
     createdBy,
   });
@@ -152,7 +179,11 @@ export async function updateEmployee(
   id: number,
   data: UpdateEmployeeData
 ): Promise<void> {
-  await db.update(employees).set(data).where(eq(employees.id, id));
+  const updates = pickEmployeeFields(data as unknown as Record<string, unknown>);
+  if (Object.keys(updates).length === 0) {
+    return;
+  }
+  await db.update(employees).set(updates).where(eq(employees.id, id));
 }
 
 export async function deleteEmployee(id: number): Promise<void> {

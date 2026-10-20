@@ -24,6 +24,8 @@ export interface CreateDVData {
   amount: number;
   paymentMode: 'mds_check' | 'commercial_check' | 'ada' | 'other';
   createdBy: number;
+  /** DV numbers the preparer was warned about as possible duplicates and chose to proceed past */
+  duplicateWarningAcknowledged?: string[];
 }
 
 export interface UpdateDVData {

@@ -68,14 +68,14 @@ const additionalClaim = parseFloat(liquidation.liquidationReport.additionalClaim
       font-size: 10pt;
       line-height: 1.4;
       color: #000;
-      background: #fff;
+      background: #FFFFFF;
       padding: 20px;
     }
 
     .lr-container {
       max-width: 8.5in;
       margin: 0 auto;
-      background: white;
+      background: #FFFFFF;
       border: 2px solid #000;
       padding: 0.5in;
     }
@@ -148,7 +148,7 @@ const additionalClaim = parseFloat(liquidation.liquidationReport.additionalClaim
     }
 
     th {
-      background: #e0e0e0;
+      background: #DCDFE4;
       font-weight: bold;
     }
 
@@ -160,7 +160,7 @@ const additionalClaim = parseFloat(liquidation.liquidationReport.additionalClaim
       border: 2px solid #000;
       padding: 15px;
       margin: 20px 0;
-      background: #f9f9f9;
+      background: #F7F8F9;
     }
 
     .summary-row {
@@ -179,18 +179,18 @@ const additionalClaim = parseFloat(liquidation.liquidationReport.additionalClaim
     }
 
     .summary-row.highlight {
-      background: #fff3cd;
+      background: #FFF7D6;
       padding: 8px;
       margin: 8px -8px;
       font-weight: bold;
     }
 
     .refund-box {
-      background: #d1ecf1;
+      background: #E9F2FF;
     }
 
     .claim-box {
-      background: #d4edda;
+      background: #DCFFF1;
     }
 
     .signatures {
@@ -221,7 +221,7 @@ const additionalClaim = parseFloat(liquidation.liquidationReport.additionalClaim
       top: 20px;
       right: 20px;
       padding: 12px 24px;
-      background: #2563eb;
+      background: #0055CC;
       color: white;
       border: none;
       border-radius: 6px;
@@ -231,7 +231,7 @@ const additionalClaim = parseFloat(liquidation.liquidationReport.additionalClaim
     }
 
     .print-button:hover {
-      background: #1d4ed8;
+      background: #0055CC;
     }
   </style>
 </head>
@@ -309,7 +309,7 @@ const additionalClaim = parseFloat(liquidation.liquidationReport.additionalClaim
         )}
       </tbody>
       <tfoot>
-        <tr style="font-weight: bold; background: #f0f0f0;">
+        <tr style="font-weight: bold; background: #F1F2F4;">
           <td colspan="4" style="text-align: right;">TOTAL EXPENSES:</td>
           <td class="amount">{formatCurrency(totalExpenses)}</td>
         </tr>
@@ -347,7 +347,7 @@ const additionalClaim = parseFloat(liquidation.liquidationReport.additionalClaim
       )}
 
       {refund === 0 && additionalClaim === 0 && (
-        <div class="summary-row highlight" style="background: #e8f5e9;">
+        <div class="summary-row highlight" style="background: #DCFFF1;">
           <span><strong>STATUS:</strong></span>
           <span><strong>BALANCED - NO REFUND OR ADDITIONAL CLAIM</strong></span>
         </div>

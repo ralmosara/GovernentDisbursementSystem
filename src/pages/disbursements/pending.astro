@@ -1,0 +1,5 @@
+---
+// Kept for old links: pending DV approvals live on the Approvals page
+const stage = Astro.url.searchParams.get('stage');
+return Astro.redirect(stage ? `/approvals?stage=${encodeURIComponent(stage)}` : '/approvals');
+---

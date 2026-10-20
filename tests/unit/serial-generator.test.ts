@@ -1,334 +1,230 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { generateDVNumber, generateORNumber, generateCANumber, generateDepositSlipNumber } from '../../src/lib/utils/serial-generator';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import {
+  generateDVNumber,
+  generateORNumber,
+  generateCANumber,
+  generateDepositSlipNumber,
+  generateSerialNumber,
+  generateJEVNumber,
+  validateDVNumber,
+  parseDVNumber,
+} from '../../src/lib/utils/serial-generator';
 
-// Mock the database
-vi.mock('../../src/lib/db/connection', () => ({
-  db: {
-    select: vi.fn(),
-    insert: vi.fn(),
-  },
-}));
+// Each db query consumes the next queued result. Builders are chainable and awaitable.
+const queuedResults: unknown[][] = [];
+const updates: unknown[] = [];
+
+function queryBuilder() {
+  const result = queuedResults.shift() ?? [];
+  const builder: any = new Proxy(
+    {},
+    {
+      get(_target, prop) {
+        if (prop === 'then') {
+          return (resolve: (v: unknown) => void, reject: (e: unknown) => void) =>
+            Promise.resolve(result).then(resolve, reject);
+        }
+        if (prop === 'set') {
+          return (values: unknown) => {
+            updates.push(values);
+            return builder;
+          };
+        }
+        return () => builder;
+      },
+    }
+  );
+  return builder;
+}
+
+vi.mock('../../src/lib/db/connection', () => {
+  const db: any = {
+    select: vi.fn(() => queryBuilder()),
+    insert: vi.fn(() => queryBuilder()),
+    update: vi.fn(() => queryBuilder()),
+  };
+  db.transaction = vi.fn((fn: (tx: unknown) => unknown) => fn(db));
+  return { db };
+});
+
+const currentYear = new Date().getFullYear();
+const currentMonth = String(new Date().getMonth() + 1).padStart(2, '0');
 
 describe('Serial Number Generation', () => {
   beforeEach(() => {
+    queuedResults.length = 0;
+    updates.length = 0;
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   describe('generateDVNumber', () => {
     it('should generate DV number in format 0000-00-0000 (Serial-Month-Year)', async () => {
-      const { db } = await import('../../src/lib/db/connection');
-
-      // Mock database to return no existing DVs for current year
-      vi.mocked(db.select).mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            orderBy: vi.fn().mockReturnValue({
-              limit: vi.fn().mockResolvedValue([]),
-            }),
-          }),
-        }),
-      } as any);
-
-      vi.mocked(db.insert).mockReturnValue({
-        values: vi.fn().mockResolvedValue({ insertId: 1 }),
-      } as any);
+      queuedResults.push([]);
 
       const dvNo = await generateDVNumber();
 
-      // Check format: 0001-MM-YYYY
-      const dvPattern = /^\d{4}-\d{2}-\d{4}$/;
-      expect(dvNo).toMatch(dvPattern);
-
-      // Check that it starts with 0001 for first DV
-      expect(dvNo.startsWith('0001')).toBe(true);
+      expect(dvNo).toMatch(/^\d{4}-\d{2}-\d{4}$/);
+      expect(dvNo).toBe(`0001-${currentMonth}-${currentYear}`);
     });
 
-    it('should increment serial number for same month and year', async () => {
-      const { db } = await import('../../src/lib/db/connection');
+    it('should increment serial number within the fiscal year', async () => {
+      queuedResults.push([{ dvNo: `0005-01-${currentYear}` }]);
 
-      // Mock database to return existing DV: 0005-01-2024
-      vi.mocked(db.select).mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            orderBy: vi.fn().mockReturnValue({
-              limit: vi.fn().mockResolvedValue([{ dvNo: '0005-01-2024' }]),
-            }),
-          }),
-        }),
-      } as any);
+      const dvNo = await generateDVNumber(currentYear);
 
-      vi.mocked(db.insert).mockReturnValue({
-        values: vi.fn().mockResolvedValue({ insertId: 1 }),
-      } as any);
-
-      const dvNo = await generateDVNumber();
-
-      // Should be 0006-01-2024 or 0006-MM-YYYY depending on current month
       expect(dvNo.startsWith('0006')).toBe(true);
     });
 
-    it('should reset to 0001 for new year', async () => {
-      const { db } = await import('../../src/lib/db/connection');
+    it('should use the given fiscal year as the suffix', async () => {
+      queuedResults.push([]);
 
-      const currentYear = new Date().getFullYear();
-      const lastYear = currentYear - 1;
+      const dvNo = await generateDVNumber(2027);
 
-      // Mock database to return DV from last year
-      vi.mocked(db.select).mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            orderBy: vi.fn().mockReturnValue({
-              limit: vi.fn().mockResolvedValue([{ dvNo: `9999-12-${lastYear}` }]),
-            }),
-          }),
-        }),
-      } as any);
+      expect(dvNo.startsWith('0001')).toBe(true);
+      expect(dvNo.endsWith('2027')).toBe(true);
+    });
 
-      vi.mocked(db.insert).mockReturnValue({
-        values: vi.fn().mockResolvedValue({ insertId: 1 }),
-      } as any);
+    it('should handle leap year dates correctly', async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date('2024-02-29T12:00:00'));
+      queuedResults.push([]);
 
       const dvNo = await generateDVNumber();
 
-      // Should reset to 0001 for current year
-      expect(dvNo.startsWith('0001')).toBe(true);
-      expect(dvNo.endsWith(currentYear.toString())).toBe(true);
+      expect(dvNo).toBe('0001-02-2024');
+    });
+  });
+
+  describe('DV number validation', () => {
+    it('should validate and parse DV numbers', () => {
+      expect(validateDVNumber('0042-03-2026')).toBe(true);
+      expect(validateDVNumber('42-03-2026')).toBe(false);
+      expect(parseDVNumber('0042-03-2026')).toEqual({ serial: 42, month: 3, year: 2026 });
+      expect(parseDVNumber('bad')).toBeNull();
     });
   });
 
   describe('generateORNumber', () => {
-    it('should generate sequential OR number for given series', async () => {
-      const { db } = await import('../../src/lib/db/connection');
+    const series = (overrides: Record<string, unknown>) => ({
+      id: 1,
+      seriesCode: 'OR',
+      startNumber: 1,
+      currentNumber: 100,
+      endNumber: 1000,
+      isActive: true,
+      ...overrides,
+    });
 
-      // Mock OR series with prefix and last number
-      vi.mocked(db.select).mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([
-              { id: 1, prefix: 'OR', startNumber: 1, currentNumber: 100, endNumber: 1000 },
-            ]),
-          }),
-        }),
-      } as any);
-
-      vi.mocked(db.insert).mockReturnValue({
-        values: vi.fn().mockResolvedValue({ insertId: 1 }),
-      } as any);
+    it('should generate the next sequential OR number and advance the series', async () => {
+      queuedResults.push([series({ currentNumber: 100 })]);
 
       const orNo = await generateORNumber(1);
 
-      // Should be OR-0000101
-      expect(orNo).toBe('OR-0000101');
-    });
-
-    it('should throw error when OR series is exhausted', async () => {
-      const { db } = await import('../../src/lib/db/connection');
-
-      // Mock OR series at end number
-      vi.mocked(db.select).mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([
-              { id: 1, prefix: 'OR', startNumber: 1, currentNumber: 1000, endNumber: 1000 },
-            ]),
-          }),
-        }),
-      } as any);
-
-      await expect(generateORNumber(1)).rejects.toThrow('OR series is exhausted');
+      expect(orNo).toBe('OR-000101');
+      expect(updates).toContainEqual({ currentNumber: 101 });
     });
 
     it('should format OR number with leading zeros', async () => {
+      queuedResults.push([series({ currentNumber: 5 })]);
+
+      expect(await generateORNumber(1)).toBe('OR-000006');
+    });
+
+    it('should run inside a transaction so the series row can be locked', async () => {
       const { db } = await import('../../src/lib/db/connection');
+      queuedResults.push([series({})]);
 
-      // Mock OR series with low current number
-      vi.mocked(db.select).mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([
-              { id: 1, prefix: 'OR', startNumber: 1, currentNumber: 5, endNumber: 1000 },
-            ]),
-          }),
-        }),
-      } as any);
+      await generateORNumber(1);
 
-      vi.mocked(db.insert).mockReturnValue({
-        values: vi.fn().mockResolvedValue({ insertId: 1 }),
-      } as any);
+      expect((db as any).transaction).toHaveBeenCalledTimes(1);
+    });
 
-      const orNo = await generateORNumber(1);
+    it('should reuse the caller transaction when one is given', async () => {
+      const { db } = await import('../../src/lib/db/connection');
+      queuedResults.push([series({})]);
 
-      // Should be OR-0000006 with leading zeros
-      expect(orNo).toBe('OR-0000006');
-      expect(orNo.length).toBe(10); // OR-0000006
+      await generateORNumber(1, db as any);
+
+      expect((db as any).transaction).not.toHaveBeenCalled();
+    });
+
+    it('should throw error when OR series is exhausted', async () => {
+      queuedResults.push([series({ currentNumber: 1000, endNumber: 1000 })]);
+
+      await expect(generateORNumber(1)).rejects.toThrow('OR series is exhausted');
+      expect(updates).toHaveLength(0);
+    });
+
+    it('should throw error when OR series is inactive', async () => {
+      queuedResults.push([series({ isActive: false })]);
+
+      await expect(generateORNumber(1)).rejects.toThrow('OR series is inactive');
+    });
+
+    it('should throw error when OR series does not exist', async () => {
+      queuedResults.push([]);
+
+      await expect(generateORNumber(99)).rejects.toThrow('OR series not found');
     });
   });
 
   describe('generateCANumber', () => {
     it('should generate CA number in format CA-YYYY-0000', async () => {
-      const { db } = await import('../../src/lib/db/connection');
+      queuedResults.push([]);
 
-      // Mock no existing CAs for current year
-      vi.mocked(db.select).mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            orderBy: vi.fn().mockReturnValue({
-              limit: vi.fn().mockResolvedValue([]),
-            }),
-          }),
-        }),
-      } as any);
-
-      vi.mocked(db.insert).mockReturnValue({
-        values: vi.fn().mockResolvedValue({ insertId: 1 }),
-      } as any);
-
-      const caNo = await generateCANumber();
-
-      const currentYear = new Date().getFullYear();
-      expect(caNo).toBe(`CA-${currentYear}-0001`);
+      expect(await generateCANumber()).toBe(`CA-${currentYear}-0001`);
     });
 
     it('should increment CA number within same year', async () => {
-      const { db } = await import('../../src/lib/db/connection');
+      queuedResults.push([{ caNo: `CA-${currentYear}-0042` }]);
 
-      const currentYear = new Date().getFullYear();
-
-      // Mock existing CA
-      vi.mocked(db.select).mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            orderBy: vi.fn().mockReturnValue({
-              limit: vi.fn().mockResolvedValue([{ caNo: `CA-${currentYear}-0042` }]),
-            }),
-          }),
-        }),
-      } as any);
-
-      vi.mocked(db.insert).mockReturnValue({
-        values: vi.fn().mockResolvedValue({ insertId: 1 }),
-      } as any);
-
-      const caNo = await generateCANumber();
-
-      expect(caNo).toBe(`CA-${currentYear}-0043`);
+      expect(await generateCANumber()).toBe(`CA-${currentYear}-0043`);
     });
   });
 
   describe('generateDepositSlipNumber', () => {
     it('should generate deposit slip number in format DS-YYYY-0000', async () => {
-      const { db } = await import('../../src/lib/db/connection');
+      queuedResults.push([]);
 
-      // Mock no existing deposit slips
-      vi.mocked(db.select).mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          orderBy: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([]),
-          }),
-        }),
-      } as any);
-
-      vi.mocked(db.insert).mockReturnValue({
-        values: vi.fn().mockResolvedValue({ insertId: 1 }),
-      } as any);
-
-      const dsNo = await generateDepositSlipNumber();
-
-      const currentYear = new Date().getFullYear();
-      expect(dsNo).toBe(`DS-${currentYear}-0001`);
+      expect(await generateDepositSlipNumber()).toBe(`DS-${currentYear}-0001`);
     });
 
-    it('should handle large sequence numbers with proper padding', async () => {
-      const { db } = await import('../../src/lib/db/connection');
+    it('should handle large sequence numbers without truncating', async () => {
+      queuedResults.push([{ depositSlipNo: `DS-${currentYear}-9999` }]);
 
-      const currentYear = new Date().getFullYear();
-
-      // Mock existing deposit slip with high number
-      vi.mocked(db.select).mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          orderBy: vi.fn().mockReturnValue({
-            limit: vi.fn().mockResolvedValue([{ depositSlipNo: `DS-${currentYear}-9999` }]),
-          }),
-        }),
-      } as any);
-
-      vi.mocked(db.insert).mockReturnValue({
-        values: vi.fn().mockResolvedValue({ insertId: 1 }),
-      } as any);
-
-      const dsNo = await generateDepositSlipNumber();
-
-      // Should handle rollover or larger numbers
-      expect(dsNo).toBe(`DS-${currentYear}-10000`);
+      expect(await generateDepositSlipNumber()).toBe(`DS-${currentYear}-10000`);
     });
   });
 
-  describe('Serial Number Uniqueness', () => {
-    it('should not generate duplicate DV numbers', async () => {
-      const { db } = await import('../../src/lib/db/connection');
+  describe('generateSerialNumber (travel documents)', () => {
+    it.each(['IOT', 'CTC', 'LR'] as const)('should start %s numbering at 0001', async (type) => {
+      queuedResults.push([]);
 
-      vi.mocked(db.select).mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            orderBy: vi.fn().mockReturnValue({
-              limit: vi.fn().mockResolvedValue([]),
-            }),
-          }),
-        }),
-      } as any);
+      expect(await generateSerialNumber(type)).toBe(`${type}-${currentYear}-0001`);
+    });
 
-      vi.mocked(db.insert).mockReturnValue({
-        values: vi.fn().mockResolvedValue({ insertId: 1 }),
-      } as any);
+    it('should increment from the latest document of the year', async () => {
+      queuedResults.push([{ docNo: `IOT-${currentYear}-0019` }]);
 
-      const dvNo1 = await generateDVNumber();
-      const dvNo2 = await generateDVNumber();
-
-      // Should be different (in real scenario, database constraint ensures this)
-      expect(dvNo1).toBeDefined();
-      expect(dvNo2).toBeDefined();
+      expect(await generateSerialNumber('IOT')).toBe(`IOT-${currentYear}-0020`);
     });
   });
 
-  describe('Edge Cases', () => {
-    it('should handle leap year dates correctly', async () => {
-      const { db } = await import('../../src/lib/db/connection');
+  describe('generateJEVNumber', () => {
+    it('should start a month at 0001', async () => {
+      queuedResults.push([]);
 
-      // Mock date to Feb 29 of a leap year
-      const originalDate = Date;
-      global.Date = class extends originalDate {
-        constructor() {
-          super();
-          return new originalDate('2024-02-29T12:00:00Z');
-        }
-      } as any;
-
-      vi.mocked(db.select).mockReturnValue({
-        from: vi.fn().mockReturnValue({
-          where: vi.fn().mockReturnValue({
-            orderBy: vi.fn().mockReturnValue({
-              limit: vi.fn().mockResolvedValue([]),
-            }),
-          }),
-        }),
-      } as any);
-
-      vi.mocked(db.insert).mockReturnValue({
-        values: vi.fn().mockResolvedValue({ insertId: 1 }),
-      } as any);
-
-      const dvNo = await generateDVNumber();
-
-      expect(dvNo).toMatch(/0001-02-2024/);
-
-      global.Date = originalDate;
+      expect(await generateJEVNumber(2026, 3)).toBe('2026-03-0001');
     });
 
-    it('should handle year transition correctly', async () => {
-      const { db } = await import('../../src/lib/db/connection');
+    it('should continue the month sequence', async () => {
+      queuedResults.push([{ jevNo: '2026-03-0007' }]);
 
-      // Test that December and January have different year suffixes
-      expect(true).toBe(true); // Placeholder for year transition logic
+      expect(await generateJEVNumber(2026, 3)).toBe('2026-03-0008');
     });
   });
 });

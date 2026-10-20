@@ -1,0 +1,36 @@
+---
+// ADS section message: an inline banner with an icon, optional title and actions.
+interface Props {
+  appearance?: 'info' | 'success' | 'warning' | 'error' | 'discovery';
+  title?: string;
+  class?: string;
+  id?: string;
+  role?: string;
+}
+
+const { appearance = 'info', title, class: extra = '', id, role } = Astro.props;
+// Literal class names so Tailwind keeps them (it can't see classes built from template strings)
+const appearanceClass = {
+  info: 'alert-info',
+  success: 'alert-success',
+  warning: 'alert-warning',
+  error: 'alert-error',
+  discovery: 'alert-discovery',
+}[appearance];
+const icons = {
+  info: 'pi-info-circle',
+  success: 'pi-check-circle',
+  warning: 'pi-exclamation-triangle',
+  error: 'pi-times-circle',
+  discovery: 'pi-sparkles',
+};
+---
+
+<div class={`alert ${appearanceClass} ${extra}`} id={id} role={role ?? (appearance === 'error' ? 'alert' : undefined)}>
+  <i class={`pi ${icons[appearance]}`} aria-hidden="true"></i>
+  <div class="min-w-0 flex-1">
+    {title && <p class="font-semibold">{title}</p>}
+    <div class={title ? 'mt-0.5' : ''}><slot /></div>
+    {Astro.slots.has('actions') && <div class="mt-2 flex flex-wrap gap-3 text-sm font-medium"><slot name="actions" /></div>}
+  </div>
+</div>

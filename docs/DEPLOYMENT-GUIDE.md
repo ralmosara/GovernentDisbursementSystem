@@ -427,11 +427,9 @@ server {
         add_header Cache-Control "public, immutable";
     }
 
-    location /uploads/ {
-        alias /var/www/gds/uploads/;
-        expires 1y;
-        add_header Cache-Control "public";
-    }
+    # Uploaded attachments are NOT served by Nginx. They contain sensitive
+    # financial documents and are only available through the authenticated
+    # endpoint /api/attachments/{id}/download. Keep UPLOAD_DIR outside `root`.
 
     # API and dynamic routes (proxy to Node.js)
     location / {

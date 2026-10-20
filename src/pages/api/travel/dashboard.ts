@@ -18,19 +18,22 @@ export const GET: APIRoute = async ({ request, locals }) => {
       stats,
       pendingApprovals,
       outstandingCashAdvances,
-      unliquidatedTravels
+      unliquidatedTravels,
+      liquidationCounts
     ] = await Promise.all([
       TravelService.getTravelStats(fiscalYear ? parseInt(fiscalYear) : undefined),
       TravelService.getPendingApprovals(),
       TravelService.getOutstandingCashAdvances(),
-      TravelService.getUnliquidatedTravels()
+      TravelService.getUnliquidatedTravels(),
+      TravelService.getLiquidationCounts()
     ]);
 
     return new Response(JSON.stringify({
       stats,
       pendingApprovals,
       outstandingCashAdvances,
-      unliquidatedTravels
+      unliquidatedTravels,
+      liquidationCounts
     }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' }

@@ -1,0 +1,241 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import { budgetService } from '../../../lib/services/budget.service';
+
+const user = Astro.locals.user;
+
+if (!user) {
+  return Astro.redirect('/login');
+}
+
+const id = parseInt(Astro.params.id as string);
+
+if (!id || isNaN(id)) {
+  return Astro.redirect('/budget/allotments');
+}
+
+const allotment = await budgetService.getAllotmentById(id);
+
+if (!allotment) {
+  return Astro.redirect('/budget/allotments');
+}
+
+const [availability, obligations] = await Promise.all([
+  budgetService.getBudgetAvailability(id),
+  budgetService.getObligationsByAllotment(id)
+]);
+
+const peso = (n: number) => `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const pct = (part: number) => (availability.allotment > 0 ? (part / availability.allotment) * 100 : 0);
+
+const obligatedPct = pct(availability.obligation);
+const pendingPct = pct(availability.pendingObligation);
+const disbursedPct = pct(availability.disbursement);
+
+const formatDate = (date: Date | string | null) => {
+  if (!date) return 'N/A';
+  return new Date(date).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
+};
+
+const statusBadge: Record<string, string> = {
+  pending: 'badge-warning',
+  approved: 'badge-success',
+  rejected: 'badge-danger'
+};
+---
+
+<MainLayout title={`Allotment #${allotment.id}`}>
+  <div class="container-fluid py-6">
+    <!-- Page Header -->
+    <div class="page-header mb-6">
+      <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div>
+          <div class="flex items-center gap-3 mb-2">
+            <a href="/budget/allotments" class="text-gray-500 hover:text-gray-700" aria-label="Back to allotments">
+              <i class="pi pi-arrow-left"></i>
+            </a>
+            <h1 class="page-title">Allotment Details</h1>
+          </div>
+          <p class="page-description">
+            {allotment.objectOfExpenditure.code} – {allotment.objectOfExpenditure.name}
+          </p>
+        </div>
+        <div class="flex gap-3">
+          <a href={`/budget/appropriations/${allotment.appropriationId}`} class="btn btn-secondary btn-md">
+            <i class="pi pi-wallet mr-2"></i>
+            View Appropriation
+          </a>
+          <a href={`/budget/obligations/create?allotment=${allotment.id}`} class="btn btn-primary btn-md">
+            <i class="pi pi-plus mr-2"></i>
+            New Obligation
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Allotment Info -->
+    <div class="card mb-6">
+      <div class="card-header">
+        <h3 class="text-lg font-semibold text-gray-900">Allotment Information</h3>
+      </div>
+      <div class="card-body">
+        <dl class="grid grid-cols-1 md:grid-cols-3 gap-6">
+          <div>
+            <dt class="text-sm font-medium text-gray-600">Appropriation</dt>
+            <dd class="text-base font-semibold text-gray-900 mt-1">
+              {allotment.appropriation.reference}
+              <span class="text-sm font-normal text-gray-500">(FY {allotment.appropriation.year})</span>
+            </dd>
+          </div>
+          <div>
+            <dt class="text-sm font-medium text-gray-600">Fund Cluster</dt>
+            <dd class="text-base font-semibold text-gray-900 mt-1">
+              {allotment.appropriation.fundCluster.code} – {allotment.appropriation.fundCluster.name}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-sm font-medium text-gray-600">Allotment Class</dt>
+            <dd class="mt-1"><span class="badge badge-info">{allotment.allotmentClass}</span></dd>
+          </div>
+          <div>
+            <dt class="text-sm font-medium text-gray-600">Object of Expenditure</dt>
+            <dd class="text-base text-gray-900 mt-1">
+              <span class="font-mono">{allotment.objectOfExpenditure.code}</span> – {allotment.objectOfExpenditure.name}
+              <div class="text-xs text-gray-500">{allotment.objectOfExpenditure.category}</div>
+            </dd>
+          </div>
+          <div>
+            <dt class="text-sm font-medium text-gray-600">MFO/PAP</dt>
+            <dd class="text-base text-gray-900 mt-1">
+              {allotment.mfoPap ? `${allotment.mfoPap.code} – ${allotment.mfoPap.name}` : 'Not specified'}
+            </dd>
+          </div>
+          <div>
+            <dt class="text-sm font-medium text-gray-600">Date Created</dt>
+            <dd class="text-base text-gray-900 mt-1">{formatDate(allotment.createdAt)}</dd>
+          </div>
+          <div class="md:col-span-3">
+            <dt class="text-sm font-medium text-gray-600">Purpose</dt>
+            <dd class="text-gray-900 mt-1">{allotment.purpose}</dd>
+          </div>
+        </dl>
+      </div>
+    </div>
+
+    <!-- Budget Utilization -->
+    <div class="card mb-6">
+      <div class="card-header">
+        <h3 class="text-lg font-semibold text-gray-900">Budget Utilization</h3>
+      </div>
+      <div class="card-body">
+        <div class="grid grid-cols-2 lg:grid-cols-5 gap-4">
+          <div class="p-4 bg-blue-50 rounded-lg">
+            <p class="text-xs text-gray-600 mb-1">Allotment</p>
+            <p class="text-lg font-bold text-blue-700">{peso(availability.allotment)}</p>
+          </div>
+          <div class="p-4 bg-green-50 rounded-lg">
+            <p class="text-xs text-gray-600 mb-1">Approved Obligations</p>
+            <p class="text-lg font-bold text-green-700">{peso(availability.obligation)}</p>
+          </div>
+          <div class="p-4 bg-yellow-50 rounded-lg">
+            <p class="text-xs text-gray-600 mb-1">Pending Obligations</p>
+            <p class="text-lg font-bold text-yellow-700">{peso(availability.pendingObligation)}</p>
+          </div>
+          <div class="p-4 bg-purple-50 rounded-lg">
+            <p class="text-xs text-gray-600 mb-1">Disbursed</p>
+            <p class="text-lg font-bold text-purple-700">{peso(availability.disbursement)}</p>
+          </div>
+          <div class="p-4 bg-gray-50 rounded-lg col-span-2 lg:col-span-1">
+            <p class="text-xs text-gray-600 mb-1">Available for New Obligations</p>
+            <p class={`text-lg font-bold ${availability.availableBalance <= 0 ? 'text-red-600' : 'text-gray-900'}`}>
+              {peso(availability.availableBalance)}
+            </p>
+          </div>
+        </div>
+
+        <div class="mt-6">
+          <div class="flex items-center justify-between text-sm text-gray-600 mb-2">
+            <span>Obligation Rate</span>
+            <span>{obligatedPct.toFixed(2)}% approved · {pendingPct.toFixed(2)}% pending</span>
+          </div>
+          <div
+            class="w-full bg-gray-200 rounded-full h-3 flex overflow-hidden"
+            role="img"
+            aria-label={`${obligatedPct.toFixed(1)}% obligated, ${pendingPct.toFixed(1)}% pending`}
+          >
+            <div class="bg-green-600 h-3" style={`width: ${Math.min(obligatedPct, 100)}%`}></div>
+            <div class="bg-yellow-400 h-3" style={`width: ${Math.min(pendingPct, Math.max(100 - obligatedPct, 0))}%`}></div>
+          </div>
+          <div class="flex items-center justify-between text-sm text-gray-600 mt-4 mb-2">
+            <span>Disbursement Rate</span>
+            <span>{disbursedPct.toFixed(2)}%</span>
+          </div>
+          <div class="w-full bg-gray-200 rounded-full h-3">
+            <div class="bg-purple-600 h-3 rounded-full" style={`width: ${Math.min(disbursedPct, 100)}%`}></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Obligations -->
+    <div class="card">
+      <div class="card-header flex items-center justify-between">
+        <h3 class="text-lg font-semibold text-gray-900">Obligations ({obligations.length})</h3>
+        <a href={`/budget/obligations/create?allotment=${allotment.id}`} class="btn btn-primary btn-sm">
+          <i class="pi pi-plus mr-2"></i>
+          Add Obligation
+        </a>
+      </div>
+      <div class="card-body">
+        {obligations.length === 0 ? (
+          <div class="text-center py-12">
+            <i class="pi pi-inbox text-4xl text-gray-400 mb-4"></i>
+            <p class="text-gray-500">No obligations have been charged to this allotment yet</p>
+          </div>
+        ) : (
+          <div class="overflow-x-auto">
+            <table class="table table-hover">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>ORS / BURS No.</th>
+                  <th>Payee</th>
+                  <th>Particulars</th>
+                  <th class="text-right">Amount</th>
+                  <th>Status</th>
+                  <th class="text-center">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {obligations.map(obligation => (
+                  <tr>
+                    <td class="text-sm whitespace-nowrap">{formatDate(obligation.obligationDate)}</td>
+                    <td class="text-sm font-mono">{obligation.orsNumber || obligation.bursNumber || '—'}</td>
+                    <td class="text-sm font-medium text-gray-900">{obligation.payee}</td>
+                    <td class="text-sm text-gray-700 max-w-xs truncate" title={obligation.particulars}>{obligation.particulars}</td>
+                    <td class="text-right font-medium whitespace-nowrap">{peso(obligation.amount)}</td>
+                    <td>
+                      <span class={`badge ${statusBadge[obligation.status || ''] || 'badge-secondary'} text-xs`}>
+                        {obligation.status}
+                      </span>
+                    </td>
+                    <td class="text-center">
+                      <a
+                        href={`/budget/obligations/${obligation.id}`}
+                        class="text-blue-600 hover:text-blue-800"
+                        title="View obligation"
+                        aria-label={`View obligation for ${obligation.payee}`}
+                      >
+                        <i class="pi pi-eye"></i>
+                      </a>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  </div>
+</MainLayout>
