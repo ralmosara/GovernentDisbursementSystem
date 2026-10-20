@@ -16,6 +16,7 @@ import {
 } from '../db/schema';
 import { eq, and, or, desc, sum, sql, isNotNull, isNull, gte, lte, inArray, notInArray } from 'drizzle-orm';
 import { generateORNumber, generateDepositSlipNumber, generateCANumber } from '../utils/serial-generator';
+import { ledgerService } from './ledger.service';
 
 // ============================================
 // TYPE DEFINITIONS
@@ -98,7 +99,7 @@ export class CashService {
     try {
       // Issue the OR number and record the receipt atomically so a failed insert
       // never consumes (and skips) an accountable-form number
-      return await db.transaction(async (tx) => {
+      const receipt = await db.transaction(async (tx) => {
         const orNo = await generateORNumber(data.orSeriesId, tx);
 
         const [result] = await tx.insert(cashReceipts).values({
@@ -122,6 +123,9 @@ export class CashService {
           orNo,
         };
       });
+
+      await ledgerService.tryPost(`OR ${receipt.orNo}`, () => ledgerService.postCashReceipt(receipt.id, userId));
+      return receipt;
     } catch (error) {
       throw new Error(`Failed to create cash receipt: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
@@ -317,10 +321,17 @@ export class CashService {
    * Confirm a bank deposit
    */
   async confirmBankDeposit(depositId: number, userId: number): Promise<void> {
-    await db
+    // Only a pending deposit can be confirmed, so it is recorded in the books once
+    const [result] = await db
       .update(bankDeposits)
       .set({ status: 'confirmed' })
-      .where(eq(bankDeposits.id, depositId));
+      .where(and(eq(bankDeposits.id, depositId), eq(bankDeposits.status, 'pending')));
+
+    if (result.affectedRows === 0) {
+      throw new Error('Only a pending deposit can be confirmed');
+    }
+
+    await ledgerService.tryPost(`deposit #${depositId}`, () => ledgerService.postDeposit(depositId, userId));
   }
 
   /**

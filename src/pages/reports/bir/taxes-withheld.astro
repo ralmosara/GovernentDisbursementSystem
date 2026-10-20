@@ -1,0 +1,225 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import PageHeader from '../../../components/ui/PageHeader.astro';
+import FilterBar from '../../../components/ui/FilterBar.astro';
+import DataTable from '../../../components/ui/DataTable.astro';
+import EmptyState from '../../../components/ui/EmptyState.astro';
+import Banner from '../../../components/ui/Banner.astro';
+import { complianceReportsService, quarterOf } from '../../../lib/services/compliance-reports.service';
+import { getSetting } from '../../../lib/services/settings.service';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const params = Astro.url.searchParams;
+const now = new Date();
+const year = parseInt(params.get('year') ?? '') || now.getFullYear();
+const quarter = Math.min(4, Math.max(1, parseInt(params.get('quarter') ?? '') || Math.floor(now.getMonth() / 3) + 1));
+const view = params.get('view') === '2307' ? '2307' : 'summary';
+
+const period = quarterOf(year, quarter);
+const [taxes, form2307, agencyName] = await Promise.all([
+  complianceReportsService.getTaxesWithheld(period),
+  complianceReportsService.getForm2307(year, quarter),
+  getSetting('agency_name').catch(() => ''),
+]);
+
+const peso = (value: number) => value.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const formatDate = (date: Date | string) => new Date(date).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
+const TAX_LABELS: Record<string, string> = { ewt: 'Expanded withholding tax', final_vat: 'Final VAT', percentage_tax: 'Percentage tax' };
+const href = (v: string) => `/reports/bir/taxes-withheld?year=${year}&quarter=${quarter}&view=${v}`;
+
+// Totals by month for the monthly remittance (0619-E for EWT)
+const months = [0, 1, 2].map(i => new Date(year, period.from.getMonth() + i, 1));
+const monthly = months.map(m => ({
+  label: m.toLocaleDateString('en-PH', { month: 'long' }),
+  ewt: taxes.details.filter(d => d.taxType === 'ewt' && new Date(d.dvDate).getMonth() === m.getMonth()).reduce((s, d) => s + d.amount, 0),
+  vat: taxes.details.filter(d => d.taxType !== 'ewt' && new Date(d.dvDate).getMonth() === m.getMonth()).reduce((s, d) => s + d.amount, 0),
+}));
+---
+
+<MainLayout title="Taxes withheld - Philippine Government FMS">
+  <PageHeader
+    title="Taxes withheld"
+    description="Taxes withheld from suppliers on approved vouchers, for BIR remittance and certificates."
+    breadcrumbs={[{ label: 'Reports', href: '/reports' }, { label: 'BIR: taxes withheld' }]}
+  >
+    <button slot="actions" type="button" class="btn btn-secondary" onclick="window.print()">
+      <i class="pi pi-print" aria-hidden="true"></i>
+      Print
+    </button>
+  </PageHeader>
+
+  <FilterBar action="/reports/bir/taxes-withheld">
+    <input type="hidden" name="view" value={view} />
+    <div class="form-group">
+      <label for="year" class="form-label">Year</label>
+      <select id="year" name="year" class="form-select">
+        {[now.getFullYear(), now.getFullYear() - 1, now.getFullYear() - 2].map(y => <option value={y} selected={y === year}>{y}</option>)}
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="quarter" class="form-label">Quarter</label>
+      <select id="quarter" name="quarter" class="form-select">
+        {[1, 2, 3, 4].map(q => <option value={q} selected={q === quarter}>Q{q}</option>)}
+      </select>
+    </div>
+  </FilterBar>
+
+  <nav class="flex gap-1 mb-4 no-print" aria-label="Report view">
+    <a href={href('summary')} class={`btn btn-sm ${view === 'summary' ? 'btn-secondary' : 'btn-subtle'}`} aria-current={view === 'summary' ? 'page' : undefined}>Remittance summary</a>
+    <a href={href('2307')} class={`btn btn-sm ${view === '2307' ? 'btn-secondary' : 'btn-subtle'}`} aria-current={view === '2307' ? 'page' : undefined}>Form 2307 by payee</a>
+  </nav>
+
+  {taxes.details.length === 0 ? (
+    <div class="card">
+      <EmptyState icon="pi-percentage" title={`No taxes withheld in Q${quarter} ${year}`} description="Taxes appear here once vouchers with a tax treatment are approved." />
+    </div>
+  ) : view === 'summary' ? (
+    <div class="space-y-6">
+      <section class="card" aria-labelledby="by-month">
+        <div class="card-header"><h2 id="by-month" class="card-title">By month — Q{quarter} {year}</h2></div>
+        <div class="relative overflow-x-auto">
+          <table class="table">
+            <thead>
+              <tr>
+                <th scope="col">Month</th>
+                <th scope="col" class="!text-right">Expanded withholding tax</th>
+                <th scope="col" class="!text-right">Final VAT and percentage tax</th>
+              </tr>
+            </thead>
+            <tbody>
+              {monthly.map(m => (
+                <tr>
+                  <td>{m.label}</td>
+                  <td class="text-right tabular-nums">{peso(m.ewt)}</td>
+                  <td class="text-right tabular-nums">{peso(m.vat)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p class="px-5 py-3 text-xs text-gray-500 border-t border-gray-200">
+          EWT is remitted monthly on BIR Form 0619-E (first two months) and quarterly on 1601-EQ. Final VAT and percentage tax withheld by government are remitted on Form 1600-VT / 1600-PT.
+        </p>
+      </section>
+
+      <section class="card" aria-labelledby="by-atc">
+        <div class="card-header"><h2 id="by-atc" class="card-title">By ATC</h2></div>
+        <div class="relative overflow-x-auto">
+          <table class="table">
+            <thead>
+              <tr>
+                <th scope="col">Tax</th>
+                <th scope="col">ATC</th>
+                <th scope="col" class="!text-right">Vouchers</th>
+                <th scope="col" class="!text-right">Tax base</th>
+                <th scope="col" class="!text-right">Tax withheld</th>
+              </tr>
+            </thead>
+            <tbody>
+              {taxes.summary.map(s => (
+                <tr>
+                  <td>{TAX_LABELS[s.taxType] ?? s.taxType}</td>
+                  <td class="tabular-nums">{s.atc ?? '—'}</td>
+                  <td class="text-right tabular-nums">{s.count}</td>
+                  <td class="text-right tabular-nums">{peso(s.taxBase)}</td>
+                  <td class="text-right tabular-nums">{peso(s.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr class="border-t-2 border-gray-200 font-semibold">
+                <th scope="row" colspan="4" class="!text-sm !text-gray-800">Total withheld</th>
+                <td class="text-right tabular-nums">{peso(taxes.total)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </section>
+
+      <DataTable title="Vouchers" count={taxes.details.length} quickFilter quickFilterLabel="Filter by payee or DV no.">
+        <table class="table">
+          <thead>
+            <tr>
+              <th scope="col">DV no.</th>
+              <th scope="col">Date</th>
+              <th scope="col">Payee</th>
+              <th scope="col">TIN</th>
+              <th scope="col">ATC</th>
+              <th scope="col" class="!text-right">Base</th>
+              <th scope="col" class="!text-right">Withheld</th>
+            </tr>
+          </thead>
+          <tbody>
+            {taxes.details.map(d => (
+              <tr>
+                <td class="whitespace-nowrap"><a href={`/disbursements/${d.dvId}`} class="text-primary-600 hover:underline">{d.dvNo}</a></td>
+                <td class="whitespace-nowrap text-gray-600" data-sort-value={new Date(d.dvDate).getTime()}>{formatDate(d.dvDate)}</td>
+                <td>{d.payeeName}</td>
+                <td class="text-gray-600 tabular-nums">{d.payeeTin ?? <span class="badge badge-warning">No TIN</span>}</td>
+                <td class="tabular-nums">{d.atc ?? TAX_LABELS[d.taxType]}</td>
+                <td class="text-right tabular-nums" data-sort-value={d.taxBase}>{peso(d.taxBase)}</td>
+                <td class="text-right tabular-nums" data-sort-value={d.amount}>{peso(d.amount)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </DataTable>
+    </div>
+  ) : (
+    <div class="space-y-6">
+      <Banner appearance="info" class="no-print">
+        Figures for BIR Form 2307 (Certificate of Creditable Tax Withheld at Source), one per payee for the quarter.
+        Issue the official form from the BIR eFPS/eBIRForms; final VAT and percentage tax go on Form 2306.
+      </Banner>
+      {form2307.payees.length === 0 && (
+        <div class="card"><EmptyState title="No expanded withholding tax this quarter" /></div>
+      )}
+      {form2307.payees.map(payee => (
+        <article class="card" aria-label={`Form 2307 for ${payee.payeeName}`}>
+          <header class="px-5 py-4 border-b border-gray-200">
+            <p class="text-xs font-semibold text-gray-600">CERTIFICATE OF CREDITABLE TAX WITHHELD AT SOURCE — Q{quarter} {year}</p>
+            <p class="mt-1 font-semibold text-gray-800">{payee.payeeName}</p>
+            <p class="text-sm text-gray-600">
+              TIN {payee.payeeTin ?? <span class="badge badge-warning">missing</span>}
+              {payee.payeeAddress ? ` · ${payee.payeeAddress}` : ''}
+            </p>
+            {agencyName && <p class="text-sm text-gray-600">Withholding agent: {agencyName}</p>}
+          </header>
+          <div class="relative overflow-x-auto">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th scope="col">Income payment subject to EWT</th>
+                  <th scope="col">ATC</th>
+                  {form2307.monthNames.map(m => <th scope="col" class="!text-right">{m}</th>)}
+                  <th scope="col" class="!text-right">Total</th>
+                  <th scope="col" class="!text-right">Tax withheld</th>
+                </tr>
+              </thead>
+              <tbody>
+                {payee.lines.map(line => (
+                  <tr>
+                    <td>{line.description}</td>
+                    <td class="tabular-nums">{line.atc}</td>
+                    {line.months.map(m => <td class="text-right tabular-nums">{m ? peso(m) : ''}</td>)}
+                    <td class="text-right tabular-nums">{peso(line.months.reduce((s, m) => s + m, 0))}</td>
+                    <td class="text-right tabular-nums">{peso(line.tax)}</td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr class="border-t-2 border-gray-200 font-semibold">
+                  <th scope="row" colspan="5" class="!text-sm !text-gray-800">Total</th>
+                  <td class="text-right tabular-nums">{peso(payee.totalIncome)}</td>
+                  <td class="text-right tabular-nums">{peso(payee.totalTax)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </article>
+      ))}
+    </div>
+  )}
+</MainLayout>

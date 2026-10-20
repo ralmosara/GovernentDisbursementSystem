@@ -1,0 +1,191 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import PageHeader from '../../../components/ui/PageHeader.astro';
+import FilterBar from '../../../components/ui/FilterBar.astro';
+import DataTable from '../../../components/ui/DataTable.astro';
+import EmptyState from '../../../components/ui/EmptyState.astro';
+import Banner from '../../../components/ui/Banner.astro';
+import Lozenge from '../../../components/ui/Lozenge.astro';
+import { db } from '../../../lib/db/connection';
+import { fundClusters } from '../../../lib/db/schema';
+import { ledgerService, JOURNAL_LABELS, SOURCE_LABELS, type JournalType } from '../../../lib/services/ledger.service';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const canPost = (user.roles ?? []).some(role => role === 'accountant' || role === 'administrator');
+const params = Astro.url.searchParams;
+const currentYear = new Date().getFullYear();
+const fiscalYear = parseInt(params.get('year') ?? '') || currentYear;
+const month = parseInt(params.get('month') ?? '') || undefined;
+const journalType = (Object.keys(JOURNAL_LABELS).includes(params.get('journal') ?? '') ? params.get('journal') : undefined) as JournalType | undefined;
+const fundClusterId = parseInt(params.get('fund') ?? '') || undefined;
+const search = params.get('search')?.trim() || undefined;
+
+const [entries, clusters, unposted] = await Promise.all([
+  ledgerService.getEntries({ fiscalYear, month, journalType, fundClusterId, search }),
+  db.select({ id: fundClusters.id, code: fundClusters.code, name: fundClusters.name }).from(fundClusters),
+  ledgerService.getUnposted(),
+]);
+
+const activeFilters = [month, journalType, fundClusterId, search, fiscalYear !== currentYear ? fiscalYear : undefined].filter(Boolean).length;
+const peso = (value: number | string) =>
+  `₱${parseFloat(String(value || 0)).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const formatDate = (date: Date | string) => new Date(date).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+---
+
+<MainLayout title="Journal entries - Philippine Government FMS">
+  <PageHeader
+    title="Journal entries"
+    description="Journal Entry Vouchers (JEV) recorded in the books of accounts, per the Government Accounting Manual."
+    breadcrumbs={[{ label: 'Accounting' }, { label: 'Journal entries' }]}
+  >
+    <Fragment slot="actions">
+      <a href="/accounting/trial-balance" class="btn btn-secondary">Trial balance</a>
+      {canPost && (
+        <a href="/accounting/journals/create" class="btn btn-primary">
+          <i class="pi pi-plus" aria-hidden="true"></i>
+          New journal entry
+        </a>
+      )}
+    </Fragment>
+  </PageHeader>
+
+  {unposted.total > 0 && (
+    <Banner appearance="warning" title={`${unposted.total} transaction${unposted.total === 1 ? ' is' : 's are'} not yet in the books`} class="mb-6" id="unposted-banner">
+      {[
+        unposted.dvs.length && `${unposted.dvs.length} approved DV${unposted.dvs.length === 1 ? '' : 's'}`,
+        unposted.payments.length && `${unposted.payments.length} issued payment${unposted.payments.length === 1 ? '' : 's'}`,
+        unposted.paymentReversals.length && `${unposted.paymentReversals.length} cancelled/stale check${unposted.paymentReversals.length === 1 ? '' : 's'}`,
+        unposted.receipts.length && `${unposted.receipts.length} official receipt${unposted.receipts.length === 1 ? '' : 's'}`,
+        unposted.invoices.length && `${unposted.invoices.length} receivable${unposted.invoices.length === 1 ? '' : 's'}`,
+        unposted.collections.length && `${unposted.collections.length} collection${unposted.collections.length === 1 ? '' : 's'}`,
+        unposted.deposits.length && `${unposted.deposits.length} deposit${unposted.deposits.length === 1 ? '' : 's'}`,
+        unposted.ncas.length && `${unposted.ncas.length} NCA${unposted.ncas.length === 1 ? '' : 's'}`,
+      ].filter(Boolean).join(', ')}.
+      These were recorded before automatic posting existed, or their posting failed.
+      <Fragment slot="actions">
+        {canPost ? (
+          <button type="button" class="btn btn-primary btn-sm" id="post-unposted">Post them now</button>
+        ) : (
+          <span class="text-gray-700">An accountant can post them from this page.</span>
+        )}
+      </Fragment>
+    </Banner>
+  )}
+  <div id="post-result" class="hidden mb-6" role="status"></div>
+
+  <FilterBar action="/accounting/journals" resetHref="/accounting/journals" activeCount={activeFilters}>
+    <div class="form-group flex-1 min-w-[14rem]">
+      <label for="search" class="form-label">Search</label>
+      <input type="search" id="search" name="search" class="form-input" placeholder="JEV no. or particulars" value={search ?? ''} />
+    </div>
+    <div class="form-group">
+      <label for="year" class="form-label">Year</label>
+      <select id="year" name="year" class="form-select">
+        {Array.from({ length: 5 }, (_, i) => currentYear - i).map(y => <option value={y} selected={y === fiscalYear}>{y}</option>)}
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="month" class="form-label">Month</label>
+      <select id="month" name="month" class="form-select">
+        <option value="">All months</option>
+        {MONTHS.map((name, i) => <option value={i + 1} selected={month === i + 1}>{name}</option>)}
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="journal" class="form-label">Journal</label>
+      <select id="journal" name="journal" class="form-select">
+        <option value="">All journals</option>
+        {Object.entries(JOURNAL_LABELS).map(([value, label]) => <option value={value} selected={journalType === value}>{label}</option>)}
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="fund" class="form-label">Fund cluster</label>
+      <select id="fund" name="fund" class="form-select">
+        <option value="">All funds</option>
+        {clusters.map(c => <option value={c.id} selected={fundClusterId === c.id}>{c.code} – {c.name}</option>)}
+      </select>
+    </div>
+  </FilterBar>
+
+  {entries.length === 0 ? (
+    <div class="card">
+      <EmptyState
+        icon="pi-book"
+        title={activeFilters ? 'No journal entries match these filters' : `No journal entries for ${fiscalYear} yet`}
+        description="Entries are posted automatically when DVs are approved, checks and ADAs are issued, collections are received and NCAs are recorded."
+      />
+    </div>
+  ) : (
+    <DataTable title="Entries" count={entries.length} quickFilter quickFilterLabel="Filter these entries">
+      <table class="table">
+        <thead>
+          <tr>
+            <th scope="col">JEV no.</th>
+            <th scope="col">Date</th>
+            <th scope="col">Particulars</th>
+            <th scope="col" class="hidden lg:table-cell">Journal</th>
+            <th scope="col" class="hidden md:table-cell">Source</th>
+            <th scope="col" class="!text-right">Amount</th>
+            <th scope="col">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map(entry => (
+            <tr class="hover:bg-gray-50">
+              <td class="whitespace-nowrap">
+                <a href={`/accounting/journals/${entry.id}`} class="font-medium text-primary-600 hover:underline">{entry.jevNo}</a>
+              </td>
+              <td class="whitespace-nowrap text-gray-600" data-sort-value={new Date(entry.jevDate).getTime()}>{formatDate(entry.jevDate)}</td>
+              <td class="max-w-[24rem]"><p class="truncate" title={entry.particulars}>{entry.particulars}</p></td>
+              <td class="hidden lg:table-cell text-gray-600 whitespace-nowrap">{JOURNAL_LABELS[entry.journalType]}</td>
+              <td class="hidden md:table-cell"><span class="badge">{SOURCE_LABELS[entry.sourceType] ?? entry.sourceType}</span></td>
+              <td class="text-right tabular-nums whitespace-nowrap" data-sort-value={entry.amount}>{peso(entry.amount)}</td>
+              <td><Lozenge status={entry.status === 'posted' ? 'posted' : 'cancelled'} label={entry.status === 'posted' ? 'Posted' : 'Reversed'} /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </DataTable>
+  )}
+
+  <script>
+    const button = document.getElementById('post-unposted') as HTMLButtonElement | null;
+    const output = document.getElementById('post-result')!;
+
+    button?.addEventListener('click', async () => {
+      button.disabled = true;
+      button.textContent = 'Posting…';
+      try {
+        const response = await fetch('/api/accounting/post-unposted', { method: 'POST' });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message || 'Posting failed');
+        if (result.failed.length === 0) {
+          window.location.reload();
+          return;
+        }
+        output.className = 'alert alert-warning mb-6';
+        output.innerHTML = '<i class="pi pi-exclamation-triangle" aria-hidden="true"></i><div></div>';
+        const body = output.querySelector('div')!;
+        body.textContent = `Posted ${result.posted}. These could not be posted: `;
+        const list = document.createElement('ul');
+        list.className = 'mt-1 list-disc pl-5';
+        for (const failure of result.failed) {
+          const item = document.createElement('li');
+          item.textContent = failure;
+          list.appendChild(item);
+        }
+        body.appendChild(list);
+        button.disabled = false;
+        button.textContent = 'Try again';
+      } catch (error) {
+        output.className = 'alert alert-error mb-6';
+        output.textContent = (error as Error).message;
+        button.disabled = false;
+        button.textContent = 'Post them now';
+      }
+    });
+  </script>
+</MainLayout>

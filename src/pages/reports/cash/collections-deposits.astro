@@ -1,0 +1,175 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import PageHeader from '../../../components/ui/PageHeader.astro';
+import FilterBar from '../../../components/ui/FilterBar.astro';
+import EmptyState from '../../../components/ui/EmptyState.astro';
+import Banner from '../../../components/ui/Banner.astro';
+import Lozenge from '../../../components/ui/Lozenge.astro';
+import { db } from '../../../lib/db/connection';
+import { fundClusters } from '../../../lib/db/schema';
+import { complianceReportsService } from '../../../lib/services/compliance-reports.service';
+import { getSetting } from '../../../lib/services/settings.service';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const params = Astro.url.searchParams;
+const now = new Date();
+const fromParam = params.get('from') || new Date(now.getFullYear(), now.getMonth(), 1).toLocaleDateString('en-CA');
+const toParam = params.get('to') || now.toLocaleDateString('en-CA');
+const fundClusterId = parseInt(params.get('fund') ?? '') || undefined;
+
+const [report, clusters, agencyName] = await Promise.all([
+  complianceReportsService.getCollectionsAndDeposits({ from: new Date(`${fromParam}T00:00:00`), to: new Date(`${toParam}T23:59:59`) }, fundClusterId),
+  db.select({ id: fundClusters.id, code: fundClusters.code, name: fundClusters.name }).from(fundClusters),
+  getSetting('agency_name').catch(() => ''),
+]);
+
+const cluster = clusters.find(c => c.id === fundClusterId);
+const peso = (value: number) => value.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const formatDate = (date: Date | string) => new Date(date).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
+---
+
+<MainLayout title="RCD - Philippine Government FMS">
+  <PageHeader
+    title="Collections and deposits (RCD)"
+    description="Official receipts issued and deposits made in the period, for the collecting officer's report to COA."
+    breadcrumbs={[{ label: 'Reports', href: '/reports' }, { label: 'RCD' }]}
+  >
+    <button slot="actions" type="button" class="btn btn-secondary" onclick="window.print()">
+      <i class="pi pi-print" aria-hidden="true"></i>
+      Print
+    </button>
+  </PageHeader>
+
+  <FilterBar action="/reports/cash/collections-deposits">
+    <div class="form-group">
+      <label for="from" class="form-label">From</label>
+      <input type="date" id="from" name="from" class="form-input" value={fromParam} />
+    </div>
+    <div class="form-group">
+      <label for="to" class="form-label">To</label>
+      <input type="date" id="to" name="to" class="form-input" value={toParam} />
+    </div>
+    <div class="form-group">
+      <label for="fund" class="form-label">Fund cluster</label>
+      <select id="fund" name="fund" class="form-select">
+        <option value="">All funds</option>
+        {clusters.map(c => <option value={c.id} selected={fundClusterId === c.id}>{c.code} – {c.name}</option>)}
+      </select>
+    </div>
+  </FilterBar>
+
+  {report.undeposited > 0 && (
+    <Banner appearance="warning" class="mb-6 no-print">
+      ₱{peso(report.undeposited)} collected in this period has not been deposited. Collections must be deposited intact, daily or the next banking day.
+    </Banner>
+  )}
+
+  <article class="card" aria-label="Report of collections and deposits">
+    <header class="px-6 pt-6 pb-4 text-center border-b border-gray-200">
+      <p class="text-lg font-semibold text-gray-800">REPORT OF COLLECTIONS AND DEPOSITS</p>
+      {agencyName && <p class="text-sm text-gray-600">{agencyName}</p>}
+      <p class="text-sm text-gray-600">{cluster ? `Fund Cluster ${cluster.code}` : 'All fund clusters'} · {formatDate(fromParam)} to {formatDate(toParam)}</p>
+    </header>
+
+    <section aria-labelledby="collections-heading">
+      <h2 id="collections-heading" class="px-6 pt-4 section-title">A. Collections</h2>
+      {report.collections.length === 0 ? (
+        <EmptyState icon="pi-money-bill" title="No official receipts issued in this period" />
+      ) : (
+        <div class="relative overflow-x-auto">
+          <table class="table">
+            <thead>
+              <tr>
+                <th scope="col">Date</th>
+                <th scope="col">OR no.</th>
+                <th scope="col">Payor</th>
+                <th scope="col" class="hidden lg:table-cell">Nature of collection</th>
+                <th scope="col">Mode</th>
+                <th scope="col" class="!text-right">Amount</th>
+                <th scope="col">Deposited</th>
+              </tr>
+            </thead>
+            <tbody>
+              {report.collections.map(r => (
+                <tr>
+                  <td class="whitespace-nowrap">{formatDate(r.receiptDate)}</td>
+                  <td class="whitespace-nowrap"><a href={`/cash/receipts/${r.id}`} class="text-primary-600 hover:underline">{r.orNo}</a></td>
+                  <td>{r.payorName}</td>
+                  <td class="hidden lg:table-cell max-w-[18rem]"><p class="truncate text-gray-600" title={r.particulars}>{r.particulars}</p></td>
+                  <td class="capitalize text-gray-600">{r.paymentMode}</td>
+                  <td class="text-right tabular-nums">{peso(r.amount)}</td>
+                  <td>{r.bankDepositId ? <Lozenge appearance="success" label="Yes" /> : <Lozenge appearance="moved" label="No" />}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr class="border-t-2 border-gray-200 font-semibold">
+                <th scope="row" colspan="5" class="!text-sm !text-gray-800">Total collections</th>
+                <td class="text-right tabular-nums">{peso(report.totalCollections)}</td>
+                <td></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+    </section>
+
+    <section aria-labelledby="deposits-heading" class="border-t border-gray-200">
+      <h2 id="deposits-heading" class="px-6 pt-4 section-title">B. Deposits</h2>
+      {report.deposits.length === 0 ? (
+        <EmptyState icon="pi-building-columns" title="No deposits in this period" />
+      ) : (
+        <div class="relative overflow-x-auto">
+          <table class="table">
+            <thead>
+              <tr>
+                <th scope="col">Date</th>
+                <th scope="col">Deposit slip no.</th>
+                <th scope="col">Bank / account</th>
+                <th scope="col">Status</th>
+                <th scope="col" class="!text-right">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {report.deposits.map(d => (
+                <tr>
+                  <td class="whitespace-nowrap">{formatDate(d.depositDate)}</td>
+                  <td>{d.depositSlipNo}</td>
+                  <td class="text-gray-600">{d.bankName} {d.accountNumber}</td>
+                  <td><Lozenge status={d.status === 'confirmed' ? 'completed' : 'pending'} label={d.status === 'confirmed' ? 'Confirmed' : 'Pending'} /></td>
+                  <td class="text-right tabular-nums">{peso(d.totalAmount)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr class="border-t-2 border-gray-200 font-semibold">
+                <th scope="row" colspan="4" class="!text-sm !text-gray-800">Total deposits</th>
+                <td class="text-right tabular-nums">{peso(report.totalDeposits)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+    </section>
+
+    <dl class="grid grid-cols-3 gap-4 px-6 py-4 border-t border-gray-200 text-sm">
+      <div><dt class="form-label">Collections</dt><dd class="font-semibold tabular-nums">₱{peso(report.totalCollections)}</dd></div>
+      <div><dt class="form-label">Deposits</dt><dd class="font-semibold tabular-nums">₱{peso(report.totalDeposits)}</dd></div>
+      <div><dt class="form-label">Undeposited collections</dt><dd class="font-semibold tabular-nums">₱{peso(report.undeposited)}</dd></div>
+    </dl>
+
+    <div class="grid grid-cols-2 gap-8 px-6 pt-8 pb-6 text-sm">
+      <div>
+        <p class="form-label">Certification</p>
+        <p class="text-gray-600 text-xs">I certify that this report is a true record of collections and deposits.</p>
+        <div class="mt-8 border-t border-gray-400 pt-1 text-gray-600">Collecting Officer</div>
+      </div>
+      <div>
+        <p class="form-label">Verification</p>
+        <div class="mt-12 border-t border-gray-400 pt-1 text-gray-600">Accounting Unit</div>
+      </div>
+    </div>
+  </article>
+</MainLayout>

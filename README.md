@@ -139,6 +139,34 @@ After seeding:
 - 10-year audit retention
 - Philippine government standards
 
+### Government Accounting (GAM for NGAs)
+Run `npm run db:migrate-accounting` once per environment (safe to re-run), then open
+**Accounting → Journal entries** and choose **Post them now** to bring existing transactions into the books.
+
+- **Chart of accounts:** standard Revised Chart of Accounts (UACS) accounts, plus every object of expenditure as an expense account.
+- **Journal Entry Vouchers (JEV)** post automatically. Each source posts once, and mistakes are corrected with reversing entries rather than edits.
+
+  | Event | Debit | Credit |
+  |---|---|---|
+  | DV fully approved | Expense | Due to BIR, Accounts Payable |
+  | Check/ADA issued | Accounts Payable | Cash-MDS / Cash in Bank |
+  | Check cancelled or stale | reversal of the issue entry | |
+  | Official receipt | Cash-Collecting Officers | Revenue |
+  | Receivable | Accounts Receivable | Revenue |
+  | Collection | Cash-Collecting Officers | Accounts Receivable |
+  | Deposit confirmed | Cash in Bank | Cash-Collecting Officers |
+  | NCA received | Cash-MDS | Subsidy from National Government |
+
+- **Pages:** General ledger, trial balance, and manual JEVs (accountants only; they must balance).
+- **NCA registry:** MDS checks and ADAs may not exceed the Notice of Cash Allocation remaining for the fund cluster and year. The limit applies once an NCA is recorded for that fund and year.
+- **Taxes withheld on DVs:**
+  - VAT-registered suppliers: 5% final VAT plus 1% EWT on goods or 2% on services.
+  - Non-VAT suppliers: 3% percentage tax plus EWT.
+  - Payments are made at the net amount.
+- **Reports:** BIR taxes withheld by ATC and Form 2307 figures by payee; Report of Checks Issued (RCI), Report of ADA Issued (RADAI), and Report of Collections and Deposits (RCD).
+- **Payroll withholding** follows the TRAIN Law table (no personal exemptions), and Pag-IBIG is capped at the ₱10,000 fund salary.
+- **Manual JEVs still needed:** receivable write-offs and payroll accounting entries.
+
 ## Testing
 
 ### Test Coverage

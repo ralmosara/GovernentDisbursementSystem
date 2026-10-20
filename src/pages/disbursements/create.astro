@@ -2,6 +2,7 @@
 import MainLayout from '../../layouts/MainLayout.astro';
 import { db } from '../../lib/db/connection';
 import { fundClusters, objectOfExpenditure, mfoPap } from '../../lib/db/schema';
+import { TAX_TREATMENTS } from '../../lib/utils/withholding';
 
 const user = Astro.locals.user;
 
@@ -269,6 +270,50 @@ const prefill = {
             </div>
           </div>
 
+          <!-- Taxes withheld -->
+          <div class="mt-8">
+            <h3 class="text-lg font-semibold text-gray-900 mb-4 pb-2 border-b border-gray-200">Taxes withheld</h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div class="form-group">
+                <label for="taxTreatment" class="form-label form-label-required">Tax treatment</label>
+                <select name="taxTreatment" id="taxTreatment" class="form-select" required>
+                  {TAX_TREATMENTS.map(t => (
+                    <option value={t.value} selected={t.value === (prefill.fromObligation ? 'vat_goods' : 'none')}>{t.label}</option>
+                  ))}
+                </select>
+                <p class="form-help" id="tax-treatment-help">{TAX_TREATMENTS[0].help}</p>
+              </div>
+              <div class="form-group">
+                <label for="payeeType" class="form-label">Payee type</label>
+                <select name="payeeType" id="payeeType" class="form-select">
+                  <option value="corporate">Corporation or partnership</option>
+                  <option value="individual">Individual (sole proprietor or professional)</option>
+                </select>
+                <p class="form-help">Sets the BIR ATC on Form 2307 (WC… or WI…)</p>
+              </div>
+            </div>
+            <div id="tax-preview" class="hidden rounded border border-gray-200 overflow-hidden" aria-live="polite">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th scope="col">Tax</th>
+                    <th scope="col">ATC</th>
+                    <th scope="col" class="!text-right">Base</th>
+                    <th scope="col" class="!text-right">Amount</th>
+                  </tr>
+                </thead>
+                <tbody id="tax-lines"></tbody>
+                <tfoot>
+                  <tr class="border-t-2 border-gray-200">
+                    <th scope="row" colspan="3" class="!text-sm !text-gray-800">Net amount payable to payee</th>
+                    <td class="text-right font-semibold tabular-nums" id="tax-net"></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+            <p class="form-help">Final amounts are computed when the voucher is saved and recorded for BIR Form 2307 and remittance.</p>
+          </div>
+
           <!-- Possible duplicate payment -->
           <div id="duplicate-check" class="hidden mt-8 alert alert-warning" role="alert">
             <i class="pi pi-exclamation-triangle" aria-hidden="true"></i>
@@ -306,6 +351,7 @@ const prefill = {
   </div>
 
   <script>
+    import { computeWithholding, TAX_TREATMENTS, type TaxTreatment, type PayeeType } from '../../lib/utils/withholding';
     const form = document.getElementById('dv-form') as HTMLFormElement;
     const submitBtn = document.getElementById('submit-btn') as HTMLButtonElement;
     const amountInput = document.getElementById('amount') as HTMLInputElement;
@@ -370,6 +416,32 @@ const prefill = {
         amountWords.textContent = '';
       }
     });
+
+    // ---------- Taxes withheld (preview; the server computes the stored amounts) ----------
+    const taxTreatmentSelect = document.getElementById('taxTreatment') as HTMLSelectElement;
+    const payeeTypeSelect = document.getElementById('payeeType') as HTMLSelectElement;
+    const taxPreview = document.getElementById('tax-preview')!;
+    const taxLines = document.getElementById('tax-lines')!;
+    const taxNet = document.getElementById('tax-net')!;
+    const taxHelp = document.getElementById('tax-treatment-help')!;
+    const pesoFmt = (value: number) => `₱${value.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+    function renderTaxes() {
+      const treatment = taxTreatmentSelect.value as TaxTreatment;
+      taxHelp.textContent = TAX_TREATMENTS.find(t => t.value === treatment)?.help ?? '';
+      const gross = parseFloat(amountInput.value);
+      const result = computeWithholding(Number.isFinite(gross) ? gross : 0, treatment, payeeTypeSelect.value as PayeeType);
+      taxPreview.classList.toggle('hidden', result.lines.length === 0);
+      taxLines.innerHTML = result.lines
+        .map(line => `<tr><td>${line.description}</td><td class="text-gray-600">${line.atc ?? '—'}</td>
+          <td class="text-right tabular-nums">${pesoFmt(line.taxBase)}</td><td class="text-right tabular-nums">${pesoFmt(line.amount)}</td></tr>`)
+        .join('');
+      taxNet.textContent = pesoFmt(result.netAmount);
+    }
+
+    [taxTreatmentSelect, payeeTypeSelect].forEach(el => el.addEventListener('change', renderTaxes));
+    amountInput?.addEventListener('input', renderTaxes);
+    renderTaxes();
 
     // ---------- Pre-submit checks ----------
     const peso = (value: number) =>
@@ -568,6 +640,8 @@ const prefill = {
           objectExpenditureId: parseInt(formData.get('objectExpenditureId') as string),
           amount: parseFloat(formData.get('amount') as string),
           paymentMode: formData.get('paymentMode') as string,
+          taxTreatment: formData.get('taxTreatment') as string,
+          payeeType: formData.get('payeeType') as string,
           duplicateWarningAcknowledged: duplicateAck.checked ? duplicates.map(d => d.dvNo) : undefined,
         };
 

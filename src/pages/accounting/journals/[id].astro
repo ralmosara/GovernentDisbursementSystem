@@ -1,0 +1,180 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import PageHeader from '../../../components/ui/PageHeader.astro';
+import Lozenge from '../../../components/ui/Lozenge.astro';
+import Banner from '../../../components/ui/Banner.astro';
+import Modal from '../../../components/ui/Modal.astro';
+import { ledgerService, JOURNAL_LABELS, SOURCE_LABELS } from '../../../lib/services/ledger.service';
+import { getSetting } from '../../../lib/services/settings.service';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const id = parseInt(Astro.params.id ?? '');
+const entry = id ? await ledgerService.getEntry(id) : null;
+if (!entry) return Astro.redirect('/accounting/journals');
+
+const agencyName = await getSetting('agency_name').catch(() => '');
+const canReverse =
+  entry.sourceType === 'manual' &&
+  entry.status === 'posted' &&
+  (user.roles ?? []).some(role => role === 'accountant' || role === 'administrator');
+
+// Where the entry came from, so the reader can open the source document
+const sourceLinks: Record<string, (id: number) => string> = {
+  dv_approval: id => `/disbursements/${id}`,
+  cash_receipt: id => `/cash/receipts/${id}`,
+  ar_invoice: id => `/revenue/receivables/${id}`,
+  collection: id => `/revenue/collections/${id}`,
+  nca: () => '/accounting/nca',
+  reversal: id => `/accounting/journals/${id}`,
+  payment_reversal: id => `/accounting/journals/${id}`,
+};
+const sourceHref = entry.sourceId && sourceLinks[entry.sourceType] ? sourceLinks[entry.sourceType](entry.sourceId) : null;
+
+const peso = (value: number | string) =>
+  parseFloat(String(value || 0)).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const totalDebit = entry.lines.reduce((sum, l) => sum + parseFloat(String(l.debit)), 0);
+const totalCredit = entry.lines.reduce((sum, l) => sum + parseFloat(String(l.credit)), 0);
+const formatDate = (date: Date | string) => new Date(date).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' });
+---
+
+<MainLayout title={`JEV ${entry.jevNo} - Philippine Government FMS`}>
+  <div class="no-print">
+    <PageHeader title={`JEV ${entry.jevNo}`} breadcrumbs={[{ label: 'Journal entries', href: '/accounting/journals' }, { label: entry.jevNo }]}>
+      <p slot="meta" class="mt-1 flex flex-wrap items-center gap-2 text-sm text-gray-600">
+        <Lozenge status={entry.status === 'posted' ? 'posted' : 'cancelled'} label={entry.status === 'posted' ? 'Posted' : 'Reversed'} />
+        <span>{JOURNAL_LABELS[entry.journalType]}</span>
+        <span aria-hidden="true">·</span>
+        <span>{SOURCE_LABELS[entry.sourceType] ?? entry.sourceType}</span>
+        {sourceHref && <a href={sourceHref} class="text-primary-600 hover:underline">Open source document</a>}
+      </p>
+      <Fragment slot="actions">
+        <button type="button" class="btn btn-secondary" onclick="window.print()">
+          <i class="pi pi-print" aria-hidden="true"></i>
+          Print JEV
+        </button>
+        {canReverse && <button type="button" class="btn btn-secondary" data-open="reverse-dialog">Reverse</button>}
+      </Fragment>
+    </PageHeader>
+
+    {entry.status === 'reversed' && entry.reversedBy && (
+      <Banner appearance="info" class="mb-6">
+        This entry was reversed by <a href={`/accounting/journals/${entry.reversedBy.id}`} class="font-medium text-primary-600 hover:underline">JEV {entry.reversedBy.jevNo}</a>.
+      </Banner>
+    )}
+  </div>
+
+  <!-- JEV form layout (GAM Appendix 5) -->
+  <article class="card print-full-width" aria-label="Journal entry voucher">
+    <header class="px-6 pt-6 pb-4 text-center border-b border-gray-200">
+      <p class="text-lg font-semibold text-gray-800">JOURNAL ENTRY VOUCHER</p>
+      {agencyName && <p class="text-sm text-gray-600">{agencyName}</p>}
+    </header>
+    <dl class="grid grid-cols-2 md:grid-cols-4 gap-4 px-6 py-4 border-b border-gray-200 text-sm">
+      <div><dt class="form-label">JEV No.</dt><dd class="font-semibold">{entry.jevNo}</dd></div>
+      <div><dt class="form-label">Date</dt><dd>{formatDate(entry.jevDate)}</dd></div>
+      <div><dt class="form-label">Fund cluster</dt><dd>{entry.fundClusterCode} – {entry.fundClusterName}</dd></div>
+      <div><dt class="form-label">Journal</dt><dd>{JOURNAL_LABELS[entry.journalType]}</dd></div>
+    </dl>
+
+    <div class="relative overflow-x-auto">
+      <table class="table">
+        <thead>
+          <tr>
+            <th scope="col">Responsibility center</th>
+            <th scope="col">Account title</th>
+            <th scope="col">UACS code</th>
+            <th scope="col" class="!text-right">Debit</th>
+            <th scope="col" class="!text-right">Credit</th>
+          </tr>
+        </thead>
+        <tbody>
+          {entry.lines.map(line => (
+            <tr>
+              <td class="text-gray-600">{line.responsibilityCenter ?? ''}</td>
+              <td class={parseFloat(String(line.credit)) > 0 ? 'pl-10' : ''}>
+                <span class="text-gray-800">{line.accountTitle ?? line.accountCode}</span>
+                {(line.subsidiary || line.description) && (
+                  <span class="block text-xs text-gray-500">{[line.subsidiary, line.description].filter(Boolean).join(' · ')}</span>
+                )}
+              </td>
+              <td class="tabular-nums text-gray-600">
+                <a href={`/accounting/general-ledger?account=${line.accountCode}`} class="hover:underline no-print-link">{line.accountCode}</a>
+              </td>
+              <td class="text-right tabular-nums">{parseFloat(String(line.debit)) > 0 ? peso(line.debit) : ''}</td>
+              <td class="text-right tabular-nums">{parseFloat(String(line.credit)) > 0 ? peso(line.credit) : ''}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr class="border-t-2 border-gray-200 font-semibold">
+            <th scope="row" colspan="3" class="!text-sm !text-gray-800">Total</th>
+            <td class="text-right tabular-nums">{peso(totalDebit)}</td>
+            <td class="text-right tabular-nums">{peso(totalCredit)}</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <div class="px-6 py-4 border-t border-gray-200">
+      <p class="form-label">Particulars</p>
+      <p class="whitespace-pre-wrap">{entry.particulars}</p>
+    </div>
+
+    <div class="grid grid-cols-2 gap-8 px-6 pt-10 pb-6 text-sm">
+      <div>
+        <p class="form-label">Prepared by</p>
+        <div class="mt-8 border-t border-gray-400 pt-1 text-gray-600">Signature over printed name</div>
+      </div>
+      <div>
+        <p class="form-label">Approved by</p>
+        <div class="mt-8 border-t border-gray-400 pt-1 text-gray-600">Chief Accountant / Head of Accounting Unit</div>
+      </div>
+    </div>
+  </article>
+
+  {canReverse && (
+    <Modal id="reverse-dialog" title={`Reverse JEV ${entry.jevNo}?`} appearance="warning">
+      <form id="reverse-form" method="dialog" class="space-y-3">
+        <p class="text-sm text-gray-700">A reversing entry with the debits and credits swapped will be posted today. The original stays on record.</p>
+        <div>
+          <label for="reverse-reason" class="form-label form-label-required">Reason</label>
+          <textarea id="reverse-reason" name="reason" rows="3" class="form-textarea" required></textarea>
+        </div>
+        <p id="reverse-error" class="form-error hidden" role="alert"></p>
+      </form>
+      <Fragment slot="footer">
+        <button type="button" class="btn btn-subtle" data-modal-close>Cancel</button>
+        <button type="submit" form="reverse-form" class="btn btn-warning" id="reverse-submit">Post reversal</button>
+      </Fragment>
+    </Modal>
+  )}
+
+  <script define:vars={{ entryId: entry.id }}>
+    document.querySelectorAll('[data-open]').forEach(button =>
+      button.addEventListener('click', () => document.getElementById(button.dataset.open)?.showModal())
+    );
+    const form = document.getElementById('reverse-form');
+    form?.addEventListener('submit', async event => {
+      event.preventDefault();
+      const error = document.getElementById('reverse-error');
+      const submit = document.getElementById('reverse-submit');
+      submit.disabled = true;
+      try {
+        const response = await fetch(`/api/accounting/journals/${entryId}/reverse`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: form.elements.reason.value }),
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.message);
+        window.location.href = `/accounting/journals/${result.id}`;
+      } catch (e) {
+        error.textContent = e.message;
+        error.classList.remove('hidden');
+        submit.disabled = false;
+      }
+    });
+  </script>
+</MainLayout>

@@ -1,0 +1,132 @@
+---
+import MainLayout from '../../layouts/MainLayout.astro';
+import PageHeader from '../../components/ui/PageHeader.astro';
+import FilterBar from '../../components/ui/FilterBar.astro';
+import EmptyState from '../../components/ui/EmptyState.astro';
+import { db } from '../../lib/db/connection';
+import { fundClusters } from '../../lib/db/schema';
+import { ledgerService } from '../../lib/services/ledger.service';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const params = Astro.url.searchParams;
+const year = new Date().getFullYear();
+const fromParam = params.get('from') || `${year}-01-01`;
+const toParam = params.get('to') || new Date().toLocaleDateString('en-CA');
+const accountCode = params.get('account')?.trim() || '';
+const fundClusterId = parseInt(params.get('fund') ?? '') || undefined;
+
+const [accounts, clusters] = await Promise.all([
+  ledgerService.getAccounts(false),
+  db.select({ id: fundClusters.id, code: fundClusters.code, name: fundClusters.name }).from(fundClusters),
+]);
+const ledger = accountCode
+  ? await ledgerService.getGeneralLedger(accountCode, new Date(`${fromParam}T00:00:00`), new Date(`${toParam}T23:59:59`), fundClusterId)
+  : null;
+
+const peso = (value: number) => value.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const amount = (value: number) => (value ? peso(value) : '');
+const formatDate = (date: Date | string) => new Date(date).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
+---
+
+<MainLayout title="General ledger - Philippine Government FMS">
+  <PageHeader
+    title="General ledger"
+    description="Every posting to an account, with opening and running balances."
+    breadcrumbs={[{ label: 'Accounting', href: '/accounting/journals' }, { label: 'General ledger' }]}
+  >
+    {ledger && (
+      <button slot="actions" type="button" class="btn btn-secondary" onclick="window.print()">
+        <i class="pi pi-print" aria-hidden="true"></i>
+        Print
+      </button>
+    )}
+  </PageHeader>
+
+  <FilterBar action="/accounting/general-ledger">
+    <div class="form-group flex-1 min-w-[18rem]">
+      <label for="account" class="form-label form-label-required">Account</label>
+      <select id="account" name="account" class="form-select" required>
+        <option value="">Choose an account</option>
+        {accounts.map(a => <option value={a.code} selected={a.code === accountCode}>{a.code} – {a.title}</option>)}
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="from" class="form-label">From</label>
+      <input type="date" id="from" name="from" class="form-input" value={fromParam} />
+    </div>
+    <div class="form-group">
+      <label for="to" class="form-label">To</label>
+      <input type="date" id="to" name="to" class="form-input" value={toParam} />
+    </div>
+    <div class="form-group">
+      <label for="fund" class="form-label">Fund cluster</label>
+      <select id="fund" name="fund" class="form-select">
+        <option value="">All funds</option>
+        {clusters.map(c => <option value={c.id} selected={fundClusterId === c.id}>{c.code} – {c.name}</option>)}
+      </select>
+    </div>
+  </FilterBar>
+
+  {!ledger ? (
+    <div class="card">
+      <EmptyState icon="pi-book" title="Choose an account" description="Pick an account above, or open one from the trial balance." />
+    </div>
+  ) : (
+    <article class="card" aria-label={`General ledger for ${ledger.account.title}`}>
+      <header class="flex flex-wrap items-end justify-between gap-4 px-6 py-4 border-b border-gray-200">
+        <div>
+          <p class="text-xs font-semibold text-gray-600">GENERAL LEDGER</p>
+          <p class="text-lg font-semibold text-gray-800">{ledger.account.title}</p>
+          <p class="text-sm text-gray-600">UACS {ledger.account.code} · normal {ledger.account.normalBalance} balance</p>
+        </div>
+        <p class="text-sm text-gray-600">{formatDate(fromParam)} to {formatDate(toParam)}</p>
+      </header>
+      <div class="relative overflow-x-auto">
+        <table class="table">
+          <thead>
+            <tr>
+              <th scope="col">Date</th>
+              <th scope="col">JEV no.</th>
+              <th scope="col">Particulars</th>
+              <th scope="col" class="!text-right">Debit</th>
+              <th scope="col" class="!text-right">Credit</th>
+              <th scope="col" class="!text-right">Balance</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="bg-gray-50">
+              <td colspan="5" class="font-medium">Balance brought forward</td>
+              <td class="text-right tabular-nums font-medium">{peso(ledger.openingBalance)}</td>
+            </tr>
+            {ledger.rows.map(row => (
+              <tr>
+                <td class="whitespace-nowrap text-gray-600">{formatDate(row.jevDate)}</td>
+                <td class="whitespace-nowrap"><a href={`/accounting/journals/${row.entryId}`} class="text-primary-600 hover:underline">{row.jevNo}</a></td>
+                <td class="max-w-[26rem]">
+                  <p class="truncate" title={row.particulars}>{row.particulars}</p>
+                  {row.subsidiary && <p class="text-xs text-gray-500">{row.subsidiary}</p>}
+                </td>
+                <td class="text-right tabular-nums">{amount(row.debit)}</td>
+                <td class="text-right tabular-nums">{amount(row.credit)}</td>
+                <td class="text-right tabular-nums">{peso(row.balance)}</td>
+              </tr>
+            ))}
+            {ledger.rows.length === 0 && (
+              <tr><td colspan="6" class="text-center text-gray-600 py-6">No postings in this period.</td></tr>
+            )}
+          </tbody>
+          <tfoot>
+            <tr class="border-t-2 border-gray-200 font-semibold">
+              <th scope="row" colspan="3" class="!text-sm !text-gray-800">Totals and closing balance</th>
+              <td class="text-right tabular-nums">{peso(ledger.totalDebit)}</td>
+              <td class="text-right tabular-nums">{peso(ledger.totalCredit)}</td>
+              <td class="text-right tabular-nums">{peso(ledger.closingBalance)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </article>
+  )}
+</MainLayout>
