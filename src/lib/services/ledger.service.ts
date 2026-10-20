@@ -14,7 +14,11 @@ import {
   bankAccounts,
   fundClusters,
   ncaRegistry,
+  payrollPeriods,
+  payrollTransactions,
+  remittances,
 } from '../db/schema';
+import { calculateGSISContribution, calculatePhilHealthContribution, calculatePagIBIGContribution } from '../utils/payroll-calculator';
 import { and, asc, desc, eq, gte, inArray, isNull, lte, like, notInArray, sql, type SQL } from 'drizzle-orm';
 import { logAudit } from '../middleware/audit-logger';
 
@@ -35,6 +39,10 @@ import { logAudit } from '../middleware/audit-logger';
  *   AR collection        Dr Cash-Collecting Officers   Cr Accounts Receivable
  *   Deposit confirmed    Dr Cash in Bank               Cr Cash-Collecting Officers
  *   NCA received         Dr Cash-MDS, Regular          Cr Subsidy from National Government
+ *   Payroll processed    Dr Salaries, PERA, allowances, employer shares
+ *                        Cr Due to BIR/GSIS/Pag-IBIG/PhilHealth, Other Payables, Due to Officers and Employees
+ *   Payroll paid out     Dr Due to Officers and Employees  Cr Cash-MDS, Regular
+ *   Remittance paid      Dr Due to GSIS/Pag-IBIG/PhilHealth  Cr Cash-MDS (BIR: Cr Cash-Tax Remittance Advice)
  */
 
 export const ACCOUNTS = {
@@ -42,9 +50,22 @@ export const ACCOUNTS = {
   PETTY_CASH: '1010102000',
   CASH_IN_BANK_CURRENT: '1010202000',
   CASH_MDS_REGULAR: '1010404000',
+  CASH_TRA: '1010407000',
   ACCOUNTS_RECEIVABLE: '1030101000',
   ACCOUNTS_PAYABLE: '2010101000',
+  DUE_TO_OFFICERS_EMPLOYEES: '2010102000',
   DUE_TO_BIR: '2020101000',
+  DUE_TO_GSIS: '2020102000',
+  DUE_TO_PAGIBIG: '2020103000',
+  DUE_TO_PHILHEALTH: '2020104000',
+  OTHER_PAYABLES: '2999999000',
+  SALARIES_REGULAR: '5010101000',
+  PERA: '5010201000',
+  OVERTIME: '5010213000',
+  OTHER_BONUSES_ALLOWANCES: '5010299000',
+  RETIREMENT_LIFE_INSURANCE: '5010301000',
+  PAGIBIG_CONTRIBUTIONS: '5010302000',
+  PHILHEALTH_CONTRIBUTIONS: '5010303000',
   SUBSIDY_FROM_NG: '4030101000',
   MISCELLANEOUS_INCOME: '4060101000',
 } as const;
@@ -67,6 +88,9 @@ export const SOURCE_LABELS: Record<string, string> = {
   collection: 'Collection',
   deposit: 'Bank deposit',
   nca: 'NCA received',
+  payroll: 'Payroll',
+  payroll_payout: 'Payroll paid',
+  remittance: 'Remittance',
   manual: 'Manual entry',
   reversal: 'Reversal',
 };
@@ -528,6 +552,139 @@ export class LedgerService {
   }
 
   /**
+   * Payroll processed: recognise salary expense, employer contributions and what is owed
+   * to the BIR, GSIS, Pag-IBIG, PhilHealth, other creditors and the employees.
+   * Employer shares are computed from basic salary with the same rules as the payroll run.
+   */
+  async postPayroll(periodId: number, userId: number): Promise<PostResult> {
+    const [period] = await db.select().from(payrollPeriods).where(eq(payrollPeriods.id, periodId)).limit(1);
+    if (!period) throw new Error('Payroll period not found');
+
+    const rows = await db.select().from(payrollTransactions).where(eq(payrollTransactions.payrollPeriodId, periodId));
+    if (rows.length === 0) throw new Error(`Payroll ${period.periodNo} has no transactions`);
+
+    const t = {
+      basic: 0, pera: 0, overtime: 0, allowances: 0,
+      gsisEe: 0, gsisEr: 0, philhealthEe: 0, philhealthEr: 0, pagibigEe: 0, pagibigEr: 0,
+      tax: 0, gsisLoan: 0, pagibigLoan: 0, otherPayables: 0, net: 0,
+    };
+    for (const row of rows) {
+      const basic = num(row.basicSalary);
+      t.basic += basic;
+      t.pera += num(row.pera);
+      t.overtime += num(row.overtime);
+      t.allowances += num(row.additionalAllowance) + num(row.otherEarnings);
+      t.gsisEe += num(row.gsisContribution);
+      t.philhealthEe += num(row.philhealthContribution);
+      t.pagibigEe += num(row.pagibigContribution);
+      t.gsisEr += calculateGSISContribution(basic).employerShare;
+      t.philhealthEr += calculatePhilHealthContribution(basic).employerShare;
+      t.pagibigEr += calculatePagIBIGContribution(basic).employerShare;
+      t.tax += num(row.withholdingTax);
+      t.gsisLoan += num(row.gsisLoan);
+      t.pagibigLoan += num(row.pagibigLoan);
+      t.otherPayables += num(row.salaryLoan) + num(row.otherDeductions);
+      t.net += num(row.netPay);
+    }
+
+    const r2 = (value: number) => Math.round(value * 100) / 100;
+    const debit = (accountCode: string, amount: number, description: string): JournalLineInput[] =>
+      r2(amount) > 0 ? [{ accountCode, debit: r2(amount), description }] : [];
+    const credit = (accountCode: string, amount: number, description: string): JournalLineInput[] =>
+      r2(amount) > 0 ? [{ accountCode, credit: r2(amount), description }] : [];
+
+    const lines: JournalLineInput[] = [
+      ...debit(ACCOUNTS.SALARIES_REGULAR, t.basic, 'Basic salaries'),
+      ...debit(ACCOUNTS.PERA, t.pera, 'PERA'),
+      ...debit(ACCOUNTS.OVERTIME, t.overtime, 'Overtime'),
+      ...debit(ACCOUNTS.OTHER_BONUSES_ALLOWANCES, t.allowances, 'Allowances and other earnings'),
+      ...debit(ACCOUNTS.RETIREMENT_LIFE_INSURANCE, t.gsisEr, 'GSIS government share'),
+      ...debit(ACCOUNTS.PAGIBIG_CONTRIBUTIONS, t.pagibigEr, 'Pag-IBIG government share'),
+      ...debit(ACCOUNTS.PHILHEALTH_CONTRIBUTIONS, t.philhealthEr, 'PhilHealth government share'),
+      ...credit(ACCOUNTS.DUE_TO_BIR, t.tax, 'Withholding tax on compensation'),
+      ...credit(ACCOUNTS.DUE_TO_GSIS, t.gsisEe + t.gsisEr + t.gsisLoan, 'GSIS premiums and loan amortizations'),
+      ...credit(ACCOUNTS.DUE_TO_PAGIBIG, t.pagibigEe + t.pagibigEr + t.pagibigLoan, 'Pag-IBIG contributions and loan amortizations'),
+      ...credit(ACCOUNTS.DUE_TO_PHILHEALTH, t.philhealthEe + t.philhealthEr, 'PhilHealth premiums'),
+      ...credit(ACCOUNTS.OTHER_PAYABLES, t.otherPayables, 'Salary loans and other deductions'),
+      ...credit(ACCOUNTS.DUE_TO_OFFICERS_EMPLOYEES, t.net, 'Net pay'),
+    ];
+
+    // Each payslip is rounded separately; absorb any centavo difference in net pay
+    const gap = lines.reduce((sum, l) => sum + toCentavos(l.debit) - toCentavos(l.credit), 0);
+    if (gap !== 0 && Math.abs(gap) <= rows.length) {
+      const netLine = lines.find(l => l.accountCode === ACCOUNTS.DUE_TO_OFFICERS_EMPLOYEES);
+      if (netLine) netLine.credit = r2((netLine.credit ?? 0) + gap / 100);
+    }
+
+    return this.post({
+      date: new Date(period.periodEnd),
+      fundClusterId: await this.defaultFundClusterId(),
+      journalType: 'general',
+      particulars: `To recognise payroll ${period.periodNo} (${period.periodName}), ${rows.length} employee${rows.length === 1 ? '' : 's'}`,
+      sourceType: 'payroll',
+      sourceId: period.id,
+      createdBy: userId,
+      lines,
+    });
+  }
+
+  /** Net pay released to employees (ADA to payroll accounts) */
+  async postPayrollPayout(periodId: number, userId: number): Promise<PostResult> {
+    const [period] = await db.select().from(payrollPeriods).where(eq(payrollPeriods.id, periodId)).limit(1);
+    if (!period) throw new Error('Payroll period not found');
+
+    // The payroll must be in the books before it is paid
+    const recognised = await this.postPayroll(periodId, userId);
+    const entry = await this.getEntry(recognised.id);
+    const net = num(entry?.lines.find(l => l.accountCode === ACCOUNTS.DUE_TO_OFFICERS_EMPLOYEES)?.credit);
+    if (!(net > 0)) throw new Error(`Payroll ${period.periodNo} has no net pay to release`);
+
+    return this.post({
+      date: new Date(period.payDate),
+      fundClusterId: await this.defaultFundClusterId(),
+      journalType: 'cash_disbursements',
+      particulars: `Release of net pay for payroll ${period.periodNo} (${period.periodName})`,
+      sourceType: 'payroll_payout',
+      sourceId: period.id,
+      createdBy: userId,
+      lines: [
+        { accountCode: ACCOUNTS.DUE_TO_OFFICERS_EMPLOYEES, debit: net, description: 'Net pay' },
+        { accountCode: ACCOUNTS.CASH_MDS_REGULAR, credit: net, description: 'ADA to payroll accounts' },
+      ],
+    });
+  }
+
+  /** A remittance to BIR, GSIS, Pag-IBIG or PhilHealth settles that liability */
+  async postRemittance(remittanceId: number, userId: number): Promise<PostResult> {
+    const [remittance] = await db.select().from(remittances).where(eq(remittances.id, remittanceId)).limit(1);
+    if (!remittance) throw new Error('Remittance not found');
+
+    const liability = {
+      BIR: ACCOUNTS.DUE_TO_BIR,
+      GSIS: ACCOUNTS.DUE_TO_GSIS,
+      'Pag-IBIG': ACCOUNTS.DUE_TO_PAGIBIG,
+      PhilHealth: ACCOUNTS.DUE_TO_PHILHEALTH,
+    }[remittance.remittanceType];
+    // Taxes withheld by NGAs are remitted through a Tax Remittance Advice
+    const cash = remittance.remittanceType === 'BIR' ? ACCOUNTS.CASH_TRA : ACCOUNTS.CASH_MDS_REGULAR;
+    const amount = num(remittance.totalAmount);
+
+    return this.post({
+      date: remittance.paymentDate ? new Date(remittance.paymentDate) : new Date(),
+      fundClusterId: await this.defaultFundClusterId(),
+      journalType: 'cash_disbursements',
+      particulars: `Remittance ${remittance.remittanceNo} to ${remittance.remittanceType} for ${remittance.month}/${remittance.year}${remittance.referenceNo ? `, ref. ${remittance.referenceNo}` : ''}`,
+      sourceType: 'remittance',
+      sourceId: remittance.id,
+      createdBy: userId,
+      lines: [
+        { accountCode: liability, debit: amount, subsidiary: remittance.remittanceType },
+        { accountCode: cash, credit: amount },
+      ],
+    });
+  }
+
+  /**
    * Run an automatic posting without failing the business action that triggered it.
    * Anything that fails shows up in getUnposted() and can be posted later.
    */
@@ -563,7 +720,7 @@ export class LedgerService {
 
   /** Transactions that should be in the books but are not yet */
   async getUnposted() {
-    const [dvs, paid, reversed, receipts, invoices, colls, deposits, ncas] = await Promise.all([
+    const [dvs, paid, reversed, receipts, invoices, colls, deposits, ncas, payrolls, payouts, remits] = await Promise.all([
       this.unpostedIds('dv_approval', disbursementVouchers, disbursementVouchers.id,
         and(inArray(disbursementVouchers.status, ['approved', 'paid']), isNull(disbursementVouchers.deletedAt))),
       this.unpostedIds('payment', payments, payments.id, inArray(payments.status, ['issued', 'cleared', 'stale'])),
@@ -573,8 +730,14 @@ export class LedgerService {
       this.unpostedIds('collection', collections, collections.id),
       this.unpostedIds('deposit', bankDeposits, bankDeposits.id, eq(bankDeposits.status, 'confirmed')),
       this.unpostedIds('nca', ncaRegistry, ncaRegistry.id),
+      this.unpostedIds('payroll', payrollPeriods, payrollPeriods.id, inArray(payrollPeriods.status, ['Completed', 'Posted'])),
+      this.unpostedIds('payroll_payout', payrollPeriods, payrollPeriods.id, eq(payrollPeriods.status, 'Posted')),
+      this.unpostedIds('remittance', remittances, remittances.id, eq(remittances.paymentStatus, 'Paid')),
     ]);
-    const groups = { dvs, payments: paid, paymentReversals: reversed, receipts, invoices, collections: colls, deposits, ncas };
+    const groups = {
+      dvs, payments: paid, paymentReversals: reversed, receipts, invoices, collections: colls, deposits, ncas,
+      payrolls, payrollPayouts: payouts, remittances: remits,
+    };
     const total = Object.values(groups).reduce((sum, ids) => sum + ids.length, 0);
     return { ...groups, total };
   }
@@ -614,6 +777,9 @@ export class LedgerService {
     for (const id of unposted.collections) await run(`Collection #${id}`, () => this.postCollection(id, userId));
     for (const id of unposted.receipts) await run(`OR #${id}`, () => this.postCashReceipt(id, userId));
     for (const id of unposted.deposits) await run(`Deposit #${id}`, () => this.postDeposit(id, userId));
+    for (const id of unposted.payrolls) await run(`Payroll #${id}`, () => this.postPayroll(id, userId));
+    for (const id of unposted.payrollPayouts) await run(`Payroll #${id} payout`, () => this.postPayrollPayout(id, userId));
+    for (const id of unposted.remittances) await run(`Remittance #${id}`, () => this.postRemittance(id, userId));
 
     return results;
   }

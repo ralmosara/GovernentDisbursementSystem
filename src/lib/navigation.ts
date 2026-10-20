@@ -37,6 +37,16 @@ export const navSections: NavSection[] = [
     ],
   },
   {
+    id: 'procurement',
+    title: 'Procurement',
+    icon: 'pi-shopping-cart',
+    items: [
+      { href: '/procurement/requests', label: 'Purchase requests', icon: 'pi-list' },
+      { href: '/procurement/orders', label: 'Purchase orders', icon: 'pi-file-edit' },
+      { href: '/procurement/orders?view=deliveries', label: 'Deliveries (IAR)', icon: 'pi-box' },
+    ],
+  },
+  {
     id: 'accounting',
     title: 'Accounting',
     icon: 'pi-calculator',
@@ -174,6 +184,12 @@ export const createActions: CreateAction[] = [
     label: 'Disbursement voucher',
     icon: 'pi-file-edit',
     description: 'Pay a supplier, employee or claimant',
+  },
+  {
+    href: '/procurement/requests/create',
+    label: 'Purchase request',
+    icon: 'pi-shopping-cart',
+    description: 'Ask for goods or services to be procured',
   },
   {
     href: '/budget/obligations/create',

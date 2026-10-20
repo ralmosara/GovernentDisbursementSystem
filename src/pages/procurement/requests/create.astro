@@ -1,0 +1,165 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import PageHeader from '../../../components/ui/PageHeader.astro';
+import { db } from '../../../lib/db/connection';
+import { fundClusters, objectOfExpenditure } from '../../../lib/db/schema';
+import { asc } from 'drizzle-orm';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const [clusters, expenses] = await Promise.all([
+  db.select({ id: fundClusters.id, code: fundClusters.code, name: fundClusters.name }).from(fundClusters),
+  db.select({ id: objectOfExpenditure.id, code: objectOfExpenditure.code, name: objectOfExpenditure.name, category: objectOfExpenditure.category }).from(objectOfExpenditure).orderBy(asc(objectOfExpenditure.code)),
+]);
+---
+
+<MainLayout title="New purchase request - Philippine Government FMS">
+  <PageHeader
+    title="New purchase request"
+    description="List what is needed and its estimated cost. The total becomes the approved budget for the contract once approved."
+    breadcrumbs={[{ label: 'Purchase requests', href: '/procurement/requests' }, { label: 'New' }]}
+  />
+
+  <form id="pr-form" class="card max-w-6xl" novalidate>
+    <div class="card-body">
+      <div id="pr-error" class="alert alert-error mb-4 hidden" role="alert">
+        <i class="pi pi-times-circle" aria-hidden="true"></i>
+        <span id="pr-error-text"></span>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="form-group">
+          <label for="prDate" class="form-label form-label-required">Date</label>
+          <input type="date" id="prDate" name="prDate" class="form-input" value={new Date().toLocaleDateString('en-CA')} required />
+        </div>
+        <div class="form-group">
+          <label for="fundClusterId" class="form-label form-label-required">Fund cluster</label>
+          <select id="fundClusterId" name="fundClusterId" class="form-select" required>
+            {clusters.map(c => <option value={c.id}>{c.code} – {c.name}</option>)}
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="office" class="form-label">Office / section</label>
+          <input id="office" name="office" class="form-input" placeholder="e.g. Finance Division" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="purpose" class="form-label form-label-required">Purpose</label>
+        <textarea id="purpose" name="purpose" rows="2" class="form-textarea" required placeholder="e.g. Office supplies for the 4th quarter operations of the Finance Division"></textarea>
+      </div>
+
+      <h2 class="section-title mt-6">Items</h2>
+      <div class="relative overflow-x-auto">
+        <table class="table">
+          <thead>
+            <tr>
+              <th scope="col" class="w-24">Unit</th>
+              <th scope="col">Item description</th>
+              <th scope="col" class="w-56">Object of expenditure</th>
+              <th scope="col" class="w-28 !text-right">Quantity</th>
+              <th scope="col" class="w-36 !text-right">Est. unit cost</th>
+              <th scope="col" class="w-36 !text-right">Est. cost</th>
+              <th scope="col" class="w-10"><span class="sr-only">Remove</span></th>
+            </tr>
+          </thead>
+          <tbody id="items"></tbody>
+          <tfoot>
+            <tr class="border-t-2 border-gray-200">
+              <td colspan="5">
+                <button type="button" class="btn btn-subtle btn-sm" id="add-item"><i class="pi pi-plus" aria-hidden="true"></i>Add item</button>
+              </td>
+              <td class="text-right font-semibold tabular-nums" id="pr-total">0.00</td>
+              <td></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+    <div class="card-footer">
+      <a href="/procurement/requests" class="btn btn-subtle">Cancel</a>
+      <button type="submit" class="btn btn-primary" id="pr-submit">Submit for approval</button>
+    </div>
+  </form>
+
+  <template id="expense-options">
+    <option value="">—</option>
+    {['Personnel Services', 'MOOE', 'Capital Outlay', 'Financial Assistance'].map(category => (
+      <optgroup label={category}>
+        {expenses.filter(e => e.category === category).map(e => <option value={e.id}>{e.code} – {e.name}</option>)}
+      </optgroup>
+    ))}
+  </template>
+
+  <script>
+    const form = document.getElementById('pr-form') as HTMLFormElement;
+    const tbody = document.getElementById('items')!;
+    const total = document.getElementById('pr-total')!;
+    const expenseOptions = (document.getElementById('expense-options') as HTMLTemplateElement).innerHTML;
+    const fmt = (value: number) => value.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    function addItem() {
+      const n = tbody.children.length + 1;
+      const row = document.createElement('tr');
+      row.innerHTML = `
+        <td><input class="form-input" data-field="unit" aria-label="Unit, item ${n}" placeholder="pc" /></td>
+        <td><input class="form-input" data-field="description" aria-label="Description, item ${n}" /></td>
+        <td><select class="form-select" data-field="objectExpenditureId" aria-label="Object of expenditure, item ${n}">${expenseOptions}</select></td>
+        <td><input type="number" min="0" step="0.01" class="form-input text-right" data-field="quantity" aria-label="Quantity, item ${n}" /></td>
+        <td><input type="number" min="0" step="0.01" class="form-input text-right" data-field="unitCost" aria-label="Estimated unit cost, item ${n}" /></td>
+        <td class="text-right tabular-nums" data-cost>0.00</td>
+        <td><button type="button" class="btn btn-subtle btn-sm btn-icon" data-remove aria-label="Remove item ${n}"><i class="pi pi-times" aria-hidden="true"></i></button></td>`;
+      tbody.appendChild(row);
+    }
+
+    function recalc() {
+      let sum = 0;
+      tbody.querySelectorAll('tr').forEach(row => {
+        const qty = parseFloat((row.querySelector('[data-field="quantity"]') as HTMLInputElement).value) || 0;
+        const cost = parseFloat((row.querySelector('[data-field="unitCost"]') as HTMLInputElement).value) || 0;
+        const line = Math.round(qty * cost * 100) / 100;
+        row.querySelector('[data-cost]')!.textContent = fmt(line);
+        sum += line;
+      });
+      total.textContent = fmt(sum);
+    }
+
+    tbody.addEventListener('input', recalc);
+    tbody.addEventListener('click', event => {
+      const remove = (event.target as HTMLElement).closest('[data-remove]');
+      if (remove && tbody.children.length > 1) {
+        remove.closest('tr')!.remove();
+        recalc();
+      }
+    });
+    document.getElementById('add-item')!.addEventListener('click', addItem);
+    addItem();
+
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      const error = document.getElementById('pr-error')!;
+      const submit = document.getElementById('pr-submit') as HTMLButtonElement;
+      error.classList.add('hidden');
+      const data = new FormData(form);
+      const items = Array.from(tbody.querySelectorAll('tr')).map(row => {
+        const get = (field: string) => (row.querySelector(`[data-field="${field}"]`) as HTMLInputElement).value;
+        return { unit: get('unit'), description: get('description'), objectExpenditureId: get('objectExpenditureId'), quantity: get('quantity'), unitCost: get('unitCost') };
+      });
+      submit.disabled = true;
+      const response = await fetch('/api/procurement/requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...Object.fromEntries(data), items }),
+      });
+      const result = await response.json();
+      if (response.ok) {
+        window.location.href = `/procurement/requests/${result.id}?created=1`;
+      } else {
+        document.getElementById('pr-error-text')!.textContent = result.message;
+        error.classList.remove('hidden');
+        error.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        submit.disabled = false;
+      }
+    });
+  </script>
+</MainLayout>

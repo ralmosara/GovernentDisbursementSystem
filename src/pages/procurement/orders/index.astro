@@ -1,0 +1,111 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import PageHeader from '../../../components/ui/PageHeader.astro';
+import DataTable from '../../../components/ui/DataTable.astro';
+import EmptyState from '../../../components/ui/EmptyState.astro';
+import Lozenge from '../../../components/ui/Lozenge.astro';
+import { procurementService } from '../../../lib/services/procurement.service';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const view = Astro.url.searchParams.get('view') === 'deliveries' ? 'deliveries' : 'orders';
+const [orders, iars] = await Promise.all([procurementService.getPos(), procurementService.getIars()]);
+const awaitingPayment = iars.filter(i => !i.dvId).length;
+
+const peso = (value: string | number) => `₱${parseFloat(String(value)).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const formatDate = (date: Date | string) => new Date(date).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
+const poStatus = (status: string) => (status === 'delivered' ? 'completed' : status === 'partially_delivered' ? 'partial' : status);
+---
+
+<MainLayout title="Purchase orders - Philippine Government FMS">
+  <PageHeader
+    title="Purchase orders and deliveries"
+    description="Orders issued to suppliers, and deliveries inspected and accepted for payment."
+    breadcrumbs={[{ label: 'Procurement' }, { label: 'Orders and deliveries' }]}
+  >
+    <a slot="actions" href="/procurement/requests?status=approved" class="btn btn-secondary">Approved requests to order</a>
+  </PageHeader>
+
+  <nav class="flex gap-1 mb-4" aria-label="View">
+    <a href="/procurement/orders" class={`btn btn-sm ${view === 'orders' ? 'btn-secondary' : 'btn-subtle'}`} aria-current={view === 'orders' ? 'page' : undefined}>
+      Purchase orders <span class="badge ml-1">{orders.length}</span>
+    </a>
+    <a href="/procurement/orders?view=deliveries" class={`btn btn-sm ${view === 'deliveries' ? 'btn-secondary' : 'btn-subtle'}`} aria-current={view === 'deliveries' ? 'page' : undefined}>
+      Deliveries (IAR) <span class="badge ml-1">{iars.length}</span>
+      {awaitingPayment > 0 && <span class="badge badge-warning ml-1">{awaitingPayment} to pay</span>}
+    </a>
+  </nav>
+
+  {view === 'orders' ? (
+    orders.length === 0 ? (
+      <div class="card"><EmptyState icon="pi-file-edit" title="No purchase orders yet" description="Issue one from an approved purchase request." /></div>
+    ) : (
+      <DataTable title="Purchase orders" count={orders.length} quickFilter quickFilterLabel="Filter by PO no. or supplier">
+        <table class="table">
+          <thead>
+            <tr>
+              <th scope="col">PO no.</th>
+              <th scope="col">Date</th>
+              <th scope="col">Supplier</th>
+              <th scope="col" class="hidden lg:table-cell">Mode</th>
+              <th scope="col" class="hidden md:table-cell">ORS/BURS</th>
+              <th scope="col" class="!text-right">Amount</th>
+              <th scope="col">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {orders.map(po => (
+              <tr class="hover:bg-gray-50">
+                <td class="whitespace-nowrap"><a href={`/procurement/orders/${po.id}`} class="font-medium text-primary-600 hover:underline">{po.poNo}</a><p class="text-xs text-gray-500">{po.prNo}</p></td>
+                <td class="whitespace-nowrap text-gray-600" data-sort-value={new Date(po.poDate).getTime()}>{formatDate(po.poDate)}</td>
+                <td>{po.supplierName}</td>
+                <td class="hidden lg:table-cell text-gray-600">{po.modeOfProcurement}</td>
+                <td class="hidden md:table-cell">{po.orsBursNo ?? <span class="badge badge-warning">Not obligated</span>}</td>
+                <td class="text-right tabular-nums" data-sort-value={po.totalAmount}>{peso(po.totalAmount)}</td>
+                <td><Lozenge status={poStatus(po.status)} label={po.status === 'partially_delivered' ? 'Partly delivered' : undefined} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </DataTable>
+    )
+  ) : iars.length === 0 ? (
+    <div class="card"><EmptyState icon="pi-box" title="No deliveries accepted yet" description="Record an inspection and acceptance report from a purchase order when goods arrive." /></div>
+  ) : (
+    <DataTable title="Inspection and acceptance reports" count={iars.length} quickFilter quickFilterLabel="Filter by IAR, PO or supplier">
+      <table class="table">
+        <thead>
+          <tr>
+            <th scope="col">IAR no.</th>
+            <th scope="col">Date</th>
+            <th scope="col">PO</th>
+            <th scope="col">Supplier</th>
+            <th scope="col">Acceptance</th>
+            <th scope="col" class="!text-right">Accepted value</th>
+            <th scope="col">Payment</th>
+          </tr>
+        </thead>
+        <tbody>
+          {iars.map(iar => (
+            <tr class="hover:bg-gray-50">
+              <td class="whitespace-nowrap"><a href={`/procurement/inspections/${iar.id}`} class="font-medium text-primary-600 hover:underline">{iar.iarNo}</a></td>
+              <td class="whitespace-nowrap text-gray-600" data-sort-value={new Date(iar.iarDate).getTime()}>{formatDate(iar.iarDate)}</td>
+              <td class="whitespace-nowrap"><a href={`/procurement/orders/${iar.poId}`} class="text-primary-600 hover:underline">{iar.poNo}</a></td>
+              <td>{iar.supplierName}</td>
+              <td><Lozenge status={iar.acceptance === 'complete' ? 'completed' : 'partial'} label={iar.acceptance === 'complete' ? 'Complete' : 'Partial'} /></td>
+              <td class="text-right tabular-nums" data-sort-value={iar.totalAmount}>{peso(iar.totalAmount)}</td>
+              <td>
+                {iar.dvId ? (
+                  <a href={`/disbursements/${iar.dvId}`} class="text-primary-600 hover:underline">Voucher</a>
+                ) : (
+                  <a href={`/procurement/inspections/${iar.id}`} class="btn btn-primary btn-sm">Create voucher</a>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </DataTable>
+  )}
+</MainLayout>

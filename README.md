@@ -140,7 +140,7 @@ After seeding:
 - Philippine government standards
 
 ### Government Accounting (GAM for NGAs)
-Run `npm run db:migrate-accounting` once per environment (safe to re-run), then open
+Run `npm run db:migrate-gov` once per environment (safe to re-run), then open
 **Accounting → Journal entries** and choose **Post them now** to bring existing transactions into the books.
 
 - **Chart of accounts:** standard Revised Chart of Accounts (UACS) accounts, plus every object of expenditure as an expense account.
@@ -165,7 +165,20 @@ Run `npm run db:migrate-accounting` once per environment (safe to re-run), then 
   - Payments are made at the net amount.
 - **Reports:** BIR taxes withheld by ATC and Form 2307 figures by payee; Report of Checks Issued (RCI), Report of ADA Issued (RADAI), and Report of Collections and Deposits (RCD).
 - **Payroll withholding** follows the TRAIN Law table (no personal exemptions), and Pag-IBIG is capped at the ₱10,000 fund salary.
-- **Manual JEVs still needed:** receivable write-offs and payroll accounting entries.
+- **Payroll in the books:**
+  - Processing a payroll posts the salary expense, the government's share of contributions, and what is owed to BIR, GSIS, Pag-IBIG, PhilHealth and the employees.
+  - **Record payout** releases net pay.
+  - **Record payment** on a remittance clears what is owed to that agency. BIR is paid through the Tax Remittance Advice account.
+- **Manual JEVs still needed:** receivable write-offs.
+
+### Procurement (RA 12009)
+The chain runs purchase request → purchase order → obligation (ORS) → inspection and acceptance report (IAR) → disbursement voucher.
+
+- **Approval:** the head of office approves purchase requests, and segregation of duties stops requesters approving their own.
+- **Ordering limits:** purchase orders can't exceed the approved budget for the contract or the requested quantities.
+- **Obligation:** the ORS is raised from the purchase order, and its number is recorded on it.
+- **Deliveries:** each IAR accepts at most what is still undelivered, and marks the purchase order partly or fully delivered.
+- **Payment:** each IAR opens a voucher already filled in with the supplier, amount, ORS number and object of expenditure. An IAR can be paid by one voucher only.
 
 ## Testing
 

@@ -1,0 +1,167 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import PageHeader from '../../../components/ui/PageHeader.astro';
+import Lozenge from '../../../components/ui/Lozenge.astro';
+import Banner from '../../../components/ui/Banner.astro';
+import Modal from '../../../components/ui/Modal.astro';
+import { procurementService } from '../../../lib/services/procurement.service';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const id = parseInt(Astro.params.id ?? '');
+const pr = id ? await procurementService.getPr(id) : null;
+if (!pr) return Astro.redirect('/procurement/requests');
+
+const canDecide = pr.status === 'submitted' && (user.roles ?? []).some(role => role === 'director' || role === 'administrator');
+const canOrder = (pr.status === 'approved' || pr.status === 'ordered') && pr.remainingBudget > 0 && pr.items.some(i => i.remainingQty > 0);
+const peso = (value: string | number) => `₱${parseFloat(String(value)).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const qty = (value: string | number) => parseFloat(String(value)).toLocaleString('en-PH', { maximumFractionDigits: 2 });
+const formatDate = (date: Date | string | null) => (date ? new Date(date).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' }) : '—');
+const created = Astro.url.searchParams.get('created');
+---
+
+<MainLayout title={`${pr.prNo} - Philippine Government FMS`}>
+  <PageHeader title={pr.prNo} breadcrumbs={[{ label: 'Purchase requests', href: '/procurement/requests' }, { label: pr.prNo }]}>
+    <p slot="meta" class="mt-1 flex flex-wrap items-center gap-2 text-sm text-gray-600">
+      <Lozenge status={pr.status === 'submitted' ? 'pending' : pr.status === 'ordered' ? 'issued' : pr.status} label={pr.status === 'submitted' ? 'Awaiting approval' : undefined} />
+      <span>{pr.office ?? 'No office given'}</span>
+      <span aria-hidden="true">·</span>
+      <span class="font-medium text-gray-800 tabular-nums">ABC {peso(pr.totalAmount)}</span>
+    </p>
+    <Fragment slot="actions">
+      <button type="button" class="btn btn-secondary" onclick="window.print()"><i class="pi pi-print" aria-hidden="true"></i>Print</button>
+      {canDecide && (
+        <>
+          <button type="button" class="btn btn-secondary" data-decide="rejected">Reject</button>
+          <button type="button" class="btn btn-primary" data-decide="approved"><i class="pi pi-check" aria-hidden="true"></i>Approve</button>
+        </>
+      )}
+      {canOrder && (
+        <a href={`/procurement/orders/create?pr=${pr.id}`} class="btn btn-primary">
+          <i class="pi pi-file-edit" aria-hidden="true"></i>
+          Issue purchase order
+        </a>
+      )}
+    </Fragment>
+  </PageHeader>
+
+  {created && <Banner appearance="success" title="Purchase request submitted" class="mb-6" role="status">The head of office approves it next; then a purchase order can be issued to the winning supplier.</Banner>}
+  {pr.status === 'rejected' && pr.remarks && <Banner appearance="error" title="Rejected" class="mb-6">{pr.remarks}</Banner>}
+
+  <article class="card mb-6" aria-label="Purchase request">
+    <dl class="grid grid-cols-2 md:grid-cols-4 gap-4 px-6 py-4 border-b border-gray-200 text-sm">
+      <div><dt class="form-label">Date</dt><dd>{formatDate(pr.prDate)}</dd></div>
+      <div><dt class="form-label">Fund cluster</dt><dd>{pr.fundClusterCode} – {pr.fundClusterName}</dd></div>
+      <div><dt class="form-label">Requested by</dt><dd>{pr.requestedByName}</dd></div>
+      <div><dt class="form-label">Approved</dt><dd>{pr.approvedAt ? formatDate(pr.approvedAt) : '—'}</dd></div>
+      <div class="col-span-2 md:col-span-4"><dt class="form-label">Purpose</dt><dd class="whitespace-pre-wrap">{pr.purpose}</dd></div>
+    </dl>
+    <div class="relative overflow-x-auto">
+      <table class="table">
+        <thead>
+          <tr>
+            <th scope="col">No.</th>
+            <th scope="col">Unit</th>
+            <th scope="col">Description</th>
+            <th scope="col" class="hidden md:table-cell">UACS</th>
+            <th scope="col" class="!text-right">Qty</th>
+            <th scope="col" class="!text-right">Est. unit cost</th>
+            <th scope="col" class="!text-right">Est. cost</th>
+            {pr.orders.length > 0 && <th scope="col" class="!text-right">Ordered</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {pr.items.map(item => (
+            <tr>
+              <td>{item.itemNo}</td>
+              <td>{item.unit}</td>
+              <td>{item.description}</td>
+              <td class="hidden md:table-cell tabular-nums text-gray-600">{item.expenseCode ?? '—'}</td>
+              <td class="text-right tabular-nums">{qty(item.quantity)}</td>
+              <td class="text-right tabular-nums">{peso(item.unitCost)}</td>
+              <td class="text-right tabular-nums">{peso(item.totalCost)}</td>
+              {pr.orders.length > 0 && <td class="text-right tabular-nums">{qty(item.orderedQty)}</td>}
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr class="border-t-2 border-gray-200 font-semibold">
+            <th scope="row" colspan="6" class="!text-sm !text-gray-800">Approved budget for the contract</th>
+            <td class="text-right tabular-nums">{peso(pr.totalAmount)}</td>
+            {pr.orders.length > 0 && <td></td>}
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </article>
+
+  {pr.orders.length > 0 && (
+    <section class="card" aria-labelledby="po-heading">
+      <div class="card-header">
+        <h2 id="po-heading" class="card-title">Purchase orders</h2>
+        <span class="text-sm text-gray-600">{peso(pr.orderedTotal)} awarded · {peso(pr.remainingBudget)} of the budget unused</span>
+      </div>
+      <ul class="divide-y divide-gray-200">
+        {pr.orders.map(po => (
+          <li class="flex flex-wrap items-center justify-between gap-2 px-5 py-3">
+            <a href={`/procurement/orders/${po.id}`} class="font-medium text-primary-600 hover:underline">{po.poNo}</a>
+            <span class="text-gray-600">{po.supplierName}</span>
+            <span class="tabular-nums">{peso(po.totalAmount)}</span>
+            <Lozenge status={po.status === 'delivered' ? 'completed' : po.status === 'partially_delivered' ? 'partial' : po.status} />
+          </li>
+        ))}
+      </ul>
+    </section>
+  )}
+
+  {canDecide && (
+    <Modal id="decide-dialog" title="Purchase request decision">
+      <form id="decide-form" method="dialog" class="space-y-3">
+        <p class="text-sm text-gray-700" id="decide-text"></p>
+        <div>
+          <label for="remarks" class="form-label" id="remarks-label">Remarks</label>
+          <textarea id="remarks" name="remarks" rows="3" class="form-textarea"></textarea>
+        </div>
+        <p id="decide-error" class="form-error hidden" role="alert"></p>
+      </form>
+      <Fragment slot="footer">
+        <button type="button" class="btn btn-subtle" data-modal-close>Cancel</button>
+        <button type="submit" form="decide-form" class="btn btn-primary" id="decide-submit">Confirm</button>
+      </Fragment>
+    </Modal>
+  )}
+
+  <script define:vars={{ prId: pr.id, abc: peso(pr.totalAmount) }}>
+    const dialog = document.getElementById('decide-dialog');
+    const form = document.getElementById('decide-form');
+    let decision = '';
+    document.querySelectorAll('[data-decide]').forEach(button =>
+      button.addEventListener('click', () => {
+        decision = button.dataset.decide;
+        document.getElementById('decide-text').textContent = decision === 'approved'
+          ? `Approve this request with an approved budget for the contract of ${abc}? Procurement can then proceed.`
+          : 'Reject this request? The requester will see your reason.';
+        document.getElementById('remarks-label').className = decision === 'rejected' ? 'form-label form-label-required' : 'form-label';
+        document.getElementById('decide-submit').className = decision === 'rejected' ? 'btn btn-danger' : 'btn btn-primary';
+        document.getElementById('decide-submit').textContent = decision === 'rejected' ? 'Reject request' : 'Approve request';
+        dialog.showModal();
+      })
+    );
+    form?.addEventListener('submit', async event => {
+      event.preventDefault();
+      const error = document.getElementById('decide-error');
+      const response = await fetch(`/api/procurement/requests/${prId}/decision`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ decision, remarks: form.elements.remarks.value }),
+      });
+      const result = await response.json();
+      if (response.ok) window.location.reload();
+      else {
+        error.textContent = result.message;
+        error.classList.remove('hidden');
+      }
+    });
+  </script>
+</MainLayout>

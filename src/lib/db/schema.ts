@@ -1297,3 +1297,101 @@ export const ncaRegistry = mysqlTable('nca_registry', {
   createdBy: int('created_by').notNull(),
   createdAt: timestamp('created_at').defaultNow(),
 });
+
+
+// ============================================
+// PROCUREMENT (RA 12009): PR → PO → IAR → DV
+// Migration: migrations/add_procurement.sql
+// ============================================
+
+export const purchaseRequests = mysqlTable('purchase_requests', {
+  id: int('id').primaryKey().autoincrement(),
+  prNo: varchar('pr_no', { length: 30 }).unique().notNull(),
+  prDate: datetime('pr_date').notNull(),
+  fundClusterId: int('fund_cluster_id').notNull(),
+  office: varchar('office', { length: 150 }),
+  purpose: text('purpose').notNull(),
+  /** Approved Budget for the Contract: the ceiling every award must stay within */
+  totalAmount: decimal('total_amount', { precision: 15, scale: 2 }).notNull(),
+  status: mysqlEnum('status', ['submitted', 'approved', 'rejected', 'cancelled', 'ordered']).notNull().default('submitted'),
+  requestedBy: int('requested_by').notNull(),
+  approvedBy: int('approved_by'),
+  approvedAt: datetime('approved_at'),
+  remarks: text('remarks'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
+});
+
+export const purchaseRequestItems = mysqlTable('purchase_request_items', {
+  id: int('id').primaryKey().autoincrement(),
+  prId: int('pr_id').notNull(),
+  itemNo: int('item_no').notNull(),
+  unit: varchar('unit', { length: 30 }).notNull(),
+  description: text('description').notNull(),
+  quantity: decimal('quantity', { precision: 12, scale: 2 }).notNull(),
+  unitCost: decimal('unit_cost', { precision: 15, scale: 2 }).notNull(),
+  totalCost: decimal('total_cost', { precision: 15, scale: 2 }).notNull(),
+  objectExpenditureId: int('object_expenditure_id'),
+});
+
+export const purchaseOrders = mysqlTable('purchase_orders', {
+  id: int('id').primaryKey().autoincrement(),
+  poNo: varchar('po_no', { length: 30 }).unique().notNull(),
+  poDate: datetime('po_date').notNull(),
+  prId: int('pr_id').notNull(),
+  fundClusterId: int('fund_cluster_id').notNull(),
+  supplierName: varchar('supplier_name', { length: 255 }).notNull(),
+  supplierAddress: text('supplier_address'),
+  supplierTin: varchar('supplier_tin', { length: 50 }),
+  modeOfProcurement: varchar('mode_of_procurement', { length: 60 }).notNull(),
+  placeOfDelivery: varchar('place_of_delivery', { length: 255 }),
+  deliveryDate: datetime('delivery_date'),
+  paymentTerm: varchar('payment_term', { length: 100 }),
+  totalAmount: decimal('total_amount', { precision: 15, scale: 2 }).notNull(),
+  obligationId: int('obligation_id'),
+  orsBursNo: varchar('ors_burs_no', { length: 50 }),
+  status: mysqlEnum('status', ['issued', 'partially_delivered', 'delivered', 'cancelled']).notNull().default('issued'),
+  createdBy: int('created_by').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
+});
+
+export const purchaseOrderItems = mysqlTable('purchase_order_items', {
+  id: int('id').primaryKey().autoincrement(),
+  poId: int('po_id').notNull(),
+  prItemId: int('pr_item_id'),
+  itemNo: int('item_no').notNull(),
+  unit: varchar('unit', { length: 30 }).notNull(),
+  description: text('description').notNull(),
+  quantity: decimal('quantity', { precision: 12, scale: 2 }).notNull(),
+  unitCost: decimal('unit_cost', { precision: 15, scale: 2 }).notNull(),
+  amount: decimal('amount', { precision: 15, scale: 2 }).notNull(),
+  objectExpenditureId: int('object_expenditure_id'),
+});
+
+export const inspectionAcceptanceReports = mysqlTable('inspection_acceptance_reports', {
+  id: int('id').primaryKey().autoincrement(),
+  iarNo: varchar('iar_no', { length: 30 }).unique().notNull(),
+  iarDate: datetime('iar_date').notNull(),
+  poId: int('po_id').notNull(),
+  invoiceNo: varchar('invoice_no', { length: 50 }),
+  invoiceDate: datetime('invoice_date'),
+  inspectedBy: varchar('inspected_by', { length: 150 }).notNull(),
+  dateInspected: datetime('date_inspected').notNull(),
+  receivedBy: varchar('received_by', { length: 150 }).notNull(),
+  dateReceived: datetime('date_received').notNull(),
+  acceptance: mysqlEnum('acceptance', ['complete', 'partial']).notNull(),
+  totalAmount: decimal('total_amount', { precision: 15, scale: 2 }).notNull(),
+  dvId: int('dv_id'),
+  remarks: text('remarks'),
+  createdBy: int('created_by').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const inspectionAcceptanceItems = mysqlTable('inspection_acceptance_items', {
+  id: int('id').primaryKey().autoincrement(),
+  iarId: int('iar_id').notNull(),
+  poItemId: int('po_item_id').notNull(),
+  quantity: decimal('quantity', { precision: 12, scale: 2 }).notNull(),
+  amount: decimal('amount', { precision: 15, scale: 2 }).notNull(),
+});

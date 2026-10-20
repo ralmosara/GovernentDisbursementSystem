@@ -1,0 +1,172 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import PageHeader from '../../../components/ui/PageHeader.astro';
+import Banner from '../../../components/ui/Banner.astro';
+import { procurementService, MODES_OF_PROCUREMENT } from '../../../lib/services/procurement.service';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const prId = parseInt(Astro.url.searchParams.get('pr') ?? '');
+const pr = prId ? await procurementService.getPr(prId) : null;
+if (!pr) return Astro.redirect('/procurement/requests?status=approved');
+
+const orderable = pr.status === 'approved' || pr.status === 'ordered';
+const lines = pr.items.filter(i => i.remainingQty > 0);
+const peso = (value: number) => `₱${value.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+---
+
+<MainLayout title="Issue purchase order - Philippine Government FMS">
+  <PageHeader
+    title="Issue purchase order"
+    description={`Against ${pr.prNo}: ${pr.purpose}`}
+    breadcrumbs={[{ label: 'Purchase requests', href: '/procurement/requests' }, { label: pr.prNo, href: `/procurement/requests/${pr.id}` }, { label: 'New purchase order' }]}
+  />
+
+  {!orderable ? (
+    <Banner appearance="warning">This purchase request is {pr.status}; only an approved request can be ordered against.</Banner>
+  ) : (
+    <form id="po-form" class="card max-w-6xl" novalidate>
+      <input type="hidden" name="prId" value={pr.id} />
+      <div class="card-body">
+        <div id="po-error" class="alert alert-error mb-4 hidden" role="alert">
+          <i class="pi pi-times-circle" aria-hidden="true"></i>
+          <span id="po-error-text"></span>
+        </div>
+
+        <Banner appearance="info" class="mb-4">
+          Approved budget remaining: <strong>{peso(pr.remainingBudget)}</strong>. Awards above the approved budget for the contract are not allowed.
+        </Banner>
+
+        <h2 class="section-title">Supplier and terms</h2>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div class="form-group md:col-span-2">
+            <label for="supplierName" class="form-label form-label-required">Supplier</label>
+            <input id="supplierName" name="supplierName" class="form-input" required />
+          </div>
+          <div class="form-group">
+            <label for="supplierTin" class="form-label">TIN</label>
+            <input id="supplierTin" name="supplierTin" class="form-input" placeholder="000-000-000-000" />
+          </div>
+          <div class="form-group md:col-span-3">
+            <label for="supplierAddress" class="form-label">Address</label>
+            <input id="supplierAddress" name="supplierAddress" class="form-input" />
+          </div>
+          <div class="form-group">
+            <label for="poDate" class="form-label form-label-required">PO date</label>
+            <input type="date" id="poDate" name="poDate" class="form-input" value={new Date().toLocaleDateString('en-CA')} required />
+          </div>
+          <div class="form-group">
+            <label for="modeOfProcurement" class="form-label form-label-required">Mode of procurement</label>
+            <select id="modeOfProcurement" name="modeOfProcurement" class="form-select" required>
+              <option value="">Choose</option>
+              {MODES_OF_PROCUREMENT.map(mode => <option value={mode}>{mode}</option>)}
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="deliveryDate" class="form-label">Delivery date</label>
+            <input type="date" id="deliveryDate" name="deliveryDate" class="form-input" />
+          </div>
+          <div class="form-group md:col-span-2">
+            <label for="placeOfDelivery" class="form-label">Place of delivery</label>
+            <input id="placeOfDelivery" name="placeOfDelivery" class="form-input" />
+          </div>
+          <div class="form-group">
+            <label for="paymentTerm" class="form-label">Payment term</label>
+            <input id="paymentTerm" name="paymentTerm" class="form-input" placeholder="e.g. 30 days after acceptance" />
+          </div>
+        </div>
+
+        <h2 class="section-title mt-6">Items to order</h2>
+        <div class="relative overflow-x-auto">
+          <table class="table">
+            <thead>
+              <tr>
+                <th scope="col">Item</th>
+                <th scope="col" class="!text-right">Remaining</th>
+                <th scope="col" class="!text-right">ABC unit cost</th>
+                <th scope="col" class="w-28 !text-right">Order qty</th>
+                <th scope="col" class="w-36 !text-right">Contract unit price</th>
+                <th scope="col" class="w-36 !text-right">Amount</th>
+              </tr>
+            </thead>
+            <tbody id="po-lines">
+              {lines.map(item => (
+                <tr data-pr-item={item.id}>
+                  <td>{item.description}<p class="text-xs text-gray-500">{item.unit}</p></td>
+                  <td class="text-right tabular-nums">{item.remainingQty}</td>
+                  <td class="text-right tabular-nums">{peso(parseFloat(item.unitCost))}</td>
+                  <td><input type="number" min="0" max={item.remainingQty} step="0.01" class="form-input text-right" data-field="quantity" value={item.remainingQty} aria-label={`Order quantity, ${item.description}`} /></td>
+                  <td><input type="number" min="0" step="0.01" class="form-input text-right" data-field="unitCost" value={item.unitCost} aria-label={`Contract unit price, ${item.description}`} /></td>
+                  <td class="text-right tabular-nums" data-amount></td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr class="border-t-2 border-gray-200 font-semibold">
+                <th scope="row" colspan="5" class="!text-sm !text-gray-800">Total</th>
+                <td class="text-right tabular-nums" id="po-total"></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <p id="po-budget" class="mt-2 text-sm" aria-live="polite"></p>
+      </div>
+      <div class="card-footer">
+        <a href={`/procurement/requests/${pr.id}`} class="btn btn-subtle">Cancel</a>
+        <button type="submit" class="btn btn-primary" id="po-submit">Issue purchase order</button>
+      </div>
+    </form>
+  )}
+
+  <script define:vars={{ remainingBudget: pr.remainingBudget }}>
+    const form = document.getElementById('po-form');
+    if (form) {
+      const tbody = document.getElementById('po-lines');
+      const fmt = value => value.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      function recalc() {
+        let total = 0;
+        tbody.querySelectorAll('tr').forEach(row => {
+          const qty = parseFloat(row.querySelector('[data-field="quantity"]').value) || 0;
+          const price = parseFloat(row.querySelector('[data-field="unitCost"]').value) || 0;
+          const amount = Math.round(qty * price * 100) / 100;
+          row.querySelector('[data-amount]').textContent = fmt(amount);
+          total += amount;
+        });
+        document.getElementById('po-total').textContent = fmt(total);
+        const over = Math.round(total * 100) > Math.round(remainingBudget * 100);
+        const status = document.getElementById('po-budget');
+        status.textContent = over ? `₱${fmt(total - remainingBudget)} over the approved budget.` : `₱${fmt(remainingBudget - total)} of the approved budget left after this order.`;
+        status.className = `mt-2 text-sm ${over ? 'text-red-700 font-medium' : 'text-gray-600'}`;
+      }
+      tbody.addEventListener('input', recalc);
+      recalc();
+
+      form.addEventListener('submit', async event => {
+        event.preventDefault();
+        const error = document.getElementById('po-error');
+        const submit = document.getElementById('po-submit');
+        error.classList.add('hidden');
+        const items = Array.from(tbody.querySelectorAll('tr')).map(row => ({
+          prItemId: row.dataset.prItem,
+          quantity: row.querySelector('[data-field="quantity"]').value,
+          unitCost: row.querySelector('[data-field="unitCost"]').value,
+        }));
+        submit.disabled = true;
+        const response = await fetch('/api/procurement/orders', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...Object.fromEntries(new FormData(form)), items }),
+        });
+        const result = await response.json();
+        if (response.ok) window.location.href = `/procurement/orders/${result.id}?created=1`;
+        else {
+          document.getElementById('po-error-text').textContent = result.message;
+          error.classList.remove('hidden');
+          error.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          submit.disabled = false;
+        }
+      });
+    }
+  </script>
+</MainLayout>

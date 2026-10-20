@@ -30,3 +30,7 @@ public/uploads/
 # Playwright output
 test-results/
 playwright-report/
+
+# Database backups
+backups/
+*.sql.gz
