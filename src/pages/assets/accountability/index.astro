@@ -1,0 +1,190 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import PageHeader from '../../../components/ui/PageHeader.astro';
+import FilterBar from '../../../components/ui/FilterBar.astro';
+import EmptyState from '../../../components/ui/EmptyState.astro';
+import Banner from '../../../components/ui/Banner.astro';
+import Modal from '../../../components/ui/Modal.astro';
+import StatTile from '../../../components/ui/StatTile.astro';
+import { db } from '../../../lib/db/connection';
+import { employees } from '../../../lib/db/schema';
+import { eq } from 'drizzle-orm';
+import { propertyService, CAPITALIZATION_THRESHOLD, documentTypeFor } from '../../../lib/services/property.service';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const canIssue = (user.roles ?? []).some(role => role === 'accountant' || role === 'administrator');
+const search = Astro.url.searchParams.get('search')?.trim() || undefined;
+const preselect = parseInt(Astro.url.searchParams.get('issue') ?? '') || null;
+
+const [officers, unassigned, staff] = await Promise.all([
+  propertyService.getAccountabilities(search),
+  propertyService.getUnassignedAssets(),
+  db.select({ firstName: employees.firstName, lastName: employees.lastName, position: employees.position }).from(employees).where(eq(employees.isActive, true)),
+]);
+
+const itemCount = officers.reduce((sum, o) => sum + o.items.length, 0);
+const peso = (value: string | number) => `₱${parseFloat(String(value)).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const formatDate = (date: Date | string) => new Date(date).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
+const issued = Astro.url.searchParams.get('issued');
+---
+
+<MainLayout title="Property accountability - Philippine Government FMS">
+  <PageHeader
+    title="Property accountability"
+    description={`Who is accountable for each item of property. PAR for items costing ₱${CAPITALIZATION_THRESHOLD.toLocaleString('en-PH')} or more, ICS for semi-expendable items below that.`}
+    breadcrumbs={[{ label: 'Assets', href: '/assets' }, { label: 'Accountability' }]}
+  >
+    <button slot="actions" type="button" class="btn btn-secondary" onclick="window.print()"><i class="pi pi-print" aria-hidden="true"></i>Print</button>
+  </PageHeader>
+
+  {issued && <Banner appearance="success" class="mb-6" role="status">Issued on {issued}. Print it for the officer's signature.</Banner>}
+
+  <div class="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-6 no-print">
+    <StatTile label="Accountable officers" value={officers.length} icon="pi-users" />
+    <StatTile label="Items issued" value={itemCount} icon="pi-box" />
+    <StatTile label="Not yet issued" value={unassigned.length} help={unassigned.length ? 'Active assets with no PAR or ICS' : 'Every active asset is issued'} icon="pi-exclamation-triangle" />
+  </div>
+
+  {canIssue && unassigned.length > 0 && (
+    <section class="card mb-6 no-print" aria-labelledby="unassigned-heading">
+      <div class="card-header">
+        <h2 id="unassigned-heading" class="card-title">Not yet issued</h2>
+        <span class="badge badge-warning">{unassigned.length}</span>
+      </div>
+      <ul class="divide-y divide-gray-200">
+        {unassigned.map(asset => (
+          <li class="flex flex-wrap items-center justify-between gap-2 px-5 py-3">
+            <span class="min-w-0">
+              <a href={`/assets/fixed/${asset.id}`} class="font-medium text-primary-600 hover:underline">{asset.assetNo}</a>
+              <span class="text-gray-600"> · {asset.description}</span>
+            </span>
+            <span class="flex items-center gap-3">
+              <span class="text-sm text-gray-600 tabular-nums">{peso(asset.acquisitionCost)}</span>
+              <span class="badge">{documentTypeFor(parseFloat(asset.acquisitionCost))}</span>
+              <button type="button" class="btn btn-primary btn-sm" data-issue={asset.id} data-label={`${asset.assetNo} · ${asset.description}`}>Issue</button>
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )}
+
+  <FilterBar action="/assets/accountability" resetHref="/assets/accountability" activeCount={search ? 1 : 0}>
+    <div class="form-group flex-1 min-w-[16rem]">
+      <label for="search" class="form-label">Find officer or asset</label>
+      <input type="search" id="search" name="search" class="form-input" value={search ?? ''} placeholder="Name or asset no." />
+    </div>
+  </FilterBar>
+
+  {officers.length === 0 ? (
+    <div class="card"><EmptyState icon="pi-users" title={search ? 'No accountable officer matches' : 'No property issued yet'} /></div>
+  ) : (
+    <div class="space-y-4">
+      {officers.map(officer => (
+        <article class="card" aria-label={`Property issued to ${officer.issuedTo}`}>
+          <header class="card-header">
+            <div>
+              <h2 class="card-title">{officer.issuedTo}</h2>
+              <p class="text-xs text-gray-600">{[officer.position, officer.office].filter(Boolean).join(' · ') || 'Position not recorded'}</p>
+            </div>
+            <span class="text-sm text-gray-600">{officer.items.length} item{officer.items.length === 1 ? '' : 's'} · <span class="tabular-nums font-medium text-gray-800">{peso(officer.total)}</span></span>
+          </header>
+          <div class="relative overflow-x-auto">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th scope="col">Document</th>
+                  <th scope="col">Asset no.</th>
+                  <th scope="col">Description</th>
+                  <th scope="col" class="hidden md:table-cell">Serial no.</th>
+                  <th scope="col">Issued</th>
+                  <th scope="col" class="!text-right">Cost</th>
+                </tr>
+              </thead>
+              <tbody>
+                {officer.items.map(item => (
+                  <tr>
+                    <td class="whitespace-nowrap"><a href={`/assets/accountability/${item.id}`} class="text-primary-600 hover:underline">{item.documentNo}</a></td>
+                    <td class="whitespace-nowrap"><a href={`/assets/fixed/${item.assetId}`} class="hover:underline">{item.assetNo}</a></td>
+                    <td>{item.description}</td>
+                    <td class="hidden md:table-cell font-mono text-xs">{item.serialNo ?? '—'}</td>
+                    <td class="whitespace-nowrap text-gray-600">{formatDate(item.issueDate)}</td>
+                    <td class="text-right tabular-nums">{peso(item.acquisitionCost)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </article>
+      ))}
+    </div>
+  )}
+
+  <datalist id="staff">
+    {staff.map(s => <option value={`${s.firstName} ${s.lastName}`}>{s.position}</option>)}
+  </datalist>
+
+  {canIssue && (
+    <Modal id="issue-dialog" title="Issue property" width="medium">
+      <form id="issue-form" method="dialog" class="space-y-3">
+        <input type="hidden" name="assetId" id="issue-asset" />
+        <p class="text-sm font-medium text-gray-800" id="issue-label"></p>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div class="md:col-span-2">
+            <label for="issuedTo" class="form-label form-label-required">Accountable officer</label>
+            <input id="issuedTo" name="issuedTo" class="form-input" list="staff" autocomplete="off" required />
+          </div>
+          <div>
+            <label for="position" class="form-label">Position</label>
+            <input id="position" name="position" class="form-input" />
+          </div>
+          <div>
+            <label for="office" class="form-label">Office</label>
+            <input id="office" name="office" class="form-input" />
+          </div>
+          <div>
+            <label for="issueDate" class="form-label form-label-required">Date issued</label>
+            <input type="date" id="issueDate" name="issueDate" class="form-input" value={new Date().toLocaleDateString('en-CA')} required />
+          </div>
+        </div>
+        <p id="issue-error" class="form-error hidden" role="alert"></p>
+      </form>
+      <Fragment slot="footer">
+        <button type="button" class="btn btn-subtle" data-modal-close>Cancel</button>
+        <button type="submit" form="issue-form" class="btn btn-primary">Issue</button>
+      </Fragment>
+    </Modal>
+  )}
+
+  <script define:vars={{ preselect }}>
+    const dialog = document.getElementById('issue-dialog');
+    const form = document.getElementById('issue-form');
+    const open = button => {
+      document.getElementById('issue-asset').value = button.dataset.issue;
+      document.getElementById('issue-label').textContent = button.dataset.label;
+      document.getElementById('issue-error').classList.add('hidden');
+      dialog.showModal();
+    };
+    document.querySelectorAll('[data-issue]').forEach(button => button.addEventListener('click', () => open(button)));
+    const preselected = preselect && document.querySelector(`[data-issue="${preselect}"]`);
+    if (preselected) open(preselected);
+
+    form?.addEventListener('submit', async event => {
+      event.preventDefault();
+      const error = document.getElementById('issue-error');
+      const response = await fetch('/api/assets/issuances', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(Object.fromEntries(new FormData(form))),
+      });
+      const result = await response.json();
+      if (response.ok) window.location.href = `/assets/accountability/${result.id}`;
+      else {
+        error.textContent = result.message;
+        error.classList.remove('hidden');
+      }
+    });
+  </script>
+</MainLayout>

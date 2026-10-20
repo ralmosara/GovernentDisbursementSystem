@@ -26,6 +26,9 @@ const mfoPapList = await db.select().from(mfoPap);
 const params = Astro.url.searchParams;
 const prefill = {
   fromObligation: parseInt(params.get('fromObligation') ?? '') || null,
+  fromIar: parseInt(params.get('fromIar') ?? '') || null,
+  payeeTin: params.get('payeeTin') ?? '',
+  payeeAddress: params.get('payeeAddress') ?? '',
   orsBursNo: params.get('orsBursNo') ?? '',
   payeeName: params.get('payeeName') ?? '',
   particulars: params.get('particulars') ?? '',
@@ -58,6 +61,16 @@ const prefill = {
       </div>
     )}
 
+    {prefill.fromIar && (
+      <div class="alert alert-info mb-4 max-w-5xl" role="status">
+        <i class="pi pi-info-circle" aria-hidden="true"></i>
+        <span>
+          Filled in from the accepted delivery. <a href={`/procurement/inspections/${prefill.fromIar}`} class="font-medium text-primary-600 hover:underline">View the IAR</a>.
+          Check the tax treatment and payment mode before creating the voucher.
+        </span>
+      </div>
+    )}
+
     <div id="form-error" class="alert alert-error mb-4 max-w-5xl hidden" role="alert">
       <i class="pi pi-times-circle" aria-hidden="true"></i>
       <span id="form-error-text"></span>
@@ -67,6 +80,7 @@ const prefill = {
     <div class="card max-w-5xl">
       <div class="card-body">
         <form id="dv-form" method="POST" action="/api/disbursements">
+          {prefill.fromIar && <input type="hidden" name="iarId" value={prefill.fromIar} />}
           <div class="space-y-8">
             <!-- Basic Information -->
             <div>
@@ -164,6 +178,7 @@ const prefill = {
                     id="payeeTin"
                     class="form-input"
                     placeholder="000-000-000-000"
+                    value={prefill.payeeTin}
                   />
                 </div>
 
@@ -176,6 +191,7 @@ const prefill = {
                     id="payeeAddress"
                     class="form-input"
                     placeholder="Enter payee address"
+                    value={prefill.payeeAddress}
                   />
                 </div>
               </div>
@@ -278,7 +294,7 @@ const prefill = {
                 <label for="taxTreatment" class="form-label form-label-required">Tax treatment</label>
                 <select name="taxTreatment" id="taxTreatment" class="form-select" required>
                   {TAX_TREATMENTS.map(t => (
-                    <option value={t.value} selected={t.value === (prefill.fromObligation ? 'vat_goods' : 'none')}>{t.label}</option>
+                    <option value={t.value} selected={t.value === (prefill.fromObligation || prefill.fromIar ? 'vat_goods' : 'none')}>{t.label}</option>
                   ))}
                 </select>
                 <p class="form-help" id="tax-treatment-help">{TAX_TREATMENTS[0].help}</p>
@@ -641,6 +657,7 @@ const prefill = {
           amount: parseFloat(formData.get('amount') as string),
           paymentMode: formData.get('paymentMode') as string,
           taxTreatment: formData.get('taxTreatment') as string,
+          iarId: formData.get('iarId') ? parseInt(formData.get('iarId') as string) : undefined,
           payeeType: formData.get('payeeType') as string,
           duplicateWarningAcknowledged: duplicateAck.checked ? duplicates.map(d => d.dvNo) : undefined,
         };

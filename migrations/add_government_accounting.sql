@@ -104,8 +104,30 @@ INSERT IGNORE INTO `chart_of_accounts` (`code`, `title`, `account_type`, `normal
   ('2020104000', 'Due to PhilHealth', 'liability', 'credit'),
   ('3010101000', 'Accumulated Surplus/(Deficit)', 'equity', 'credit'),
   ('4030101000', 'Subsidy from National Government', 'revenue', 'credit'),
-  ('4060101000', 'Miscellaneous Income', 'revenue', 'credit');
+  ('4060101000', 'Miscellaneous Income', 'revenue', 'credit'),
+  -- Payroll (personnel services) and its liabilities
+  ('2999999000', 'Other Payables', 'liability', 'credit'),
+  ('5010101000', 'Salaries and Wages - Regular', 'expense', 'debit'),
+  ('5010201000', 'Personnel Economic Relief Allowance (PERA)', 'expense', 'debit'),
+  ('5010213000', 'Overtime and Night Pay', 'expense', 'debit'),
+  ('5010299000', 'Other Bonuses and Allowances', 'expense', 'debit'),
+  ('5010301000', 'Retirement and Life Insurance Premiums', 'expense', 'debit'),
+  ('5010302000', 'Pag-IBIG Contributions', 'expense', 'debit'),
+  ('5010303000', 'PhilHealth Contributions', 'expense', 'debit');
 
 -- Every object of expenditure is an expense account
 INSERT IGNORE INTO `chart_of_accounts` (`code`, `title`, `account_type`, `normal_balance`)
   SELECT `code`, `name`, 'expense', 'debit' FROM `object_of_expenditure`;
+
+-- Year-end closing: no entry may be posted into a closed fiscal year
+CREATE TABLE IF NOT EXISTS `fiscal_year_closings` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `fiscal_year` INT NOT NULL UNIQUE,
+  `closed_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  `closed_by` INT NOT NULL,
+  `remarks` TEXT NULL
+);
+
+-- Receivables written off as uncollectible
+INSERT IGNORE INTO `chart_of_accounts` (`code`, `title`, `account_type`, `normal_balance`) VALUES
+  ('5050301000', 'Impairment Loss - Loans and Receivables', 'expense', 'debit');

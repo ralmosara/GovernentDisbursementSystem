@@ -162,7 +162,7 @@ describe('postPaymentIssued', () => {
 
 describe('post', () => {
   it('returns the existing entry instead of posting a source twice', async () => {
-    queuedResults.push([{ id: 5, jevNo: '01-2026-10-0005', status: 'posted' }]);
+    queuedResults.push([], [{ id: 5, jevNo: '01-2026-10-0005', status: 'posted' }]); // year open, existing entry
     const result = await ledgerService.post({
       date: new Date(),
       fundClusterId: 1,
@@ -177,7 +177,7 @@ describe('post', () => {
   });
 
   it('rejects accounts missing from the chart of accounts', async () => {
-    queuedResults.push([{ code: '1010101000' }]); // only one of the two codes is known
+    queuedResults.push([], [{ code: '1010101000' }]); // year open; only one of the two codes is known
     await expect(
       ledgerService.post({
         date: new Date(),
@@ -227,5 +227,80 @@ describe('NCA limit on MDS checks and ADAs', () => {
   it('blocks a payment that would exceed it', async () => {
     queuedResults.push([{ total: '500000.00', count: 1 }], [{ total: '106000.00' }]);
     await expect(ncaService.assertAvailable(1, 2026, 394000.01)).rejects.toThrow(/Not enough cash allocation/);
+  });
+});
+
+describe('year-end closing', () => {
+  const balances = [
+    { fundClusterId: 1, fundClusterCode: '01', fundClusterName: 'Regular', code: '4030101000', title: 'Subsidy from NG', accountType: 'revenue', debit: '0.00', credit: '500000.00' },
+    { fundClusterId: 1, fundClusterCode: '01', fundClusterName: 'Regular', code: '5020301000', title: 'Office Supplies', accountType: 'expense', debit: '112000.00', credit: '0.00' },
+    { fundClusterId: 1, fundClusterCode: '01', fundClusterName: 'Regular', code: '5010101000', title: 'Salaries', accountType: 'expense', debit: '300000.00', credit: '0.00' },
+  ];
+
+  it('previews revenue, expenses and the surplus per fund', async () => {
+    queuedResults.push(balances);
+    const [fund] = await ledgerService.getClosingPreview(2025);
+    expect(fund).toEqual(expect.objectContaining({ fundClusterId: 1, revenue: 500000, expense: 412000, surplus: 88000 }));
+  });
+
+  it('zeroes revenue and expenses into Accumulated Surplus/(Deficit)', async () => {
+    vi.spyOn(ledgerService, 'getClosingChecks').mockResolvedValue({ yearEnded: true, alreadyClosed: false, unposted: 0, balanced: true });
+    vi.spyOn(ledgerService, 'getClosingEntries').mockResolvedValue([]);
+    vi.spyOn(ledgerService, 'getClosingPreview').mockResolvedValue([
+      { fundClusterId: 1, fundClusterCode: '01', fundClusterName: 'Regular', revenue: 500000, expense: 412000, surplus: 88000,
+        accounts: [
+          { code: '4030101000', title: 'Subsidy', accountType: 'revenue', balance: -500000 },
+          { code: '5020301000', title: 'Supplies', accountType: 'expense', balance: 112000 },
+          { code: '5010101000', title: 'Salaries', accountType: 'expense', balance: 300000 },
+        ] },
+    ]);
+    const post = vi.spyOn(ledgerService, 'post').mockResolvedValue({ id: 9, jevNo: '01-2025-12-0001', created: true });
+    queuedResults.push([]); // insert closing lock
+
+    await ledgerService.closeYear(2025, 1);
+
+    const entry = post.mock.calls[0][0];
+    expect(entry.date).toEqual(new Date(2025, 11, 31, 23, 59, 59));
+    expect(entry.sourceType).toBe('closing');
+    expect(entry.lines).toEqual([
+      expect.objectContaining({ accountCode: '4030101000', debit: 500000 }),
+      expect.objectContaining({ accountCode: '5020301000', credit: 112000 }),
+      expect.objectContaining({ accountCode: '5010101000', credit: 300000 }),
+      expect.objectContaining({ accountCode: ACCOUNTS.ACCUMULATED_SURPLUS, credit: 88000, description: 'Surplus for the year' }),
+    ]);
+    expect(validateLines(entry.lines)).toBeNull();
+  });
+
+  it('debits Accumulated Surplus/(Deficit) for a deficit', async () => {
+    vi.spyOn(ledgerService, 'getClosingChecks').mockResolvedValue({ yearEnded: true, alreadyClosed: false, unposted: 0, balanced: true });
+    vi.spyOn(ledgerService, 'getClosingEntries').mockResolvedValue([]);
+    vi.spyOn(ledgerService, 'getClosingPreview').mockResolvedValue([
+      { fundClusterId: 1, fundClusterCode: '01', fundClusterName: 'Regular', revenue: 100, expense: 250, surplus: -150,
+        accounts: [
+          { code: '4060101000', title: 'Misc income', accountType: 'revenue', balance: -100 },
+          { code: '5020301000', title: 'Supplies', accountType: 'expense', balance: 250 },
+        ] },
+    ]);
+    const post = vi.spyOn(ledgerService, 'post').mockResolvedValue({ id: 9, jevNo: 'x', created: true });
+    queuedResults.push([]);
+    await ledgerService.closeYear(2025, 1);
+    expect(post.mock.calls[0][0].lines.at(-1)).toEqual(expect.objectContaining({ accountCode: ACCOUNTS.ACCUMULATED_SURPLUS, debit: 150 }));
+  });
+
+  it('will not close a year that has not ended or has unposted transactions', async () => {
+    vi.spyOn(ledgerService, 'getClosingChecks').mockResolvedValueOnce({ yearEnded: false, alreadyClosed: false, unposted: 0, balanced: true });
+    await expect(ledgerService.closeYear(2099, 1)).rejects.toThrow(/has not ended/);
+    vi.spyOn(ledgerService, 'getClosingChecks').mockResolvedValueOnce({ yearEnded: true, alreadyClosed: false, unposted: 3, balanced: true });
+    await expect(ledgerService.closeYear(2025, 1)).rejects.toThrow(/3 transaction\(s\) are not yet in the books/);
+  });
+
+  it('refuses to post into a closed year', async () => {
+    queuedResults.push([{ id: 1 }]); // closing lock found
+    await expect(
+      ledgerService.post({
+        date: new Date(2025, 5, 1), fundClusterId: 1, journalType: 'general', particulars: 'x', sourceType: 'manual', sourceId: null, createdBy: 1,
+        lines: [{ accountCode: 'A', debit: 1 }, { accountCode: 'B', credit: 1 }],
+      })
+    ).rejects.toThrow(/FY 2025 is closed/);
   });
 });

@@ -1,0 +1,169 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import PageHeader from '../../../components/ui/PageHeader.astro';
+import Banner from '../../../components/ui/Banner.astro';
+import { procurementService } from '../../../lib/services/procurement.service';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const poId = parseInt(Astro.url.searchParams.get('po') ?? '');
+const po = poId ? await procurementService.getPo(poId) : null;
+if (!po) return Astro.redirect('/procurement/orders');
+
+const canReceive = po.status === 'issued' || po.status === 'partially_delivered';
+const lines = po.items.filter(i => i.remainingQty > 0);
+const today = new Date().toLocaleDateString('en-CA');
+const peso = (value: string | number) => `₱${parseFloat(String(value)).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+---
+
+<MainLayout title="Record delivery - Philippine Government FMS">
+  <PageHeader
+    title="Inspection and acceptance"
+    description={`Delivery from ${po.supplierName} on ${po.poNo}`}
+    breadcrumbs={[{ label: 'Purchase orders', href: '/procurement/orders' }, { label: po.poNo, href: `/procurement/orders/${po.id}` }, { label: 'Record delivery' }]}
+  />
+
+  {!canReceive ? (
+    <Banner appearance="info">This purchase order is fully delivered or cancelled; there is nothing left to accept.</Banner>
+  ) : (
+    <form id="iar-form" class="card max-w-6xl" novalidate>
+      <input type="hidden" name="poId" value={po.id} />
+      <div class="card-body">
+        <div id="iar-error" class="alert alert-error mb-4 hidden" role="alert">
+          <i class="pi pi-times-circle" aria-hidden="true"></i>
+          <span id="iar-error-text"></span>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div class="form-group">
+            <label for="iarDate" class="form-label form-label-required">IAR date</label>
+            <input type="date" id="iarDate" name="iarDate" class="form-input" value={today} required />
+          </div>
+          <div class="form-group">
+            <label for="invoiceNo" class="form-label">Supplier invoice no.</label>
+            <input id="invoiceNo" name="invoiceNo" class="form-input" />
+          </div>
+          <div class="form-group">
+            <label for="invoiceDate" class="form-label">Invoice date</label>
+            <input type="date" id="invoiceDate" name="invoiceDate" class="form-input" />
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-2">
+          <fieldset class="rounded border border-gray-200 p-4">
+            <legend class="px-1 text-sm font-semibold text-gray-800">Inspection</legend>
+            <div class="form-group">
+              <label for="inspectedBy" class="form-label form-label-required">Inspection officer / committee</label>
+              <input id="inspectedBy" name="inspectedBy" class="form-input" required />
+            </div>
+            <div class="form-group">
+              <label for="dateInspected" class="form-label form-label-required">Date inspected</label>
+              <input type="date" id="dateInspected" name="dateInspected" class="form-input" value={today} required />
+            </div>
+            <p class="form-help">Inspected, verified and found in order as to quantity and specifications.</p>
+          </fieldset>
+          <fieldset class="rounded border border-gray-200 p-4">
+            <legend class="px-1 text-sm font-semibold text-gray-800">Acceptance</legend>
+            <div class="form-group">
+              <label for="receivedBy" class="form-label form-label-required">Supply / property officer</label>
+              <input id="receivedBy" name="receivedBy" class="form-input" required />
+            </div>
+            <div class="form-group">
+              <label for="dateReceived" class="form-label form-label-required">Date received</label>
+              <input type="date" id="dateReceived" name="dateReceived" class="form-input" value={today} required />
+            </div>
+            <p class="form-help">Acceptance is complete when every item is fully delivered; otherwise partial.</p>
+          </fieldset>
+        </div>
+
+        <h2 class="section-title mt-6">Quantities accepted</h2>
+        <div class="relative overflow-x-auto">
+          <table class="table">
+            <thead>
+              <tr>
+                <th scope="col">Item</th>
+                <th scope="col" class="!text-right">Ordered</th>
+                <th scope="col" class="!text-right">Undelivered</th>
+                <th scope="col" class="!text-right">Unit cost</th>
+                <th scope="col" class="w-32 !text-right">Accepted</th>
+                <th scope="col" class="w-36 !text-right">Value</th>
+              </tr>
+            </thead>
+            <tbody id="iar-lines">
+              {lines.map(item => (
+                <tr data-po-item={item.id} data-unit-cost={item.unitCost}>
+                  <td>{item.description}<p class="text-xs text-gray-500">{item.unit}</p></td>
+                  <td class="text-right tabular-nums">{parseFloat(item.quantity)}</td>
+                  <td class="text-right tabular-nums">{item.remainingQty}</td>
+                  <td class="text-right tabular-nums">{peso(item.unitCost)}</td>
+                  <td><input type="number" min="0" max={item.remainingQty} step="0.01" class="form-input text-right" data-field="quantity" value={item.remainingQty} aria-label={`Quantity accepted, ${item.description}`} /></td>
+                  <td class="text-right tabular-nums" data-value></td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr class="border-t-2 border-gray-200 font-semibold">
+                <th scope="row" colspan="5" class="!text-sm !text-gray-800">Value accepted (amount payable)</th>
+                <td class="text-right tabular-nums" id="iar-total"></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        <div class="form-group mt-4">
+          <label for="remarks" class="form-label">Remarks</label>
+          <textarea id="remarks" name="remarks" rows="2" class="form-textarea" placeholder="e.g. shortages, damaged items returned"></textarea>
+        </div>
+      </div>
+      <div class="card-footer">
+        <a href={`/procurement/orders/${po.id}`} class="btn btn-subtle">Cancel</a>
+        <button type="submit" class="btn btn-primary" id="iar-submit">Accept delivery</button>
+      </div>
+    </form>
+  )}
+
+  <script>
+    const form = document.getElementById('iar-form') as HTMLFormElement | null;
+    if (form) {
+      const tbody = document.getElementById('iar-lines')!;
+      const fmt = (value: number) => value.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const recalc = () => {
+        let total = 0;
+        tbody.querySelectorAll<HTMLTableRowElement>('tr').forEach(row => {
+          const qty = parseFloat((row.querySelector('[data-field="quantity"]') as HTMLInputElement).value) || 0;
+          const value = Math.round(qty * parseFloat(row.dataset.unitCost!) * 100) / 100;
+          row.querySelector('[data-value]')!.textContent = fmt(value);
+          total += value;
+        });
+        document.getElementById('iar-total')!.textContent = fmt(total);
+      };
+      tbody.addEventListener('input', recalc);
+      recalc();
+
+      form.addEventListener('submit', async event => {
+        event.preventDefault();
+        const error = document.getElementById('iar-error')!;
+        const submit = document.getElementById('iar-submit') as HTMLButtonElement;
+        error.classList.add('hidden');
+        const items = Array.from(tbody.querySelectorAll<HTMLTableRowElement>('tr')).map(row => ({
+          poItemId: row.dataset.poItem,
+          quantity: (row.querySelector('[data-field="quantity"]') as HTMLInputElement).value,
+        }));
+        submit.disabled = true;
+        const response = await fetch('/api/procurement/inspections', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ...Object.fromEntries(new FormData(form)), items }),
+        });
+        const result = await response.json();
+        if (response.ok) window.location.href = `/procurement/inspections/${result.id}?created=1`;
+        else {
+          document.getElementById('iar-error-text')!.textContent = result.message;
+          error.classList.remove('hidden');
+          error.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          submit.disabled = false;
+        }
+      });
+    }
+  </script>
+</MainLayout>

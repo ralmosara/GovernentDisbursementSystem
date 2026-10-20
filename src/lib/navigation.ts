@@ -37,6 +37,16 @@ export const navSections: NavSection[] = [
     ],
   },
   {
+    id: 'procurement',
+    title: 'Procurement',
+    icon: 'pi-shopping-cart',
+    items: [
+      { href: '/procurement/requests', label: 'Purchase requests', icon: 'pi-list' },
+      { href: '/procurement/orders', label: 'Purchase orders', icon: 'pi-file-edit' },
+      { href: '/procurement/orders?view=deliveries', label: 'Deliveries (IAR)', icon: 'pi-box' },
+    ],
+  },
+  {
     id: 'accounting',
     title: 'Accounting',
     icon: 'pi-calculator',
@@ -46,6 +56,7 @@ export const navSections: NavSection[] = [
       { href: '/accounting/trial-balance', label: 'Trial balance', icon: 'pi-calculator' },
       { href: '/accounting/chart-of-accounts', label: 'Chart of accounts', icon: 'pi-sitemap' },
       { href: '/accounting/nca', label: 'NCA registry', icon: 'pi-wallet' },
+      { href: '/accounting/year-end', label: 'Year-end closing', icon: 'pi-lock' },
     ],
   },
   {
@@ -120,6 +131,7 @@ export const navSections: NavSection[] = [
       { href: '/assets', label: 'Overview', icon: 'pi-building' },
       { href: '/assets/categories', label: 'Categories', icon: 'pi-tags' },
       { href: '/assets/fixed', label: 'Fixed assets', icon: 'pi-box' },
+      { href: '/assets/accountability', label: 'Accountability (PAR/ICS)', icon: 'pi-id-card' },
       { href: '/assets/depreciation', label: 'Depreciation', icon: 'pi-chart-line' },
       { href: '/assets/disposals', label: 'Disposals', icon: 'pi-trash' },
     ],
@@ -174,6 +186,12 @@ export const createActions: CreateAction[] = [
     label: 'Disbursement voucher',
     icon: 'pi-file-edit',
     description: 'Pay a supplier, employee or claimant',
+  },
+  {
+    href: '/procurement/requests/create',
+    label: 'Purchase request',
+    icon: 'pi-shopping-cart',
+    description: 'Ask for goods or services to be procured',
   },
   {
     href: '/budget/obligations/create',

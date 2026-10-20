@@ -5,10 +5,12 @@ import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
 /**
- * Applies migrations/add_government_accounting.sql and the column additions it lists.
- * Safe to run more than once: tables use IF NOT EXISTS, seeds use INSERT IGNORE and
- * columns are added only when missing.
+ * Applies the government accounting and procurement migrations, in order, and the column
+ * additions listed below. Safe to run more than once: tables use IF NOT EXISTS, seeds use
+ * INSERT IGNORE and columns are added only when missing.
  */
+
+const MIGRATION_FILES = ['add_government_accounting.sql', 'add_procurement.sql', 'add_property_accountability.sql', 'add_missing_inventory_asset_tables.sql'];
 
 const COLUMNS: { table: string; name: string; definition: string }[] = [
   { table: 'disbursement_vouchers', name: 'tax_treatment', definition: 'VARCHAR(30) NULL' },
@@ -16,7 +18,20 @@ const COLUMNS: { table: string; name: string; definition: string }[] = [
   { table: 'disbursement_vouchers', name: 'total_tax_withheld', definition: 'DECIMAL(15,2) NOT NULL DEFAULT 0' },
   { table: 'disbursement_vouchers', name: 'net_amount', definition: 'DECIMAL(15,2) NULL' },
   { table: 'revenue_sources', name: 'account_code', definition: 'VARCHAR(20) NULL' },
+  // The inventory service records and joins on the creator, but the column was never created
+  { table: 'inventory_items', name: 'created_by', definition: 'INT NULL' },
 ];
+
+/** Split a migration file into statements, ignoring comment lines */
+function statementsOf(sql: string): string[] {
+  return sql
+    .split('\n')
+    .filter(line => !line.trim().startsWith('--'))
+    .join('\n')
+    .split(';')
+    .map(statement => statement.trim())
+    .filter(Boolean);
+}
 
 async function runMigration() {
   const database = process.env.DATABASE_NAME || 'government_fms';
@@ -26,25 +41,17 @@ async function runMigration() {
     user: process.env.DATABASE_USER || 'root',
     password: process.env.DATABASE_PASSWORD || '',
     database,
-    multipleStatements: true,
   });
 
   try {
-    console.log('Running migration: add_government_accounting...');
+    const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'migrations');
 
-    const sqlPath = join(dirname(fileURLToPath(import.meta.url)), '..', 'migrations', 'add_government_accounting.sql');
-    // Strip comment lines, then run each statement on its own for clearer errors
-    const statements = (await readFile(sqlPath, 'utf8'))
-      .split('\n')
-      .filter(line => !line.trim().startsWith('--'))
-      .join('\n')
-      .split(';')
-      .map(statement => statement.trim())
-      .filter(Boolean);
-
-    for (const statement of statements) {
-      await connection.query(statement);
-      console.log(`  ✓ ${statement.split('\n')[0].slice(0, 70)}`);
+    for (const file of MIGRATION_FILES) {
+      console.log(`Running migration: ${file}...`);
+      for (const statement of statementsOf(await readFile(join(migrationsDir, file), 'utf8'))) {
+        await connection.query(statement);
+        console.log(`  ✓ ${statement.split('\n')[0].slice(0, 70)}`);
+      }
     }
 
     for (const column of COLUMNS) {
@@ -62,7 +69,7 @@ async function runMigration() {
 
     const [[{ accounts }]] = await connection.query<mysql.RowDataPacket[]>('SELECT COUNT(*) AS accounts FROM chart_of_accounts');
     console.log(`✓ Migration completed (${accounts} accounts in the chart of accounts)`);
-    console.log('  Next: post existing transactions from Accounting → Journal entries → "Post unposted transactions".');
+    console.log('  Next: post existing transactions from Accounting → Journal entries → "Post them now".');
   } catch (error) {
     console.error('Migration failed:', error);
     process.exitCode = 1;

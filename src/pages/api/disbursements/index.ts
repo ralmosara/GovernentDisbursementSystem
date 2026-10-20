@@ -1,6 +1,7 @@
 import type { APIRoute } from 'astro';
 import { disbursementService } from '../../../lib/services/disbursement.service';
 import { insightsService } from '../../../lib/services/insights.service';
+import { procurementService } from '../../../lib/services/procurement.service';
 
 export const POST: APIRoute = async ({ request, locals }) => {
   try {
@@ -30,6 +31,19 @@ export const POST: APIRoute = async ({ request, locals }) => {
         JSON.stringify({ message: 'All required fields must be provided' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
       );
+    }
+
+    // A delivery (IAR) is paid by one voucher only
+    const iarId = data.iarId ? parseInt(data.iarId) : null;
+    if (iarId) {
+      try {
+        await procurementService.assertIarPayable(iarId);
+      } catch (error) {
+        return new Response(JSON.stringify({ message: (error as Error).message }), {
+          status: 409,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
     }
 
     // Possible duplicate payment: require the preparer to have seen and acknowledged
@@ -73,6 +87,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
       payeeType: data.payeeType,
       duplicateWarningAcknowledged: duplicates.length > 0 ? duplicates.map(d => d.dvNo) : undefined,
     });
+
+    if (iarId) {
+      await procurementService.linkDv(iarId, Number(result.id)).catch(error =>
+        console.error(`Could not link IAR #${iarId} to DV ${result.dvNo}:`, error)
+      );
+    }
 
     return new Response(
       JSON.stringify({

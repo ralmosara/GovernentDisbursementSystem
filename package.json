@@ -23,7 +23,8 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "db:migrate-collections": "tsx scripts/run-collections-check-migration.ts",
-    "db:migrate-accounting": "tsx scripts/run-government-accounting-migration.ts"
+    "db:migrate-accounting": "tsx scripts/run-government-accounting-migration.ts",
+    "db:migrate-gov": "tsx scripts/run-government-accounting-migration.ts"
   },
   "dependencies": {
     "@astrojs/node": "^9.0.0",

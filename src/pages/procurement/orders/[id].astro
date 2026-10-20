@@ -1,0 +1,180 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import PageHeader from '../../../components/ui/PageHeader.astro';
+import ProgressTracker from '../../../components/ui/ProgressTracker.astro';
+import Lozenge from '../../../components/ui/Lozenge.astro';
+import Banner from '../../../components/ui/Banner.astro';
+import type { Step } from '../../../components/ui/types';
+import { procurementService } from '../../../lib/services/procurement.service';
+import { getSetting } from '../../../lib/services/settings.service';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const id = parseInt(Astro.params.id ?? '');
+const po = id ? await procurementService.getPo(id) : null;
+if (!po) return Astro.redirect('/procurement/orders');
+
+const agencyName = await getSetting('agency_name').catch(() => '');
+const total = parseFloat(po.totalAmount);
+const paidIars = po.iars.filter(i => i.dvId);
+const canReceive = po.status === 'issued' || po.status === 'partially_delivered';
+
+const steps: Step[] = [
+  { label: 'Purchase request', state: 'done', meta: po.prNo ?? undefined, href: `/procurement/requests/${po.prId}` },
+  { label: 'Purchase order', state: po.status === 'cancelled' ? 'failed' : 'done', meta: po.poNo },
+  {
+    label: 'Obligation',
+    state: po.obligationId ? (po.obligation?.status === 'approved' ? 'done' : 'current') : 'current',
+    meta: po.orsBursNo ?? 'Not yet raised',
+    href: po.obligationId ? `/budget/obligations/${po.obligationId}` : undefined,
+  },
+  {
+    label: 'Delivery',
+    state: po.status === 'delivered' ? 'done' : po.iars.length ? 'current' : po.obligationId ? 'current' : 'todo',
+    meta: po.iars.length ? `${po.iars.length} IAR · ${po.status === 'delivered' ? 'complete' : 'partial'}` : 'Awaiting',
+  },
+  {
+    label: 'Voucher',
+    state: po.iars.length && paidIars.length === po.iars.length && po.status === 'delivered' ? 'done' : paidIars.length || po.iars.length ? 'current' : 'todo',
+    meta: po.iars.length ? `${paidIars.length} of ${po.iars.length} deliveries` : undefined,
+  },
+];
+
+const obligationParams = new URLSearchParams({
+  poId: String(po.id),
+  payee: po.supplierName,
+  particulars: `${po.purpose ?? 'Procurement'} per PO No. ${po.poNo}`,
+  amount: total.toFixed(2),
+});
+
+const peso = (value: string | number) => `₱${parseFloat(String(value)).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const qty = (value: string | number) => parseFloat(String(value)).toLocaleString('en-PH', { maximumFractionDigits: 2 });
+const formatDate = (date: Date | string | null) => (date ? new Date(date).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' }) : '—');
+const created = Astro.url.searchParams.get('created');
+---
+
+<MainLayout title={`${po.poNo} - Philippine Government FMS`}>
+  <PageHeader title={po.poNo} breadcrumbs={[{ label: 'Purchase orders', href: '/procurement/orders' }, { label: po.poNo }]}>
+    <p slot="meta" class="mt-1 flex flex-wrap items-center gap-2 text-sm text-gray-600">
+      <Lozenge status={po.status === 'delivered' ? 'completed' : po.status === 'partially_delivered' ? 'partial' : po.status} label={po.status === 'partially_delivered' ? 'Partly delivered' : undefined} />
+      <span>{po.supplierName}</span>
+      <span aria-hidden="true">·</span>
+      <span class="font-medium text-gray-800 tabular-nums">{peso(total)}</span>
+    </p>
+    <Fragment slot="actions">
+      <button type="button" class="btn btn-secondary" onclick="window.print()"><i class="pi pi-print" aria-hidden="true"></i>Print PO</button>
+      {!po.obligationId && <a href={`/budget/obligations/create?${obligationParams}`} class="btn btn-secondary">Raise obligation (ORS)</a>}
+      {canReceive && (
+        <a href={`/procurement/inspections/create?po=${po.id}`} class="btn btn-primary">
+          <i class="pi pi-box" aria-hidden="true"></i>
+          Record delivery (IAR)
+        </a>
+      )}
+    </Fragment>
+  </PageHeader>
+
+  {created && (
+    <Banner appearance="success" title="Purchase order issued" class="mb-6 no-print" role="status">
+      Next, raise the obligation request so the funds are committed, then record the delivery when the goods arrive.
+    </Banner>
+  )}
+  {!po.obligationId && !created && (
+    <Banner appearance="warning" class="mb-6 no-print">
+      No obligation has been raised for this order yet. Funds should be obligated before the supplier delivers.
+    </Banner>
+  )}
+
+  <section class="card p-5 mb-6 no-print" aria-label="Procurement progress">
+    <ProgressTracker steps={steps} label="Procurement progress" />
+  </section>
+
+  <article class="card mb-6" aria-label="Purchase order">
+    <header class="px-6 pt-6 pb-4 text-center border-b border-gray-200">
+      <p class="text-lg font-semibold text-gray-800">PURCHASE ORDER</p>
+      {agencyName && <p class="text-sm text-gray-600">{agencyName}</p>}
+    </header>
+    <dl class="grid grid-cols-2 md:grid-cols-4 gap-4 px-6 py-4 border-b border-gray-200 text-sm">
+      <div class="col-span-2"><dt class="form-label">Supplier</dt><dd class="font-semibold">{po.supplierName}</dd><dd class="text-gray-600">{po.supplierAddress}</dd></div>
+      <div><dt class="form-label">TIN</dt><dd>{po.supplierTin ?? '—'}</dd></div>
+      <div><dt class="form-label">PO date</dt><dd>{formatDate(po.poDate)}</dd></div>
+      <div><dt class="form-label">Mode of procurement</dt><dd>{po.modeOfProcurement}</dd></div>
+      <div><dt class="form-label">Place of delivery</dt><dd>{po.placeOfDelivery ?? '—'}</dd></div>
+      <div><dt class="form-label">Date of delivery</dt><dd>{formatDate(po.deliveryDate)}</dd></div>
+      <div><dt class="form-label">Payment term</dt><dd>{po.paymentTerm ?? '—'}</dd></div>
+      <div><dt class="form-label">Fund cluster</dt><dd>{po.fundClusterCode}</dd></div>
+      <div><dt class="form-label">ORS/BURS no.</dt><dd>{po.orsBursNo ?? '—'}</dd></div>
+      <div><dt class="form-label">Purchase request</dt><dd><a href={`/procurement/requests/${po.prId}`} class="text-primary-600 hover:underline">{po.prNo}</a></dd></div>
+    </dl>
+    <div class="relative overflow-x-auto">
+      <table class="table">
+        <thead>
+          <tr>
+            <th scope="col">No.</th>
+            <th scope="col">Unit</th>
+            <th scope="col">Description</th>
+            <th scope="col" class="!text-right">Qty</th>
+            <th scope="col" class="!text-right">Unit cost</th>
+            <th scope="col" class="!text-right">Amount</th>
+            <th scope="col" class="!text-right no-print">Delivered</th>
+          </tr>
+        </thead>
+        <tbody>
+          {po.items.map(item => (
+            <tr>
+              <td>{item.itemNo}</td>
+              <td>{item.unit}</td>
+              <td>{item.description}</td>
+              <td class="text-right tabular-nums">{qty(item.quantity)}</td>
+              <td class="text-right tabular-nums">{peso(item.unitCost)}</td>
+              <td class="text-right tabular-nums">{peso(item.amount)}</td>
+              <td class="text-right tabular-nums no-print">{qty(item.acceptedQty)}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr class="border-t-2 border-gray-200 font-semibold">
+            <th scope="row" colspan="5" class="!text-sm !text-gray-800">Total amount</th>
+            <td class="text-right tabular-nums">{peso(total)}</td>
+            <td class="no-print"></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+    <div class="grid grid-cols-2 gap-8 px-6 pt-10 pb-6 text-sm">
+      <div>
+        <p class="form-label">Conforme</p>
+        <div class="mt-8 border-t border-gray-400 pt-1 text-gray-600">Supplier's authorized representative</div>
+      </div>
+      <div>
+        <p class="form-label">Very truly yours</p>
+        <div class="mt-8 border-t border-gray-400 pt-1 text-gray-600">Head of Procuring Entity / Authorized Official</div>
+      </div>
+    </div>
+  </article>
+
+  {po.iars.length > 0 && (
+    <section class="card no-print" aria-labelledby="iar-heading">
+      <div class="card-header">
+        <h2 id="iar-heading" class="card-title">Deliveries accepted</h2>
+        <span class="text-sm text-gray-600">{peso(po.acceptedTotal)} of {peso(total)}</span>
+      </div>
+      <ul class="divide-y divide-gray-200">
+        {po.iars.map(iar => (
+          <li class="flex flex-wrap items-center justify-between gap-2 px-5 py-3">
+            <span>
+              <a href={`/procurement/inspections/${iar.id}`} class="font-medium text-primary-600 hover:underline">{iar.iarNo}</a>
+              <span class="text-gray-600"> · {formatDate(iar.iarDate)}{iar.invoiceNo ? ` · Invoice ${iar.invoiceNo}` : ''}</span>
+            </span>
+            <span class="tabular-nums">{peso(iar.totalAmount)}</span>
+            {iar.dvId ? (
+              <a href={`/disbursements/${iar.dvId}`} class="text-primary-600 hover:underline">Paid by voucher</a>
+            ) : (
+              <a href={`/procurement/inspections/${iar.id}`} class="btn btn-primary btn-sm">Create voucher</a>
+            )}
+          </li>
+        ))}
+      </ul>
+    </section>
+  )}
+</MainLayout>

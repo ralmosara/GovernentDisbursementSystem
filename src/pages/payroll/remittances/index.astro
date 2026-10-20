@@ -1,135 +1,202 @@
 ---
 import MainLayout from '../../../layouts/MainLayout.astro';
+import PageHeader from '../../../components/ui/PageHeader.astro';
+import FilterBar from '../../../components/ui/FilterBar.astro';
+import DataTable from '../../../components/ui/DataTable.astro';
+import StatTile from '../../../components/ui/StatTile.astro';
+import EmptyState from '../../../components/ui/EmptyState.astro';
+import Lozenge from '../../../components/ui/Lozenge.astro';
+import Modal from '../../../components/ui/Modal.astro';
 import { payrollService } from '../../../lib/services/payroll.service';
+import { ledgerService } from '../../../lib/services/ledger.service';
 
 const user = Astro.locals.user;
 if (!user) return Astro.redirect('/login');
 
-const filters: any = {};
-const yearParam = Astro.url.searchParams.get('year');
-const typeParam = Astro.url.searchParams.get('remittanceType');
-const statusParam = Astro.url.searchParams.get('paymentStatus');
-
-if (yearParam) filters.year = parseInt(yearParam);
-else filters.year = new Date().getFullYear();
-
-if (typeParam) filters.remittanceType = typeParam;
-if (statusParam) filters.paymentStatus = statusParam;
-
-const remittances = await payrollService.getRemittances(filters);
-
-const totalRemittances = remittances.length;
-const pendingRemittances = remittances.filter(r => r.paymentStatus === 'Pending').length;
-const totalUnpaid = remittances
-  .filter(r => r.paymentStatus === 'Pending')
-  .reduce((sum, r) => sum + parseFloat(r.totalAmount || '0'), 0);
-
-function formatCurrency(amount: number | string | null): string {
-  if (!amount) return '₱0.00';
-  const num = typeof amount === 'string' ? parseFloat(amount) : amount;
-  return '₱' + num.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-function formatDate(date: Date | string | null): string {
-  if (!date) return '-';
-  const d = typeof date === 'string' ? new Date(date) : date;
-  return d.toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
-}
-
+const canPay = (user.roles ?? []).some(role => role === 'accountant' || role === 'administrator');
+const params = Astro.url.searchParams;
 const currentYear = new Date().getFullYear();
-const years = [];
-for (let i = currentYear - 5; i <= currentYear + 1; i++) {
-  years.push(i);
-}
+const year = parseInt(params.get('year') ?? '') || currentYear;
+const remittanceType = params.get('remittanceType') || undefined;
+const paymentStatus = params.get('paymentStatus') || undefined;
+
+// getRemittances returns { remittance, period } pairs
+const rows = (await payrollService.getRemittances({ year, remittanceType, paymentStatus })).map(r => r.remittance);
+const jevs = await Promise.all(rows.map(r => (r.paymentStatus === 'Paid' ? ledgerService.findBySource('remittance', r.id).catch(() => null) : null)));
+
+const today = new Date();
+const isOverdue = (r: (typeof rows)[number]) => r.paymentStatus !== 'Paid' && new Date(r.dueDate) < today;
+const unpaid = rows.filter(r => r.paymentStatus !== 'Paid');
+const overdue = rows.filter(isOverdue);
+const total = (list: typeof rows) => list.reduce((sum, r) => sum + (parseFloat(r.totalAmount) || 0), 0);
+
+const peso = (value: number | string | null) =>
+  `₱${(parseFloat(String(value ?? 0)) || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const formatDate = (date: Date | string | null) =>
+  date ? new Date(date).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' }) : '—';
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const activeFilters = [remittanceType, paymentStatus, year !== currentYear ? year : undefined].filter(Boolean).length;
 ---
 
-<MainLayout title="Government Remittances">
-  <div class="container-fluid py-6">
-    <div class="mb-6">
-      <h1 class="text-3xl font-bold text-gray-900">Government Remittances</h1>
-      <p class="mt-1 text-sm text-gray-600">Track GSIS, PhilHealth, Pag-IBIG, and BIR remittances</p>
-    </div>
+<MainLayout title="Remittances - Philippine Government FMS">
+  <PageHeader
+    title="Government remittances"
+    description="GSIS, PhilHealth, Pag-IBIG and BIR amounts withheld from payroll, with the government share, and when they are due."
+    breadcrumbs={[{ label: 'Payroll', href: '/payroll/periods' }, { label: 'Remittances' }]}
+  />
 
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-      <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
-        <p class="text-sm font-medium text-gray-600">Total Remittances</p>
-        <p class="text-2xl font-bold text-gray-900 mt-1">{totalRemittances}</p>
-      </div>
-      <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
-        <p class="text-sm font-medium text-gray-600">Pending Payment</p>
-        <p class="text-2xl font-bold text-yellow-600 mt-1">{pendingRemittances}</p>
-      </div>
-      <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
-        <p class="text-sm font-medium text-gray-600">Total Unpaid</p>
-        <p class="text-xl font-bold text-red-600 mt-1">{formatCurrency(totalUnpaid)}</p>
-      </div>
-    </div>
+  <div class="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
+    <StatTile label="Unpaid" value={unpaid.length} help={peso(total(unpaid))} icon="pi-clock" />
+    <StatTile label="Overdue" value={overdue.length} help={overdue.length ? peso(total(overdue)) : 'None past due'} icon="pi-exclamation-triangle" />
+    <StatTile label="Remitted this year" value={rows.length - unpaid.length} help={peso(total(rows) - total(unpaid))} icon="pi-check-circle" />
+  </div>
 
-    <div class="bg-gray-50 rounded-lg p-4 mb-6">
-      <form method="get" class="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div>
-          <label for="year" class="block text-sm font-medium text-gray-700 mb-1">Year</label>
-          <select name="year" id="year" class="w-full px-3 py-2 border border-gray-300 rounded-md">
-            {years.map(y => <option value={y} selected={filters.year === y}>{y}</option>)}
-          </select>
-        </div>
-        <div>
-          <label for="remittanceType" class="block text-sm font-medium text-gray-700 mb-1">Type</label>
-          <select name="remittanceType" id="remittanceType" class="w-full px-3 py-2 border border-gray-300 rounded-md">
-            <option value="">All Types</option>
-            <option value="GSIS" selected={filters.remittanceType === 'GSIS'}>GSIS</option>
-            <option value="PhilHealth" selected={filters.remittanceType === 'PhilHealth'}>PhilHealth</option>
-            <option value="Pag-IBIG" selected={filters.remittanceType === 'Pag-IBIG'}>Pag-IBIG</option>
-            <option value="BIR" selected={filters.remittanceType === 'BIR'}>BIR</option>
-          </select>
-        </div>
-        <div>
-          <label for="paymentStatus" class="block text-sm font-medium text-gray-700 mb-1">Status</label>
-          <select name="paymentStatus" id="paymentStatus" class="w-full px-3 py-2 border border-gray-300 rounded-md">
-            <option value="">All Statuses</option>
-            <option value="Pending" selected={filters.paymentStatus === 'Pending'}>Pending</option>
-            <option value="Paid" selected={filters.paymentStatus === 'Paid'}>Paid</option>
-          </select>
-        </div>
-        <div class="flex items-end">
-          <button type="submit" class="w-full btn btn-primary"><i class="pi pi-filter mr-2"></i>Apply</button>
-        </div>
-      </form>
+  <FilterBar action="/payroll/remittances" resetHref="/payroll/remittances" activeCount={activeFilters}>
+    <div class="form-group">
+      <label for="year" class="form-label">Year</label>
+      <select name="year" id="year" class="form-select">
+        {[...new Set([currentYear + 1, currentYear, currentYear - 1, currentYear - 2, year])].sort((a, b) => b - a).map(y => <option value={y} selected={y === year}>{y}</option>)}
+      </select>
     </div>
+    <div class="form-group">
+      <label for="remittanceType" class="form-label">Agency</label>
+      <select name="remittanceType" id="remittanceType" class="form-select">
+        <option value="">All</option>
+        {['GSIS', 'PhilHealth', 'Pag-IBIG', 'BIR'].map(t => <option value={t} selected={remittanceType === t}>{t}</option>)}
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="paymentStatus" class="form-label">Status</label>
+      <select name="paymentStatus" id="paymentStatus" class="form-select">
+        <option value="">Any status</option>
+        <option value="Pending" selected={paymentStatus === 'Pending'}>Pending</option>
+        <option value="Paid" selected={paymentStatus === 'Paid'}>Paid</option>
+      </select>
+    </div>
+  </FilterBar>
 
-    <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
-      <table class="min-w-full divide-y divide-gray-200">
-        <thead class="bg-gray-50">
+  {rows.length === 0 ? (
+    <div class="card">
+      <EmptyState
+        icon="pi-send"
+        title={activeFilters ? 'No remittances match these filters' : `No remittances for ${year} yet`}
+        description="Generate them from a processed payroll period."
+      >
+        <a href="/payroll/periods" class="btn btn-secondary">Open payroll periods</a>
+      </EmptyState>
+    </div>
+  ) : (
+    <DataTable title="Remittances" count={rows.length}>
+      <table class="table">
+        <thead>
           <tr>
-            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">Remittance No</th>
-            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">Type</th>
-            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">Month/Year</th>
-            <th class="px-6 py-3 text-right text-xs font-semibold text-gray-600">Employee Share</th>
-            <th class="px-6 py-3 text-right text-xs font-semibold text-gray-600">Employer Share</th>
-            <th class="px-6 py-3 text-right text-xs font-semibold text-gray-600">Total Amount</th>
-            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">Due Date</th>
-            <th class="px-6 py-3 text-left text-xs font-semibold text-gray-600">Status</th>
+            <th scope="col">Remittance no.</th>
+            <th scope="col">Agency</th>
+            <th scope="col">Period</th>
+            <th scope="col" class="!text-right hidden md:table-cell">Employee share</th>
+            <th scope="col" class="!text-right hidden md:table-cell">Government share</th>
+            <th scope="col" class="!text-right">Total</th>
+            <th scope="col">Due</th>
+            <th scope="col">Status</th>
+            <th scope="col" data-nosort><span class="sr-only">Actions</span></th>
           </tr>
         </thead>
-        <tbody class="bg-white divide-y divide-gray-200">
-          {remittances.map(rem => (
+        <tbody>
+          {rows.map((r, i) => (
             <tr class="hover:bg-gray-50">
-              <td class="px-6 py-4 whitespace-nowrap text-sm font-medium text-primary-600">{rem.remittanceNo}</td>
-              <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{rem.remittanceType}</td>
-              <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{rem.month}/{rem.year}</td>
-              <td class="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-900">{formatCurrency(rem.employeeShare)}</td>
-              <td class="px-6 py-4 whitespace-nowrap text-right text-sm text-gray-900">{formatCurrency(rem.employerShare)}</td>
-              <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium text-gray-900">{formatCurrency(rem.totalAmount)}</td>
-              <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{formatDate(rem.dueDate)}</td>
-              <td class="px-6 py-4 whitespace-nowrap">
-                <span class={`badge ${rem.paymentStatus === 'Paid' ? 'badge-success' : 'badge-warning'}`}>
-                  {rem.paymentStatus}
-                </span>
+              <td class="whitespace-nowrap font-medium">{r.remittanceNo}</td>
+              <td>{r.remittanceType}</td>
+              <td class="whitespace-nowrap text-gray-600" data-sort-value={r.year * 100 + r.month}>{MONTHS[r.month - 1]} {r.year}</td>
+              <td class="text-right tabular-nums hidden md:table-cell" title={r.remarks ?? undefined}>{peso(r.employeeShare)}</td>
+              <td class="text-right tabular-nums hidden md:table-cell">{peso(r.employerShare)}</td>
+              <td class="text-right tabular-nums font-medium" data-sort-value={r.totalAmount}>{peso(r.totalAmount)}</td>
+              <td class="whitespace-nowrap" data-sort-value={new Date(r.dueDate).getTime()}>
+                {isOverdue(r) ? <Lozenge appearance="removed" icon="pi-clock" label={formatDate(r.dueDate)} /> : <span class="text-gray-600">{formatDate(r.dueDate)}</span>}
+              </td>
+              <td>
+                {r.paymentStatus === 'Paid' ? (
+                  <span class="flex flex-col">
+                    <Lozenge status="paid" />
+                    <span class="text-xs text-gray-500">{formatDate(r.paymentDate)} · {r.referenceNo}</span>
+                    {jevs[i] && <a href={`/accounting/journals/${jevs[i]!.id}`} class="text-xs text-primary-600 hover:underline">JEV {jevs[i]!.jevNo}</a>}
+                  </span>
+                ) : (
+                  <Lozenge status={isOverdue(r) ? 'overdue' : 'pending'} />
+                )}
+              </td>
+              <td class="text-right whitespace-nowrap">
+                {canPay && r.paymentStatus !== 'Paid' && (
+                  <button
+                    type="button"
+                    class="btn btn-secondary btn-sm"
+                    data-pay={r.id}
+                    data-label={`${r.remittanceType} ${MONTHS[r.month - 1]} ${r.year} · ${peso(r.totalAmount)}`}
+                  >
+                    Record payment
+                  </button>
+                )}
               </td>
             </tr>
           ))}
         </tbody>
       </table>
-    </div>
-  </div>
+    </DataTable>
+  )}
+
+  {canPay && (
+    <Modal id="pay-dialog" title="Record remittance payment">
+      <form id="pay-form" method="dialog" class="space-y-3">
+        <p class="text-sm text-gray-700" id="pay-label"></p>
+        <div>
+          <label for="paymentDate" class="form-label form-label-required">Date paid</label>
+          <input type="date" id="paymentDate" name="paymentDate" class="form-input" value={new Date().toLocaleDateString('en-CA')} required />
+        </div>
+        <div>
+          <label for="referenceNo" class="form-label form-label-required">Reference</label>
+          <input id="referenceNo" name="referenceNo" class="form-input" placeholder="OR no., TRA no. or payment reference" required />
+        </div>
+        <p class="form-help">This posts the payment to the books and clears the amount owed to the agency.</p>
+        <p id="pay-error" class="form-error hidden" role="alert"></p>
+      </form>
+      <Fragment slot="footer">
+        <button type="button" class="btn btn-subtle" data-modal-close>Cancel</button>
+        <button type="submit" form="pay-form" class="btn btn-primary" id="pay-submit">Record payment</button>
+      </Fragment>
+    </Modal>
+  )}
+
+  <script>
+    const dialog = document.getElementById('pay-dialog') as HTMLDialogElement | null;
+    const form = document.getElementById('pay-form') as HTMLFormElement | null;
+    let remittanceId = '';
+
+    document.querySelectorAll<HTMLButtonElement>('[data-pay]').forEach(button =>
+      button.addEventListener('click', () => {
+        remittanceId = button.dataset.pay!;
+        document.getElementById('pay-label')!.textContent = button.dataset.label ?? '';
+        document.getElementById('pay-error')!.classList.add('hidden');
+        dialog?.showModal();
+      })
+    );
+
+    form?.addEventListener('submit', async event => {
+      event.preventDefault();
+      const submit = document.getElementById('pay-submit') as HTMLButtonElement;
+      const error = document.getElementById('pay-error')!;
+      submit.disabled = true;
+      const response = await fetch(`/api/payroll/remittances/${remittanceId}/pay`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(Object.fromEntries(new FormData(form))),
+      });
+      const result = await response.json();
+      if (response.ok) {
+        window.location.reload();
+      } else {
+        error.textContent = result.message;
+        error.classList.remove('hidden');
+        submit.disabled = false;
+      }
+    });
+  </script>
 </MainLayout>

@@ -1,0 +1,85 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import PageHeader from '../../../components/ui/PageHeader.astro';
+import DataTable from '../../../components/ui/DataTable.astro';
+import EmptyState from '../../../components/ui/EmptyState.astro';
+import Lozenge from '../../../components/ui/Lozenge.astro';
+import { procurementService } from '../../../lib/services/procurement.service';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const status = Astro.url.searchParams.get('status') || undefined;
+const requests = await procurementService.getPrs({ status });
+const STATUSES = [
+  { value: '', label: 'All' },
+  { value: 'submitted', label: 'Awaiting approval' },
+  { value: 'approved', label: 'Approved' },
+  { value: 'ordered', label: 'Ordered' },
+  { value: 'rejected', label: 'Rejected' },
+];
+const peso = (value: string | number) => `₱${parseFloat(String(value)).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const formatDate = (date: Date | string) => new Date(date).toLocaleDateString('en-PH', { year: 'numeric', month: 'short', day: 'numeric' });
+---
+
+<MainLayout title="Purchase requests - Philippine Government FMS">
+  <PageHeader
+    title="Purchase requests"
+    description="Requests for goods and services. Once the head of office approves, a purchase order can be issued."
+    breadcrumbs={[{ label: 'Procurement' }, { label: 'Purchase requests' }]}
+  >
+    <a slot="actions" href="/procurement/requests/create" class="btn btn-primary">
+      <i class="pi pi-plus" aria-hidden="true"></i>
+      New purchase request
+    </a>
+  </PageHeader>
+
+  <nav class="flex flex-wrap gap-1 mb-4" aria-label="Filter by status">
+    {STATUSES.map(s => (
+      <a
+        href={s.value ? `/procurement/requests?status=${s.value}` : '/procurement/requests'}
+        class={`btn btn-sm ${(status ?? '') === s.value ? 'btn-secondary' : 'btn-subtle'}`}
+        aria-current={(status ?? '') === s.value ? 'page' : undefined}
+      >
+        {s.label}
+      </a>
+    ))}
+  </nav>
+
+  {requests.length === 0 ? (
+    <div class="card">
+      <EmptyState icon="pi-shopping-cart" title="No purchase requests" description="Start a procurement with a purchase request listing what is needed and its estimated cost.">
+        <a href="/procurement/requests/create" class="btn btn-primary">New purchase request</a>
+      </EmptyState>
+    </div>
+  ) : (
+    <DataTable title="Requests" count={requests.length} quickFilter quickFilterLabel="Filter by PR no. or purpose">
+      <table class="table">
+        <thead>
+          <tr>
+            <th scope="col">PR no.</th>
+            <th scope="col">Date</th>
+            <th scope="col">Purpose</th>
+            <th scope="col" class="hidden md:table-cell">Office</th>
+            <th scope="col" class="hidden lg:table-cell">Requested by</th>
+            <th scope="col" class="!text-right">Approved budget</th>
+            <th scope="col">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {requests.map(pr => (
+            <tr class="hover:bg-gray-50">
+              <td class="whitespace-nowrap"><a href={`/procurement/requests/${pr.id}`} class="font-medium text-primary-600 hover:underline">{pr.prNo}</a></td>
+              <td class="whitespace-nowrap text-gray-600" data-sort-value={new Date(pr.prDate).getTime()}>{formatDate(pr.prDate)}</td>
+              <td class="max-w-[22rem]"><p class="truncate" title={pr.purpose}>{pr.purpose}</p></td>
+              <td class="hidden md:table-cell text-gray-600">{pr.office ?? '—'}</td>
+              <td class="hidden lg:table-cell text-gray-600">{pr.requestedByName}</td>
+              <td class="text-right tabular-nums" data-sort-value={pr.totalAmount}>{peso(pr.totalAmount)}</td>
+              <td><Lozenge status={pr.status === 'submitted' ? 'pending' : pr.status === 'ordered' ? 'issued' : pr.status} label={pr.status === 'submitted' ? 'Awaiting approval' : undefined} /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </DataTable>
+  )}
+</MainLayout>

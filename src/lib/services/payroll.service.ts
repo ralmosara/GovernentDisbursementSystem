@@ -14,8 +14,12 @@ import {
   calculatePayroll,
   calculate13thMonthPay,
   calculateNet13thMonthPay,
+  calculateGSISContribution,
+  calculatePhilHealthContribution,
+  calculatePagIBIGContribution,
   type PayrollCalculationInput,
 } from '../utils/payroll-calculator';
+import { ledgerService } from './ledger.service';
 import { type TaxExemptionCode } from '../utils/tax-calculator';
 import { logCreate, logUpdate, logDelete, logProcess, sanitizeData } from '../middleware/audit-logger';
 
@@ -502,10 +506,44 @@ export async function processPayroll(
     }
   );
 
+  // Recognise the payroll expense and what is owed to employees and agencies
+  if (totalEmployees > 0) {
+    await ledgerService.tryPost(`payroll ${period.periodNo}`, () => ledgerService.postPayroll(periodId, userId));
+  }
+
   return {
     totalEmployees,
     totalNetPay,
   };
+}
+
+/**
+ * Release net pay to employees (typically one ADA to their payroll accounts). Marks every
+ * payslip paid, moves the period to Posted and records the payment in the books.
+ */
+export async function recordPayrollPayout(
+  periodId: number,
+  data: { paymentDate: Date; paymentReference: string },
+  userId: number
+): Promise<void> {
+  const period = await getPayrollPeriodById(periodId);
+  if (!period) throw new Error('Payroll period not found');
+  if (period.status !== 'Completed') {
+    throw new Error(`Only a processed (Completed) payroll can be paid out; this one is ${period.status}`);
+  }
+  const reference = data.paymentReference.trim();
+  if (!reference) throw new Error('Enter the ADA or check reference for the payout');
+
+  await db.transaction(async tx => {
+    await tx
+      .update(payrollTransactions)
+      .set({ paymentStatus: 'Paid', paymentDate: data.paymentDate, paymentReference: reference })
+      .where(and(eq(payrollTransactions.payrollPeriodId, periodId), eq(payrollTransactions.paymentStatus, 'Pending')));
+    await tx.update(payrollPeriods).set({ status: 'Posted' }).where(eq(payrollPeriods.id, periodId));
+  });
+
+  await logUpdate('payroll_periods', periodId, { status: period.status }, { status: 'Posted', paymentReference: reference }, userId);
+  await ledgerService.tryPost(`payroll ${period.periodNo} payout`, () => ledgerService.postPayrollPayout(periodId, userId));
 }
 
 export async function getPayrollTransactions(periodId: number) {
@@ -777,35 +815,47 @@ export async function generateRemittances(
   // Get all transactions for the period
   const transactions = await getPayrollTransactions(periodId);
 
-  // Calculate totals for each remittance type
+  // Remittances already generated for this period are not created again
+  const existing = await db
+    .select({ remittanceType: remittances.remittanceType })
+    .from(remittances)
+    .where(eq(remittances.payrollPeriodId, periodId));
+  const done = new Set(existing.map(r => r.remittanceType));
+
+  // Calculate totals for each remittance type. Employer shares use the same rules as the
+  // payroll run (GSIS 12%, PhilHealth equal share, Pag-IBIG 2% of up to ₱10,000), and
+  // loan amortizations deducted from pay are remitted with the GSIS and Pag-IBIG payments.
   const remittanceTypes = ['GSIS', 'PhilHealth', 'Pag-IBIG', 'BIR'] as const;
+  const amount = (value: string | null) => parseFloat(value ?? '0') || 0;
 
   for (const type of remittanceTypes) {
+    if (done.has(type)) continue;
+
     let employeeShare = 0;
     let employerShare = 0;
 
     for (const { transaction } of transactions) {
+      const basic = amount(transaction.basicSalary);
       if (type === 'GSIS') {
-        employeeShare += parseFloat(transaction.gsisContribution);
-        // Employer share: 12% (assuming employee is 9%)
-        employerShare += (parseFloat(transaction.gsisContribution) / 0.09) * 0.12;
+        employeeShare += amount(transaction.gsisContribution) + amount(transaction.gsisLoan);
+        employerShare += calculateGSISContribution(basic).employerShare;
       } else if (type === 'PhilHealth') {
-        employeeShare += parseFloat(transaction.philhealthContribution);
-        employerShare += parseFloat(transaction.philhealthContribution); // Equal sharing
+        employeeShare += amount(transaction.philhealthContribution);
+        employerShare += calculatePhilHealthContribution(basic).employerShare;
       } else if (type === 'Pag-IBIG') {
-        employeeShare += parseFloat(transaction.pagibigContribution);
-        // Employer share: 2%
-        employerShare += (parseFloat(transaction.basicSalary) + parseFloat(transaction.pera)) * 0.02;
+        employeeShare += amount(transaction.pagibigContribution) + amount(transaction.pagibigLoan);
+        employerShare += calculatePagIBIGContribution(basic).employerShare;
       } else if (type === 'BIR') {
-        employeeShare += parseFloat(transaction.withholdingTax);
-        employerShare = 0; // No employer share for withholding tax
+        employeeShare += amount(transaction.withholdingTax);
       }
     }
 
+    employeeShare = Math.round(employeeShare * 100) / 100;
+    employerShare = Math.round(employerShare * 100) / 100;
     if (employeeShare === 0 && employerShare === 0) continue;
 
     const remittanceNo = await generateRemittanceNo();
-    const totalAmount = employeeShare + employerShare;
+    const totalAmount = Math.round((employeeShare + employerShare) * 100) / 100;
 
     // Calculate due date (typically 10th of following month)
     const dueDate = new Date(period.year, period.month, 10);
@@ -816,14 +866,36 @@ export async function generateRemittances(
       remittanceType: type,
       month: period.month,
       year: period.year,
-      employeeShare: employeeShare.toString(),
-      employerShare: employerShare.toString(),
-      totalAmount: totalAmount.toString(),
+      employeeShare: employeeShare.toFixed(2),
+      employerShare: employerShare.toFixed(2),
+      totalAmount: totalAmount.toFixed(2),
       dueDate,
       paymentStatus: 'Pending',
+      remarks: type === 'GSIS' || type === 'Pag-IBIG' ? 'Employee share includes loan amortizations' : null,
       createdBy: userId,
     });
   }
+}
+
+/** Record that a remittance was paid, which settles the liability in the books */
+export async function recordRemittancePayment(
+  remittanceId: number,
+  data: { paymentDate: Date; referenceNo: string },
+  userId: number
+): Promise<void> {
+  const [remittance] = await db.select().from(remittances).where(eq(remittances.id, remittanceId)).limit(1);
+  if (!remittance) throw new Error('Remittance not found');
+  if (remittance.paymentStatus === 'Paid') throw new Error(`Remittance ${remittance.remittanceNo} is already paid`);
+  const referenceNo = data.referenceNo.trim();
+  if (!referenceNo) throw new Error('Enter the official receipt, TRA or transaction reference');
+
+  await db
+    .update(remittances)
+    .set({ paymentStatus: 'Paid', paymentDate: data.paymentDate, referenceNo, processedBy: userId })
+    .where(eq(remittances.id, remittanceId));
+
+  await logUpdate('remittances', remittanceId, { paymentStatus: remittance.paymentStatus }, { paymentStatus: 'Paid', referenceNo }, userId);
+  await ledgerService.tryPost(`remittance ${remittance.remittanceNo}`, () => ledgerService.postRemittance(remittanceId, userId));
 }
 
 export async function getRemittances(filters?: {
@@ -896,7 +968,11 @@ export const payrollService = {
   generate13thMonthPay,
   get13thMonthPayRecords,
 
+  // Payout
+  recordPayrollPayout,
+
   // Remittances
   generateRemittances,
+  recordRemittancePayment,
   getRemittances,
 };

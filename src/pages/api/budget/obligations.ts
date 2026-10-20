@@ -1,5 +1,6 @@
 import type { APIRoute } from 'astro';
 import { budgetService } from '../../../lib/services/budget.service';
+import { procurementService } from '../../../lib/services/procurement.service';
 
 export const POST: APIRoute = async ({ request, locals }) => {
   try {
@@ -39,6 +40,13 @@ export const POST: APIRoute = async ({ request, locals }) => {
       obligationDate: new Date(data.obligationDate),
       createdBy: user.id
     });
+
+    // Raised for a purchase order: record the ORS on the PO
+    if (data.poId) {
+      await procurementService
+        .linkObligation(parseInt(data.poId), Number(result.insertId), user.id)
+        .catch(error => console.error(`Could not link obligation to PO #${data.poId}:`, error));
+    }
 
     return new Response(
       JSON.stringify({

@@ -13,6 +13,12 @@ const allotments = await budgetService.getAllotments();
 
 // Pre-select allotment when coming from an allotment or appropriation page
 const preselectedAllotmentId = parseInt(Astro.url.searchParams.get('allotment') || '0');
+
+// Prefill when raising the obligation for a purchase order
+const fromPo = parseInt(Astro.url.searchParams.get('poId') || '0') || null;
+const prefillPayee = Astro.url.searchParams.get('payee') ?? '';
+const prefillParticulars = Astro.url.searchParams.get('particulars') ?? '';
+const prefillAmount = Astro.url.searchParams.get('amount') ?? '';
 ---
 
 <MainLayout title="Create Obligation">
@@ -91,6 +97,7 @@ const preselectedAllotmentId = parseInt(Astro.url.searchParams.get('allotment') 
                 id="payee"
                 class="form-input"
                 placeholder="Name of payee/supplier"
+                value={prefillPayee}
                 required
               />
             </div>
@@ -105,7 +112,7 @@ const preselectedAllotmentId = parseInt(Astro.url.searchParams.get('allotment') 
                 class="form-textarea"
                 placeholder="Describe the goods/services to be procured..."
                 required
-              ></textarea>
+              >{prefillParticulars}</textarea>
             </div>
 
             <!-- Amount -->
@@ -121,10 +128,12 @@ const preselectedAllotmentId = parseInt(Astro.url.searchParams.get('allotment') 
                   step="0.01"
                   min="0"
                   placeholder="0.00"
+                  value={prefillAmount}
                   required
                 />
               </div>
               <p class="form-help" id="amount-help">Enter the obligation amount</p>
+              {fromPo && <input type="hidden" name="poId" value={fromPo} />}
             </div>
 
             <!-- Obligation Date -->
@@ -243,7 +252,8 @@ const preselectedAllotmentId = parseInt(Astro.url.searchParams.get('allotment') 
           amount: parseFloat(formData.get('amount') as string),
           orsNumber: formData.get('orsNumber') as string || undefined,
           bursNumber: formData.get('bursNumber') as string || undefined,
-          obligationDate: formData.get('obligationDate') as string
+          obligationDate: formData.get('obligationDate') as string,
+          poId: formData.get('poId') ? parseInt(formData.get('poId') as string) : undefined
         };
 
         const response = await fetch('/api/budget/obligations', {

@@ -14,7 +14,12 @@ import {
   bankAccounts,
   fundClusters,
   ncaRegistry,
+  payrollPeriods,
+  payrollTransactions,
+  remittances,
+  fiscalYearClosings,
 } from '../db/schema';
+import { calculateGSISContribution, calculatePhilHealthContribution, calculatePagIBIGContribution } from '../utils/payroll-calculator';
 import { and, asc, desc, eq, gte, inArray, isNull, lte, like, notInArray, sql, type SQL } from 'drizzle-orm';
 import { logAudit } from '../middleware/audit-logger';
 
@@ -35,6 +40,14 @@ import { logAudit } from '../middleware/audit-logger';
  *   AR collection        Dr Cash-Collecting Officers   Cr Accounts Receivable
  *   Deposit confirmed    Dr Cash in Bank               Cr Cash-Collecting Officers
  *   NCA received         Dr Cash-MDS, Regular          Cr Subsidy from National Government
+ *   Payroll processed    Dr Salaries, PERA, allowances, employer shares
+ *                        Cr Due to BIR/GSIS/Pag-IBIG/PhilHealth, Other Payables, Due to Officers and Employees
+ *   Payroll paid out     Dr Due to Officers and Employees  Cr Cash-MDS, Regular
+ *   Remittance paid      Dr Due to GSIS/Pag-IBIG/PhilHealth  Cr Cash-MDS (BIR: Cr Cash-Tax Remittance Advice)
+ *   Receivable written off  Dr Impairment Loss            Cr Accounts Receivable
+ *   Year-end closing     revenue and expense balances → Accumulated Surplus/(Deficit), per fund
+ *
+ * A closed fiscal year accepts no entries; reopening it reverses its closing entries.
  */
 
 export const ACCOUNTS = {
@@ -42,9 +55,24 @@ export const ACCOUNTS = {
   PETTY_CASH: '1010102000',
   CASH_IN_BANK_CURRENT: '1010202000',
   CASH_MDS_REGULAR: '1010404000',
+  CASH_TRA: '1010407000',
   ACCOUNTS_RECEIVABLE: '1030101000',
   ACCOUNTS_PAYABLE: '2010101000',
+  DUE_TO_OFFICERS_EMPLOYEES: '2010102000',
   DUE_TO_BIR: '2020101000',
+  DUE_TO_GSIS: '2020102000',
+  DUE_TO_PAGIBIG: '2020103000',
+  DUE_TO_PHILHEALTH: '2020104000',
+  OTHER_PAYABLES: '2999999000',
+  ACCUMULATED_SURPLUS: '3010101000',
+  IMPAIRMENT_LOSS_RECEIVABLES: '5050301000',
+  SALARIES_REGULAR: '5010101000',
+  PERA: '5010201000',
+  OVERTIME: '5010213000',
+  OTHER_BONUSES_ALLOWANCES: '5010299000',
+  RETIREMENT_LIFE_INSURANCE: '5010301000',
+  PAGIBIG_CONTRIBUTIONS: '5010302000',
+  PHILHEALTH_CONTRIBUTIONS: '5010303000',
   SUBSIDY_FROM_NG: '4030101000',
   MISCELLANEOUS_INCOME: '4060101000',
 } as const;
@@ -67,6 +95,12 @@ export const SOURCE_LABELS: Record<string, string> = {
   collection: 'Collection',
   deposit: 'Bank deposit',
   nca: 'NCA received',
+  payroll: 'Payroll',
+  payroll_payout: 'Payroll paid',
+  remittance: 'Remittance',
+  ar_writeoff: 'Receivable written off',
+  closing: 'Year-end closing',
+  closing_reversal: 'Closing reversed',
   manual: 'Manual entry',
   reversal: 'Reversal',
 };
@@ -161,6 +195,10 @@ export class LedgerService {
     const error = validateLines(input.lines);
     if (error) throw new Error(error);
 
+    if (await this.isYearClosed(input.date.getFullYear())) {
+      throw new Error(`FY ${input.date.getFullYear()} is closed; entries can't be posted into it. An administrator can reopen the year.`);
+    }
+
     if (input.sourceId !== null) {
       const existing = await this.findBySource(input.sourceType, input.sourceId);
       if (existing) return { id: existing.id, jevNo: existing.jevNo, created: false };
@@ -219,7 +257,7 @@ export class LedgerService {
   }
 
   /** Reverse an entry with a mirror-image entry and mark the original reversed */
-  async reverse(entryId: number, userId: number, reason: string, sourceType = 'reversal'): Promise<PostResult> {
+  async reverse(entryId: number, userId: number, reason: string, sourceType = 'reversal', date = new Date()): Promise<PostResult> {
     const entry = await this.getEntry(entryId);
     if (!entry) throw new Error('Journal entry not found');
     if (entry.status === 'reversed') {
@@ -229,7 +267,7 @@ export class LedgerService {
     }
 
     const result = await this.post({
-      date: new Date(),
+      date,
       fundClusterId: entry.fundClusterId,
       journalType: entry.journalType,
       particulars: `Reversal of JEV ${entry.jevNo}: ${reason}`,
@@ -528,6 +566,335 @@ export class LedgerService {
   }
 
   /**
+   * Payroll processed: recognise salary expense, employer contributions and what is owed
+   * to the BIR, GSIS, Pag-IBIG, PhilHealth, other creditors and the employees.
+   * Employer shares are computed from basic salary with the same rules as the payroll run.
+   */
+  async postPayroll(periodId: number, userId: number): Promise<PostResult> {
+    const [period] = await db.select().from(payrollPeriods).where(eq(payrollPeriods.id, periodId)).limit(1);
+    if (!period) throw new Error('Payroll period not found');
+
+    const rows = await db.select().from(payrollTransactions).where(eq(payrollTransactions.payrollPeriodId, periodId));
+    if (rows.length === 0) throw new Error(`Payroll ${period.periodNo} has no transactions`);
+
+    const t = {
+      basic: 0, pera: 0, overtime: 0, allowances: 0,
+      gsisEe: 0, gsisEr: 0, philhealthEe: 0, philhealthEr: 0, pagibigEe: 0, pagibigEr: 0,
+      tax: 0, gsisLoan: 0, pagibigLoan: 0, otherPayables: 0, net: 0,
+    };
+    for (const row of rows) {
+      const basic = num(row.basicSalary);
+      t.basic += basic;
+      t.pera += num(row.pera);
+      t.overtime += num(row.overtime);
+      t.allowances += num(row.additionalAllowance) + num(row.otherEarnings);
+      t.gsisEe += num(row.gsisContribution);
+      t.philhealthEe += num(row.philhealthContribution);
+      t.pagibigEe += num(row.pagibigContribution);
+      t.gsisEr += calculateGSISContribution(basic).employerShare;
+      t.philhealthEr += calculatePhilHealthContribution(basic).employerShare;
+      t.pagibigEr += calculatePagIBIGContribution(basic).employerShare;
+      t.tax += num(row.withholdingTax);
+      t.gsisLoan += num(row.gsisLoan);
+      t.pagibigLoan += num(row.pagibigLoan);
+      t.otherPayables += num(row.salaryLoan) + num(row.otherDeductions);
+      t.net += num(row.netPay);
+    }
+
+    const r2 = (value: number) => Math.round(value * 100) / 100;
+    const debit = (accountCode: string, amount: number, description: string): JournalLineInput[] =>
+      r2(amount) > 0 ? [{ accountCode, debit: r2(amount), description }] : [];
+    const credit = (accountCode: string, amount: number, description: string): JournalLineInput[] =>
+      r2(amount) > 0 ? [{ accountCode, credit: r2(amount), description }] : [];
+
+    const lines: JournalLineInput[] = [
+      ...debit(ACCOUNTS.SALARIES_REGULAR, t.basic, 'Basic salaries'),
+      ...debit(ACCOUNTS.PERA, t.pera, 'PERA'),
+      ...debit(ACCOUNTS.OVERTIME, t.overtime, 'Overtime'),
+      ...debit(ACCOUNTS.OTHER_BONUSES_ALLOWANCES, t.allowances, 'Allowances and other earnings'),
+      ...debit(ACCOUNTS.RETIREMENT_LIFE_INSURANCE, t.gsisEr, 'GSIS government share'),
+      ...debit(ACCOUNTS.PAGIBIG_CONTRIBUTIONS, t.pagibigEr, 'Pag-IBIG government share'),
+      ...debit(ACCOUNTS.PHILHEALTH_CONTRIBUTIONS, t.philhealthEr, 'PhilHealth government share'),
+      ...credit(ACCOUNTS.DUE_TO_BIR, t.tax, 'Withholding tax on compensation'),
+      ...credit(ACCOUNTS.DUE_TO_GSIS, t.gsisEe + t.gsisEr + t.gsisLoan, 'GSIS premiums and loan amortizations'),
+      ...credit(ACCOUNTS.DUE_TO_PAGIBIG, t.pagibigEe + t.pagibigEr + t.pagibigLoan, 'Pag-IBIG contributions and loan amortizations'),
+      ...credit(ACCOUNTS.DUE_TO_PHILHEALTH, t.philhealthEe + t.philhealthEr, 'PhilHealth premiums'),
+      ...credit(ACCOUNTS.OTHER_PAYABLES, t.otherPayables, 'Salary loans and other deductions'),
+      ...credit(ACCOUNTS.DUE_TO_OFFICERS_EMPLOYEES, t.net, 'Net pay'),
+    ];
+
+    // Each payslip is rounded separately; absorb any centavo difference in net pay
+    const gap = lines.reduce((sum, l) => sum + toCentavos(l.debit) - toCentavos(l.credit), 0);
+    if (gap !== 0 && Math.abs(gap) <= rows.length) {
+      const netLine = lines.find(l => l.accountCode === ACCOUNTS.DUE_TO_OFFICERS_EMPLOYEES);
+      if (netLine) netLine.credit = r2((netLine.credit ?? 0) + gap / 100);
+    }
+
+    return this.post({
+      date: new Date(period.periodEnd),
+      fundClusterId: await this.defaultFundClusterId(),
+      journalType: 'general',
+      particulars: `To recognise payroll ${period.periodNo} (${period.periodName}), ${rows.length} employee${rows.length === 1 ? '' : 's'}`,
+      sourceType: 'payroll',
+      sourceId: period.id,
+      createdBy: userId,
+      lines,
+    });
+  }
+
+  /** Net pay released to employees (ADA to payroll accounts) */
+  async postPayrollPayout(periodId: number, userId: number): Promise<PostResult> {
+    const [period] = await db.select().from(payrollPeriods).where(eq(payrollPeriods.id, periodId)).limit(1);
+    if (!period) throw new Error('Payroll period not found');
+
+    // The payroll must be in the books before it is paid
+    const recognised = await this.postPayroll(periodId, userId);
+    const entry = await this.getEntry(recognised.id);
+    const net = num(entry?.lines.find(l => l.accountCode === ACCOUNTS.DUE_TO_OFFICERS_EMPLOYEES)?.credit);
+    if (!(net > 0)) throw new Error(`Payroll ${period.periodNo} has no net pay to release`);
+
+    return this.post({
+      date: new Date(period.payDate),
+      fundClusterId: await this.defaultFundClusterId(),
+      journalType: 'cash_disbursements',
+      particulars: `Release of net pay for payroll ${period.periodNo} (${period.periodName})`,
+      sourceType: 'payroll_payout',
+      sourceId: period.id,
+      createdBy: userId,
+      lines: [
+        { accountCode: ACCOUNTS.DUE_TO_OFFICERS_EMPLOYEES, debit: net, description: 'Net pay' },
+        { accountCode: ACCOUNTS.CASH_MDS_REGULAR, credit: net, description: 'ADA to payroll accounts' },
+      ],
+    });
+  }
+
+  /** A remittance to BIR, GSIS, Pag-IBIG or PhilHealth settles that liability */
+  async postRemittance(remittanceId: number, userId: number): Promise<PostResult> {
+    const [remittance] = await db.select().from(remittances).where(eq(remittances.id, remittanceId)).limit(1);
+    if (!remittance) throw new Error('Remittance not found');
+
+    const liability = {
+      BIR: ACCOUNTS.DUE_TO_BIR,
+      GSIS: ACCOUNTS.DUE_TO_GSIS,
+      'Pag-IBIG': ACCOUNTS.DUE_TO_PAGIBIG,
+      PhilHealth: ACCOUNTS.DUE_TO_PHILHEALTH,
+    }[remittance.remittanceType];
+    // Taxes withheld by NGAs are remitted through a Tax Remittance Advice
+    const cash = remittance.remittanceType === 'BIR' ? ACCOUNTS.CASH_TRA : ACCOUNTS.CASH_MDS_REGULAR;
+    const amount = num(remittance.totalAmount);
+
+    return this.post({
+      date: remittance.paymentDate ? new Date(remittance.paymentDate) : new Date(),
+      fundClusterId: await this.defaultFundClusterId(),
+      journalType: 'cash_disbursements',
+      particulars: `Remittance ${remittance.remittanceNo} to ${remittance.remittanceType} for ${remittance.month}/${remittance.year}${remittance.referenceNo ? `, ref. ${remittance.referenceNo}` : ''}`,
+      sourceType: 'remittance',
+      sourceId: remittance.id,
+      createdBy: userId,
+      lines: [
+        { accountCode: liability, debit: amount, subsidiary: remittance.remittanceType },
+        { accountCode: cash, credit: amount },
+      ],
+    });
+  }
+
+  /** A receivable written off as uncollectible: recognise the loss and remove the receivable */
+  async postArWriteOff(arId: number, userId: number): Promise<PostResult> {
+    const [ar] = await db.select().from(accountsReceivable).where(eq(accountsReceivable.id, arId)).limit(1);
+    if (!ar) throw new Error('Receivable not found');
+    if (ar.status !== 'written_off') throw new Error(`Receivable ${ar.arNo} is not written off`);
+
+    // The receivable must be in the books before it can be written off
+    await this.postArInvoice(arId, userId);
+    const amount = num(ar.balance);
+    if (!(amount > 0)) throw new Error(`Receivable ${ar.arNo} has no balance to write off`);
+
+    return this.post({
+      date: ar.updatedAt ? new Date(ar.updatedAt) : new Date(),
+      fundClusterId: await this.defaultFundClusterId(),
+      journalType: 'general',
+      particulars: `To write off uncollectible receivable ${ar.arNo} from ${ar.debtorName}`,
+      sourceType: 'ar_writeoff',
+      sourceId: ar.id,
+      createdBy: userId,
+      lines: [
+        { accountCode: ACCOUNTS.IMPAIRMENT_LOSS_RECEIVABLES, debit: amount, subsidiary: ar.debtorName },
+        { accountCode: ACCOUNTS.ACCOUNTS_RECEIVABLE, credit: amount, subsidiary: ar.debtorName },
+      ],
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Year-end closing
+  // ---------------------------------------------------------------------------
+
+  async isYearClosed(fiscalYear: number): Promise<boolean> {
+    const [row] = await db
+      .select({ id: fiscalYearClosings.id })
+      .from(fiscalYearClosings)
+      .where(eq(fiscalYearClosings.fiscalYear, fiscalYear))
+      .limit(1);
+    return Boolean(row);
+  }
+
+  async getYearClosing(fiscalYear: number) {
+    const [row] = await db.select().from(fiscalYearClosings).where(eq(fiscalYearClosings.fiscalYear, fiscalYear)).limit(1);
+    return row ?? null;
+  }
+
+  /**
+   * Revenue and expense balances for a year, per fund cluster — what closing would move to
+   * Accumulated Surplus/(Deficit). After closing, the year shows nothing left to close.
+   */
+  async getClosingPreview(fiscalYear: number) {
+    const rows = await db
+      .select({
+        fundClusterId: journalEntries.fundClusterId,
+        fundClusterCode: fundClusters.code,
+        fundClusterName: fundClusters.name,
+        code: journalEntryLines.accountCode,
+        title: chartOfAccounts.title,
+        accountType: chartOfAccounts.accountType,
+        debit: sql<string>`SUM(${journalEntryLines.debit})`,
+        credit: sql<string>`SUM(${journalEntryLines.credit})`,
+      })
+      .from(journalEntryLines)
+      .innerJoin(journalEntries, eq(journalEntryLines.journalEntryId, journalEntries.id))
+      .innerJoin(chartOfAccounts, eq(journalEntryLines.accountCode, chartOfAccounts.code))
+      .leftJoin(fundClusters, eq(journalEntries.fundClusterId, fundClusters.id))
+      .where(and(eq(journalEntries.fiscalYear, fiscalYear), inArray(chartOfAccounts.accountType, ['revenue', 'expense'])))
+      .groupBy(journalEntries.fundClusterId, fundClusters.code, fundClusters.name, journalEntryLines.accountCode, chartOfAccounts.title, chartOfAccounts.accountType)
+      .orderBy(asc(journalEntries.fundClusterId), asc(journalEntryLines.accountCode));
+
+    const funds = new Map<number, {
+      fundClusterId: number;
+      fundClusterCode: string | null;
+      fundClusterName: string | null;
+      accounts: { code: string; title: string; accountType: string; balance: number }[];
+      revenue: number;
+      expense: number;
+      surplus: number;
+    }>();
+
+    for (const row of rows) {
+      // Positive = debit balance
+      const net = (toCentavos(row.debit) - toCentavos(row.credit)) / 100;
+      if (net === 0) continue;
+      const fund = funds.get(row.fundClusterId) ?? {
+        fundClusterId: row.fundClusterId,
+        fundClusterCode: row.fundClusterCode,
+        fundClusterName: row.fundClusterName,
+        accounts: [],
+        revenue: 0,
+        expense: 0,
+        surplus: 0,
+      };
+      fund.accounts.push({ code: row.code, title: row.title, accountType: row.accountType, balance: net });
+      if (row.accountType === 'revenue') fund.revenue = Math.round((fund.revenue - net) * 100) / 100;
+      else fund.expense = Math.round((fund.expense + net) * 100) / 100;
+      fund.surplus = Math.round((fund.revenue - fund.expense) * 100) / 100;
+      funds.set(row.fundClusterId, fund);
+    }
+    return [...funds.values()];
+  }
+
+  /** Closing entries posted for a year (any attempt), newest first */
+  async getClosingEntries(fiscalYear: number) {
+    return db
+      .select({ id: journalEntries.id, jevNo: journalEntries.jevNo, status: journalEntries.status, fundClusterId: journalEntries.fundClusterId, sourceId: journalEntries.sourceId })
+      .from(journalEntries)
+      .where(and(eq(journalEntries.sourceType, 'closing'), eq(journalEntries.fiscalYear, fiscalYear)))
+      .orderBy(desc(journalEntries.id));
+  }
+
+  /** Things that must be true before a year can be closed */
+  async getClosingChecks(fiscalYear: number) {
+    const now = new Date();
+    const [unposted, tb] = await Promise.all([
+      this.getUnposted(),
+      this.getTrialBalance(new Date(fiscalYear, 11, 31, 23, 59, 59)),
+    ]);
+    return {
+      yearEnded: fiscalYear < now.getFullYear(),
+      alreadyClosed: await this.isYearClosed(fiscalYear),
+      unposted: unposted.total,
+      balanced: tb.balanced,
+    };
+  }
+
+  /**
+   * Close a fiscal year: per fund cluster, post one entry that zeroes every revenue and
+   * expense account into Accumulated Surplus/(Deficit), then lock the year.
+   * Safe to retry: funds already closed in this attempt are not closed twice.
+   */
+  async closeYear(fiscalYear: number, userId: number, remarks?: string) {
+    const checks = await this.getClosingChecks(fiscalYear);
+    if (checks.alreadyClosed) throw new Error(`FY ${fiscalYear} is already closed`);
+    if (!checks.yearEnded) throw new Error(`FY ${fiscalYear} has not ended yet`);
+    if (checks.unposted > 0) throw new Error(`${checks.unposted} transaction(s) are not yet in the books. Post them first.`);
+    if (!checks.balanced) throw new Error('The trial balance does not balance; investigate before closing.');
+
+    const closingDate = new Date(fiscalYear, 11, 31, 23, 59, 59);
+    const existing = await this.getClosingEntries(fiscalYear);
+    const posted: PostResult[] = [];
+
+    for (const fund of await this.getClosingPreview(fiscalYear)) {
+      const lines: JournalLineInput[] = fund.accounts.map(account => ({
+        accountCode: account.code,
+        // Reverse each balance: a credit (revenue) balance is debited, a debit (expense) balance credited
+        debit: account.balance < 0 ? -account.balance : undefined,
+        credit: account.balance > 0 ? account.balance : undefined,
+        description: 'Closing',
+      }));
+      const difference = lines.reduce((sum, l) => sum + toCentavos(l.debit) - toCentavos(l.credit), 0);
+      if (difference !== 0) {
+        lines.push({
+          accountCode: ACCOUNTS.ACCUMULATED_SURPLUS,
+          debit: difference < 0 ? -difference / 100 : undefined,
+          credit: difference > 0 ? difference / 100 : undefined,
+          description: difference > 0 ? 'Surplus for the year' : 'Deficit for the year',
+        });
+      }
+      if (lines.length < 2) continue;
+
+      // Each closing attempt for a fund gets its own source key so a reopened year can be closed again
+      const attempt = existing.filter(e => Math.floor((e.sourceId ?? 0) / 100) === fiscalYear * 1000 + fund.fundClusterId).length + 1;
+      posted.push(
+        await this.post({
+          date: closingDate,
+          fundClusterId: fund.fundClusterId,
+          journalType: 'general',
+          particulars: `To close revenue and expense accounts for FY ${fiscalYear} to Accumulated Surplus/(Deficit)`,
+          sourceType: 'closing',
+          sourceId: (fiscalYear * 1000 + fund.fundClusterId) * 100 + attempt,
+          createdBy: userId,
+          lines,
+        })
+      );
+    }
+
+    await db.insert(fiscalYearClosings).values({ fiscalYear, closedBy: userId, remarks: remarks?.trim() || null });
+    await logAudit({ userId, action: 'COMPLETE', tableName: 'fiscal_year_closings', recordId: fiscalYear, newValues: { fiscalYear, closingEntries: posted.map(p => p.jevNo) } });
+    return { closingEntries: posted };
+  }
+
+  /** Reopen a closed year: unlock it and reverse its closing entries, dated within the year */
+  async reopenYear(fiscalYear: number, userId: number, reason: string) {
+    if (!reason?.trim()) throw new Error('Give a reason for reopening the year');
+    if (!(await this.isYearClosed(fiscalYear))) throw new Error(`FY ${fiscalYear} is not closed`);
+
+    await db.delete(fiscalYearClosings).where(eq(fiscalYearClosings.fiscalYear, fiscalYear));
+    const closingDate = new Date(fiscalYear, 11, 31, 23, 59, 59);
+    const reversed: PostResult[] = [];
+    for (const entry of await this.getClosingEntries(fiscalYear)) {
+      if (entry.status !== 'posted') continue;
+      reversed.push(await this.reverse(entry.id, userId, `FY ${fiscalYear} reopened: ${reason.trim()}`, 'closing_reversal', closingDate));
+    }
+    await logAudit({ userId, action: 'UPDATE', tableName: 'fiscal_year_closings', recordId: fiscalYear, newValues: { reopened: true, reason, reversals: reversed.map(r => r.jevNo) } });
+    return { reversals: reversed };
+  }
+
+  /**
    * Run an automatic posting without failing the business action that triggered it.
    * Anything that fails shows up in getUnposted() and can be posted later.
    */
@@ -563,7 +930,7 @@ export class LedgerService {
 
   /** Transactions that should be in the books but are not yet */
   async getUnposted() {
-    const [dvs, paid, reversed, receipts, invoices, colls, deposits, ncas] = await Promise.all([
+    const [dvs, paid, reversed, receipts, invoices, colls, deposits, ncas, payrolls, payouts, remits, writeOffs] = await Promise.all([
       this.unpostedIds('dv_approval', disbursementVouchers, disbursementVouchers.id,
         and(inArray(disbursementVouchers.status, ['approved', 'paid']), isNull(disbursementVouchers.deletedAt))),
       this.unpostedIds('payment', payments, payments.id, inArray(payments.status, ['issued', 'cleared', 'stale'])),
@@ -573,8 +940,15 @@ export class LedgerService {
       this.unpostedIds('collection', collections, collections.id),
       this.unpostedIds('deposit', bankDeposits, bankDeposits.id, eq(bankDeposits.status, 'confirmed')),
       this.unpostedIds('nca', ncaRegistry, ncaRegistry.id),
+      this.unpostedIds('payroll', payrollPeriods, payrollPeriods.id, inArray(payrollPeriods.status, ['Completed', 'Posted'])),
+      this.unpostedIds('payroll_payout', payrollPeriods, payrollPeriods.id, eq(payrollPeriods.status, 'Posted')),
+      this.unpostedIds('remittance', remittances, remittances.id, eq(remittances.paymentStatus, 'Paid')),
+      this.unpostedIds('ar_writeoff', accountsReceivable, accountsReceivable.id, eq(accountsReceivable.status, 'written_off')),
     ]);
-    const groups = { dvs, payments: paid, paymentReversals: reversed, receipts, invoices, collections: colls, deposits, ncas };
+    const groups = {
+      dvs, payments: paid, paymentReversals: reversed, receipts, invoices, collections: colls, deposits, ncas,
+      payrolls, payrollPayouts: payouts, remittances: remits, writeOffs,
+    };
     const total = Object.values(groups).reduce((sum, ids) => sum + ids.length, 0);
     return { ...groups, total };
   }
@@ -614,6 +988,10 @@ export class LedgerService {
     for (const id of unposted.collections) await run(`Collection #${id}`, () => this.postCollection(id, userId));
     for (const id of unposted.receipts) await run(`OR #${id}`, () => this.postCashReceipt(id, userId));
     for (const id of unposted.deposits) await run(`Deposit #${id}`, () => this.postDeposit(id, userId));
+    for (const id of unposted.payrolls) await run(`Payroll #${id}`, () => this.postPayroll(id, userId));
+    for (const id of unposted.payrollPayouts) await run(`Payroll #${id} payout`, () => this.postPayrollPayout(id, userId));
+    for (const id of unposted.remittances) await run(`Remittance #${id}`, () => this.postRemittance(id, userId));
+    for (const id of unposted.writeOffs) await run(`Receivable #${id} write-off`, () => this.postArWriteOff(id, userId));
 
     return results;
   }

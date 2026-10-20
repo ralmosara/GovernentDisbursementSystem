@@ -1,6 +1,8 @@
 ---
 import MainLayout from '../../../layouts/MainLayout.astro';
 import { payrollService } from '../../../lib/services/payroll.service';
+import { ledgerService } from '../../../lib/services/ledger.service';
+import Modal from '../../../components/ui/Modal.astro';
 
 const user = Astro.locals.user;
 
@@ -26,6 +28,13 @@ if (period.status !== 'Draft') {
     console.error('Error fetching transactions:', error);
   }
 }
+
+// Journal entries recording this payroll and its payout
+const [payrollJev, payoutJev] = await Promise.all([
+  ledgerService.findBySource('payroll', id).catch(() => null),
+  ledgerService.findBySource('payroll_payout', id).catch(() => null),
+]);
+const canPayOut = period.status === 'Completed' && (user.roles ?? []).some(role => role === 'accountant' || role === 'administrator');
 
 // Format currency
 function formatCurrency(amount: number | string | null): string {
@@ -275,7 +284,22 @@ function getStatusBadge(status: string): string {
                   <i class="pi pi-file-export mr-2"></i>
                   Generate Remittances
                 </button>
+
+                {canPayOut && (
+                  <button type="button" class="w-full btn btn-primary" id="payout-open">
+                    <i class="pi pi-send" aria-hidden="true"></i>
+                    Record payout
+                  </button>
+                )}
               </>
+            )}
+
+            {(payrollJev || payoutJev) && (
+              <div class="pt-3 mt-3 border-t border-gray-200 text-sm space-y-1">
+                <p class="form-label">In the books</p>
+                {payrollJev && <a href={`/accounting/journals/${payrollJev.id}`} class="block text-primary-600 hover:underline">Payroll JEV {payrollJev.jevNo}</a>}
+                {payoutJev && <a href={`/accounting/journals/${payoutJev.id}`} class="block text-primary-600 hover:underline">Payout JEV {payoutJev.jevNo}</a>}
+              </div>
             )}
 
             <a
@@ -306,6 +330,51 @@ function getStatusBadge(status: string): string {
       </div>
     </div>
   </div>
+  {canPayOut && (
+    <Modal id="payout-dialog" title="Record payroll payout">
+      <form id="payout-form" method="dialog" class="space-y-3">
+        <p class="text-sm text-gray-700">Marks every payslip in {period.periodName} as paid and records the release of net pay in the books.</p>
+        <div>
+          <label for="payout-date" class="form-label form-label-required">Date released</label>
+          <input type="date" id="payout-date" name="paymentDate" class="form-input" value={new Date().toLocaleDateString('en-CA')} required />
+        </div>
+        <div>
+          <label for="payout-ref" class="form-label form-label-required">ADA or check reference</label>
+          <input id="payout-ref" name="paymentReference" class="form-input" required />
+        </div>
+        <p id="payout-error" class="form-error hidden" role="alert"></p>
+      </form>
+      <Fragment slot="footer">
+        <button type="button" class="btn btn-subtle" data-modal-close>Cancel</button>
+        <button type="submit" form="payout-form" class="btn btn-primary" id="payout-submit">Record payout</button>
+      </Fragment>
+    </Modal>
+  )}
+
+  <script define:vars={{ payoutPeriodId: period.id }}>
+    const payoutDialog = document.getElementById('payout-dialog');
+    document.getElementById('payout-open')?.addEventListener('click', () => payoutDialog?.showModal());
+    const payoutForm = document.getElementById('payout-form');
+    payoutForm?.addEventListener('submit', async event => {
+      event.preventDefault();
+      const submit = document.getElementById('payout-submit');
+      const error = document.getElementById('payout-error');
+      submit.disabled = true;
+      const response = await fetch(`/api/payroll/periods/${payoutPeriodId}/payout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(Object.fromEntries(new FormData(payoutForm))),
+      });
+      const result = await response.json();
+      if (response.ok) {
+        window.location.reload();
+      } else {
+        error.textContent = result.message;
+        error.classList.remove('hidden');
+        submit.disabled = false;
+      }
+    });
+  </script>
 </MainLayout>
 
 <script define:vars={{ periodId: period.id }}>
