@@ -1,0 +1,174 @@
+---
+import MainLayout from '../../layouts/MainLayout.astro';
+import PageHeader from '../../components/ui/PageHeader.astro';
+import FilterBar from '../../components/ui/FilterBar.astro';
+import { db } from '../../lib/db/connection';
+import { fundClusters } from '../../lib/db/schema';
+import { budgetService } from '../../lib/services/budget.service';
+import { revenueService } from '../../lib/services/revenue.service';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const params = Astro.url.searchParams;
+const currentYear = new Date().getFullYear();
+const year = parseInt(params.get('year') ?? '') || currentYear;
+const fundClusterId = parseInt(params.get('fund') ?? '') || undefined;
+
+const [targets, clusters, sources] = await Promise.all([
+  budgetService.getRevenueTargets(year, fundClusterId),
+  db.select({ id: fundClusters.id, code: fundClusters.code, name: fundClusters.name }).from(fundClusters),
+  revenueService.getRevenueSources(true),
+]);
+
+const roles = user.roles ?? [];
+const canEdit = roles.some(role => role === 'budget_officer' || role === 'administrator');
+const years = Array.from({ length: 6 }, (_, i) => currentYear + 1 - i);
+const peso = (n: number) => `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const totals = targets.reduce((t, r) => ({ original: t.original + r.originalAmount, final: t.final + r.amount }), { original: 0, final: 0 });
+---
+
+<MainLayout title="Revenue targets - Philippine Government FMS">
+  <PageHeader
+    title="Revenue targets"
+    description="Budgeted receipts per revenue source, compared with collections in the Statement of Comparison of Budget and Actual Amounts."
+    breadcrumbs={[{ label: 'Budget', href: '/budget/appropriations' }, { label: 'Revenue targets' }]}
+  >
+    <a slot="actions" href={`/reports/statements/budget-comparison?year=${year}${fundClusterId ? `&fund=${fundClusterId}` : ''}`} class="btn btn-secondary">
+      <i class="pi pi-chart-bar" aria-hidden="true"></i>
+      Budget and actual
+    </a>
+  </PageHeader>
+
+  <FilterBar action="/budget/revenue-targets" resetHref="/budget/revenue-targets" activeCount={[params.get('year'), fundClusterId].filter(Boolean).length}>
+    <div class="form-group">
+      <label for="year" class="form-label">Fiscal year</label>
+      <select id="year" name="year" class="form-select">
+        {years.map(y => <option value={y} selected={y === year}>{y}</option>)}
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="fund" class="form-label">Fund cluster</label>
+      <select id="fund" name="fund" class="form-select">
+        <option value="">All funds</option>
+        {clusters.map(c => <option value={c.id} selected={fundClusterId === c.id}>{c.code} – {c.name}</option>)}
+      </select>
+    </div>
+  </FilterBar>
+
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <section class="card lg:col-span-2" aria-labelledby="targets-heading">
+      <div class="card-header">
+        <h2 id="targets-heading" class="text-lg font-semibold text-gray-900">FY {year} targets</h2>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="table">
+          <thead>
+            <tr>
+              <th scope="col">Revenue source</th>
+              <th scope="col">Fund</th>
+              <th scope="col" class="!text-right">Original</th>
+              <th scope="col" class="!text-right">Final</th>
+              {canEdit && <th scope="col"><span class="sr-only">Actions</span></th>}
+            </tr>
+          </thead>
+          <tbody>
+            {targets.length === 0 && (
+              <tr><td colspan={canEdit ? 5 : 4} class="text-center text-gray-500 py-8">No targets set for FY {year}.</td></tr>
+            )}
+            {targets.map(t => (
+              <tr>
+                <td>
+                  <span class="font-mono text-sm">{t.sourceCode}</span> {t.sourceName}
+                  {t.remarks && <span class="block text-xs text-gray-500">{t.remarks}</span>}
+                </td>
+                <td class="text-sm">{t.fundClusterCode}</td>
+                <td class="text-right tabular-nums">{peso(t.originalAmount)}</td>
+                <td class="text-right tabular-nums">{peso(t.amount)}</td>
+                {canEdit && (
+                  <td class="text-right">
+                    <button type="button" class="btn btn-subtle btn-sm" data-delete-target={t.id} aria-label={`Remove target for ${t.sourceName}`}>
+                      <i class="pi pi-trash" aria-hidden="true"></i>
+                    </button>
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+          {targets.length > 0 && (
+            <tfoot>
+              <tr class="font-semibold border-t-2 border-gray-300">
+                <th scope="row" colspan="2" class="!text-sm">Total</th>
+                <td class="text-right tabular-nums">{peso(totals.original)}</td>
+                <td class="text-right tabular-nums">{peso(totals.final)}</td>
+                {canEdit && <td></td>}
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+    </section>
+
+    {canEdit && (
+      <section class="card p-5" aria-labelledby="set-heading">
+        <h2 id="set-heading" class="text-lg font-semibold text-gray-900 mb-1">Set a target</h2>
+        <p class="text-sm text-gray-600 mb-4">The first amount set is the original budget. Setting it again changes the final budget only.</p>
+        <form id="target-form" class="space-y-4">
+          <input type="hidden" name="fiscalYear" value={year} />
+          <div>
+            <label for="target-source" class="form-label form-label-required">Revenue source</label>
+            <select id="target-source" name="revenueSourceId" class="form-select" required>
+              <option value="">Choose a source</option>
+              {sources.map((s: any) => <option value={s.id}>{s.code} – {s.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label for="target-fund" class="form-label form-label-required">Fund cluster</label>
+            <select id="target-fund" name="fundClusterId" class="form-select" required>
+              {clusters.map(c => <option value={c.id} selected={(fundClusterId ?? clusters.find(x => x.code === '01')?.id) === c.id}>{c.code} – {c.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label for="target-amount" class="form-label form-label-required">Budgeted amount</label>
+            <input id="target-amount" name="amount" type="number" step="0.01" min="0" class="form-input" required />
+          </div>
+          <div>
+            <label for="target-remarks" class="form-label">Remarks</label>
+            <input id="target-remarks" name="remarks" type="text" class="form-input" />
+          </div>
+          <p id="target-error" class="form-error hidden" role="alert"></p>
+          <button type="submit" class="btn btn-primary w-full">Save target</button>
+        </form>
+      </section>
+    )}
+  </div>
+</MainLayout>
+
+<script>
+  const form = document.getElementById('target-form') as HTMLFormElement | null;
+  const showError = (message: string) => {
+    const error = document.getElementById('target-error');
+    if (error) {
+      error.textContent = message;
+      error.classList.remove('hidden');
+    } else alert(message);
+  };
+  form?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const response = await fetch('/api/budget/revenue-targets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(Object.fromEntries(new FormData(form).entries())),
+    });
+    if (response.ok) window.location.reload();
+    else showError((await response.json().catch(() => ({}))).message || 'The target could not be saved');
+  });
+  document.querySelectorAll<HTMLButtonElement>('[data-delete-target]').forEach(button =>
+    button.addEventListener('click', async () => {
+      if (!confirm('Remove this revenue target?')) return;
+      const response = await fetch(`/api/budget/revenue-targets/${button.dataset.deleteTarget}`, { method: 'DELETE' });
+      if (response.ok) window.location.reload();
+      else showError((await response.json().catch(() => ({}))).message || 'The target could not be removed');
+    })
+  );
+</script>

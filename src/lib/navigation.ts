@@ -34,6 +34,7 @@ export const navSections: NavSection[] = [
       { href: '/budget/appropriations', label: 'Appropriations', icon: 'pi-wallet' },
       { href: '/budget/allotments', label: 'Allotments', icon: 'pi-chart-pie' },
       { href: '/budget/obligations', label: 'Obligations', icon: 'pi-book' },
+      { href: '/budget/revenue-targets', label: 'Revenue targets', icon: 'pi-flag' },
     ],
   },
   {
@@ -57,6 +58,7 @@ export const navSections: NavSection[] = [
       { href: '/accounting/chart-of-accounts', label: 'Chart of accounts', icon: 'pi-sitemap' },
       { href: '/accounting/nca', label: 'NCA registry', icon: 'pi-wallet' },
       { href: '/accounting/depreciation', label: 'Depreciation', icon: 'pi-chart-line' },
+      { href: '/accounting/opening-balances', label: 'Opening balances', icon: 'pi-flag-fill' },
       { href: '/accounting/year-end', label: 'Year-end closing', icon: 'pi-lock' },
     ],
   },

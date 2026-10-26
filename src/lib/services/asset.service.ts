@@ -1399,17 +1399,21 @@ export class AssetService {
           reference: data.reference,
           requestedBy: data.requestedBy,
           remarks,
+          previousQuantity: data.transactionType === 'adjustment' ? previousQuantity : null,
           createdBy: userId,
         });
 
         return Number(result.insertId);
       });
 
-      // Supplies delivered under an IAR move to inventory; issues are expensed out of it
+      // Supplies delivered under an IAR move to inventory; issues are expensed out of it, and
+      // count adjustments write the difference off or back on
       if (data.transactionType === 'receipt') {
         await ledgerService.tryPost(`stock receipt ${transactionNo}`, () => ledgerService.postStockReceipt(transactionId, userId));
       } else if (data.transactionType === 'issue') {
         await ledgerService.tryPost(`stock issue ${transactionNo}`, () => ledgerService.postStockIssue(transactionId, userId));
+      } else if (data.transactionType === 'adjustment') {
+        await ledgerService.tryPost(`stock adjustment ${transactionNo}`, () => ledgerService.postStockAdjustment(transactionId, userId));
       }
 
       return { id: transactionId, transactionNo };

@@ -286,7 +286,7 @@ export async function generateDepositSlipNumber(): Promise<string> {
   const latestDeposit = await db
     .select({ depositSlipNo: bankDeposits.depositSlipNo })
     .from(bankDeposits)
-    .where(sql`YEAR(${bankDeposits.depositDate}) = ${year}`)
+    .where(like(bankDeposits.depositSlipNo, `DS-${year}-%`))
     .orderBy(desc(bankDeposits.id))
     .limit(1);
 
@@ -317,7 +317,7 @@ export async function generateCANumber(): Promise<string> {
   const latestCA = await db
     .select({ caNo: cashAdvances.caNo })
     .from(cashAdvances)
-    .where(sql`YEAR(${cashAdvances.dateIssued}) = ${year}`)
+    .where(like(cashAdvances.caNo, `CA-${year}-%`))
     .orderBy(desc(cashAdvances.id))
     .limit(1);
 
@@ -347,7 +347,7 @@ export async function generateRevenueEntryNumber(): Promise<string> {
   const latestEntry = await db
     .select({ entryNo: revenueEntries.entryNo })
     .from(revenueEntries)
-    .where(sql`YEAR(${revenueEntries.entryDate}) = ${year}`)
+    .where(like(revenueEntries.entryNo, `REV-${year}-%`))
     .orderBy(desc(revenueEntries.id))
     .limit(1);
 
@@ -374,7 +374,7 @@ export async function generateARNumber(): Promise<string> {
   const latestAR = await db
     .select({ arNo: accountsReceivable.arNo })
     .from(accountsReceivable)
-    .where(sql`YEAR(${accountsReceivable.invoiceDate}) = ${year}`)
+    .where(like(accountsReceivable.arNo, `AR-${year}-%`))
     .orderBy(desc(accountsReceivable.id))
     .limit(1);
 
@@ -401,7 +401,7 @@ export async function generateCollectionNumber(): Promise<string> {
   const latestCollection = await db
     .select({ collectionNo: collections.collectionNo })
     .from(collections)
-    .where(sql`YEAR(${collections.collectionDate}) = ${year}`)
+    .where(like(collections.collectionNo, `COL-${year}-%`))
     .orderBy(desc(collections.id))
     .limit(1);
 
@@ -428,7 +428,7 @@ export async function generateAssetNumber(): Promise<string> {
   const latestAsset = await db
     .select({ assetNo: fixedAssets.assetNo })
     .from(fixedAssets)
-    .where(sql`YEAR(${fixedAssets.acquisitionDate}) = ${year}`)
+    .where(like(fixedAssets.assetNo, `ASSET-${year}-%`))
     .orderBy(desc(fixedAssets.id))
     .limit(1);
 
@@ -482,7 +482,7 @@ export async function generateDisposalNumber(): Promise<string> {
   const latestDisposal = await db
     .select({ disposalNo: assetDisposals.disposalNo })
     .from(assetDisposals)
-    .where(sql`YEAR(${assetDisposals.disposalDate}) = ${year}`)
+    .where(like(assetDisposals.disposalNo, `DSP-${year}-%`))
     .orderBy(desc(assetDisposals.id))
     .limit(1);
 
@@ -509,7 +509,7 @@ export async function generateInventoryTransactionNumber(): Promise<string> {
   const latestTransaction = await db
     .select({ transactionNo: inventoryTransactions.transactionNo })
     .from(inventoryTransactions)
-    .where(sql`YEAR(${inventoryTransactions.transactionDate}) = ${year}`)
+    .where(like(inventoryTransactions.transactionNo, `INVT-${year}-%`))
     .orderBy(desc(inventoryTransactions.id))
     .limit(1);
 
@@ -536,7 +536,7 @@ export async function generatePhysicalCountNumber(): Promise<string> {
   const latestCount = await db
     .select({ countNo: physicalInventoryCount.countNo })
     .from(physicalInventoryCount)
-    .where(sql`YEAR(${physicalInventoryCount.countDate}) = ${year}`)
+    .where(like(physicalInventoryCount.countNo, `PCOUNT-${year}-%`))
     .orderBy(desc(physicalInventoryCount.id))
     .limit(1);
 

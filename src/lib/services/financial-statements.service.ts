@@ -9,6 +9,12 @@ import {
   registryAppropriations,
   registryAllotments,
   registryObligations,
+  fundClusters,
+  revenueTargets,
+  revenueSources,
+  cashReceipts,
+  collections,
+  accountsReceivable,
 } from '../db/schema';
 import { and, eq, gte, inArray, lt, lte, notInArray, sql, type SQL } from 'drizzle-orm';
 import { ACCOUNTS, debitAccountFor } from './ledger.service';
@@ -20,8 +26,8 @@ import { ACCOUNTS, debitAccountFor } from './ledger.service';
  *   Statement of Financial Performance       revenue and expenses for a period
  *   Statement of Changes in Net Assets/Equity
  *   Statement of Cash Flows (direct method)  each cash movement classified by its counter-entry
- *   Statement of Comparison of Budget and Actual Amounts  allotments against obligations (from
- *                                            the budget registries, not the ledger)
+ *   Statement of Comparison of Budget and Actual Amounts  budgeted against collected receipts, and
+ *                                            allotments against obligations (from the budget registries)
  *
  * Year-end closing entries are left out of period figures; otherwise a closed year would show
  * no revenue or expenses. Each builder takes one or more columns (current, comparative) and
@@ -357,8 +363,18 @@ export const ALLOTMENT_CLASSES: Record<string, string> = {
 
 export interface BudgetClassAmounts {
   allotmentClass: string;
+  /** As first released, before modifications */
+  original: number;
+  /** After augmentations, reductions and realignments */
   allotted: number;
   obligated: number;
+}
+
+export interface ReceiptAmounts {
+  label: string;
+  original: number;
+  final: number;
+  actual: number;
 }
 
 export interface BudgetComparisonLine {
@@ -369,34 +385,54 @@ export interface BudgetComparisonLine {
   difference: number;
 }
 
+const comparisonLine = (label: string, original: number, final: number, actual: number): BudgetComparisonLine => ({
+  label,
+  original: original / 100,
+  final: final / 100,
+  actual: actual / 100,
+  difference: (final - actual) / 100,
+});
+
 /**
- * Payments by allotment class: the budget is what was allotted, the actual amount on a
- * comparable (obligation) basis is what was obligated. Appropriations not yet allotted are
- * budget with no actual. Budget modifications are not recorded, so original = final.
+ * Receipts by revenue source (budgeted against collected) and payments by allotment class:
+ * the payments budget is what was allotted (original as released, final after modifications)
+ * and the actual amount on a comparable (obligation) basis is what was obligated.
+ * Appropriations not yet allotted are budget with no actual.
  */
-export function buildBudgetComparison(classes: BudgetClassAmounts[], appropriation: number) {
+export function buildBudgetComparison(classes: BudgetClassAmounts[], appropriation: number, receipts: ReceiptAmounts[] = []) {
   const order = Object.keys(ALLOTMENT_CLASSES);
   const sorted = [...classes].sort((a, b) => {
     const ia = order.indexOf(a.allotmentClass);
     const ib = order.indexOf(b.allotmentClass);
     return (ia < 0 ? order.length : ia) - (ib < 0 ? order.length : ib) || a.allotmentClass.localeCompare(b.allotmentClass);
   });
-  const line = (label: string, budget: number, actual: number): BudgetComparisonLine => ({
-    label,
-    original: budget / 100,
-    final: budget / 100,
-    actual: actual / 100,
-    difference: (budget - actual) / 100,
-  });
+  const total = (values: number[]) => values.reduce((sum, v) => sum + v, 0);
 
-  const lines = sorted.map(c => line(ALLOTMENT_CLASSES[c.allotmentClass] ?? c.allotmentClass, toCentavos(c.allotted), toCentavos(c.obligated)));
-  const allotted = sorted.reduce((total, c) => total + toCentavos(c.allotted), 0);
-  const obligated = sorted.reduce((total, c) => total + toCentavos(c.obligated), 0);
-  const unallotted = toCentavos(appropriation) - allotted;
-  if (unallotted !== 0) lines.push(line('Appropriations not yet allotted', unallotted, 0));
+  const lines = sorted.map(c =>
+    comparisonLine(ALLOTMENT_CLASSES[c.allotmentClass] ?? c.allotmentClass, toCentavos(c.original), toCentavos(c.allotted), toCentavos(c.obligated))
+  );
+  const original = total(sorted.map(c => toCentavos(c.original)));
+  const allotted = total(sorted.map(c => toCentavos(c.allotted)));
+  const obligated = total(sorted.map(c => toCentavos(c.obligated)));
+  const appropriated = toCentavos(appropriation);
+  if (appropriated !== original || appropriated !== allotted) {
+    lines.push(comparisonLine('Appropriations not yet allotted', appropriated - original, appropriated - allotted, 0));
+  }
 
-  const budget = Math.max(toCentavos(appropriation), allotted);
-  return { lines, total: line('Total payments', budget, obligated) };
+  const receiptLines = receipts.map(r => comparisonLine(r.label, toCentavos(r.original), toCentavos(r.final), toCentavos(r.actual)));
+  return {
+    receipts: {
+      lines: receiptLines,
+      total: comparisonLine(
+        'Total receipts',
+        total(receipts.map(r => toCentavos(r.original))),
+        total(receipts.map(r => toCentavos(r.final))),
+        total(receipts.map(r => toCentavos(r.actual)))
+      ),
+    },
+    lines,
+    total: comparisonLine('Total payments', Math.max(appropriated, original), Math.max(appropriated, allotted), obligated),
+  };
 }
 
 export class FinancialStatementsService {
@@ -528,7 +564,11 @@ export class FinancialStatementsService {
     const [[appropriation], allotments, obligations] = await Promise.all([
       db.select({ total: sql<string>`COALESCE(SUM(${registryAppropriations.amount}), 0)` }).from(registryAppropriations).where(appropriationFilter),
       db
-        .select({ allotmentClass: registryAllotments.allotmentClass, total: sql<string>`SUM(${registryAllotments.amount})` })
+        .select({
+          allotmentClass: registryAllotments.allotmentClass,
+          original: sql<string>`SUM(COALESCE(${registryAllotments.originalAmount}, ${registryAllotments.amount}))`,
+          total: sql<string>`SUM(${registryAllotments.amount})`,
+        })
         .from(registryAllotments)
         .innerJoin(registryAppropriations, eq(registryAllotments.appropriationId, registryAppropriations.id))
         .where(appropriationFilter)
@@ -544,10 +584,66 @@ export class FinancialStatementsService {
 
     const classes = allotments.map(a => ({
       allotmentClass: a.allotmentClass,
+      original: Number(a.original ?? 0),
       allotted: Number(a.total ?? 0),
       obligated: Number(obligations.find(o => o.allotmentClass === a.allotmentClass)?.total ?? 0),
     }));
-    return buildBudgetComparison(classes, Number(appropriation?.total ?? 0));
+    return buildBudgetComparison(classes, Number(appropriation?.total ?? 0), await this.receiptsComparison(year, fundClusterId));
+  }
+
+  /**
+   * Budgeted receipts per revenue source against collections in the year: official receipts
+   * plus collections on receivables (which the ledger books to fund cluster 01).
+   */
+  private async receiptsComparison(year: number, fundClusterId?: number): Promise<ReceiptAmounts[]> {
+    const [defaultFund] = await db.select({ id: fundClusters.id }).from(fundClusters).where(eq(fundClusters.code, '01')).limit(1);
+    const includeCollections = !fundClusterId || fundClusterId === defaultFund?.id;
+    const [targets, receipts, collected] = await Promise.all([
+      db
+        .select({
+          sourceId: revenueTargets.revenueSourceId,
+          original: sql<string>`SUM(${revenueTargets.originalAmount})`,
+          final: sql<string>`SUM(${revenueTargets.amount})`,
+        })
+        .from(revenueTargets)
+        .where(and(eq(revenueTargets.fiscalYear, year), fundClusterId ? eq(revenueTargets.fundClusterId, fundClusterId) : undefined))
+        .groupBy(revenueTargets.revenueSourceId),
+      db
+        .select({ sourceId: cashReceipts.revenueSourceId, total: sql<string>`SUM(${cashReceipts.amount})` })
+        .from(cashReceipts)
+        .where(and(sql`YEAR(${cashReceipts.receiptDate}) = ${year}`, fundClusterId ? eq(cashReceipts.fundClusterId, fundClusterId) : undefined))
+        .groupBy(cashReceipts.revenueSourceId),
+      includeCollections
+        ? db
+            .select({ sourceId: accountsReceivable.revenueSourceId, total: sql<string>`SUM(${collections.amount})` })
+            .from(collections)
+            .innerJoin(accountsReceivable, eq(collections.arId, accountsReceivable.id))
+            .where(sql`YEAR(${collections.collectionDate}) = ${year}`)
+            .groupBy(accountsReceivable.revenueSourceId)
+        : Promise.resolve([] as { sourceId: number | null; total: string }[]),
+    ]);
+
+    const sourceIds = [...new Set([...targets, ...receipts, ...collected].map(r => r.sourceId ?? 0))];
+    const sources = sourceIds.length
+      ? await db.select({ id: revenueSources.id, code: revenueSources.code, name: revenueSources.name }).from(revenueSources).where(inArray(revenueSources.id, sourceIds))
+      : [];
+    const amountFor = (rows: { sourceId: number | null; total: string }[], id: number) =>
+      rows.filter(r => (r.sourceId ?? 0) === id).reduce((total, r) => total + Number(r.total ?? 0), 0);
+
+    return sourceIds
+      .map(id => {
+        const source = sources.find(s => s.id === id);
+        const target = targets.find(t => t.sourceId === id);
+        return {
+          code: source?.code ?? '',
+          label: source?.name ?? 'Receipts with no revenue source',
+          original: Number(target?.original ?? 0),
+          final: Number(target?.final ?? 0),
+          actual: amountFor(receipts, id) + amountFor(collected, id),
+        };
+      })
+      .sort((a, b) => (a.code || '~').localeCompare(b.code || '~'))
+      .map(({ code: _code, ...amounts }) => amounts);
   }
 }
 

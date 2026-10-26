@@ -230,7 +230,8 @@ describe('cash advances', () => {
   function liquidate(advance: ReturnType<typeof ca>) {
     vi.spyOn(ledgerService, 'postDvApproval').mockResolvedValue({ id: 1, jevNo: 'dv', created: false });
     const post = posted();
-    queuedResults.push([advance], [advance], [dv], [dv]);
+    // Each DV lookup is followed by the opening-balance date check, as is the liquidation itself
+    queuedResults.push([advance], [advance], [dv], [], [], [dv], []);
     return { post, run: ledgerService.postCashAdvanceLiquidation(7, 1) };
   }
 
@@ -491,9 +492,9 @@ describe('Statement of Comparison of Budget and Actual Amounts', () => {
   it('compares allotments with obligations by class, in PS, MOOE, FA, CO order', () => {
     const scbaa = buildBudgetComparison(
       [
-        { allotmentClass: 'CO', allotted: 500000, obligated: 450000 },
-        { allotmentClass: 'PS', allotted: 1200000, obligated: 1180000.5 },
-        { allotmentClass: 'MOOE', allotted: 800000, obligated: 610000 },
+        { allotmentClass: 'CO', original: 500000, allotted: 500000, obligated: 450000 },
+        { allotmentClass: 'PS', original: 1200000, allotted: 1200000, obligated: 1180000.5 },
+        { allotmentClass: 'MOOE', original: 800000, allotted: 800000, obligated: 610000 },
       ],
       3000000
     );
@@ -509,8 +510,163 @@ describe('Statement of Comparison of Budget and Actual Amounts', () => {
   });
 
   it('shows no unallotted line when the appropriation is fully allotted', () => {
-    const scbaa = buildBudgetComparison([{ allotmentClass: 'MOOE', allotted: 100, obligated: 40 }], 100);
+    const scbaa = buildBudgetComparison([{ allotmentClass: 'MOOE', original: 100, allotted: 100, obligated: 40 }], 100);
     expect(scbaa.lines).toHaveLength(1);
     expect(scbaa.total.difference).toBe(60);
+  });
+});
+
+describe('budget modifications and receipts in the comparison', () => {
+  it('shows allotments as first released and after modification', () => {
+    // MOOE realigned ₱50,000 to CO after release
+    const scbaa = buildBudgetComparison(
+      [
+        { allotmentClass: 'MOOE', original: 300000, allotted: 250000, obligated: 200000 },
+        { allotmentClass: 'CO', original: 100000, allotted: 150000, obligated: 150000 },
+      ],
+      400000
+    );
+    expect(scbaa.lines).toEqual([
+      { label: 'Maintenance and Other Operating Expenses', original: 300000, final: 250000, actual: 200000, difference: 50000 },
+      { label: 'Capital Outlay', original: 100000, final: 150000, actual: 150000, difference: 0 },
+    ]);
+    expect(scbaa.total).toMatchObject({ original: 400000, final: 400000, actual: 350000 });
+  });
+
+  it('shows the unallotted balance before and after an augmentation', () => {
+    const scbaa = buildBudgetComparison([{ allotmentClass: 'PS', original: 600, allotted: 900, obligated: 0 }], 1000);
+    expect(scbaa.lines[1]).toEqual({ label: 'Appropriations not yet allotted', original: 400, final: 100, actual: 0, difference: 100 });
+  });
+
+  it('compares budgeted receipts with collections', () => {
+    const scbaa = buildBudgetComparison([], 0, [
+      { label: 'Permit fees', original: 50000, final: 60000, actual: 61250.75 },
+      { label: 'Receipts with no revenue source', original: 0, final: 0, actual: 500 },
+    ]);
+    expect(scbaa.receipts.lines[0].difference).toBe(-1250.75);
+    expect(scbaa.receipts.total).toMatchObject({ original: 50000, final: 60000, actual: 61750.75, difference: -1750.75 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Physical count adjustments
+// ---------------------------------------------------------------------------
+
+describe('stock count adjustments', () => {
+  const adjustment = (quantity: number, previousQuantity: number | null) => ({
+    id: 41,
+    transactionNo: 'INV-T-0041',
+    transactionDate: new Date(2025, 6, 31),
+    transactionType: 'adjustment',
+    quantity,
+    previousQuantity,
+    unitCost: '100.00',
+    reference: 'PC-2025-0001',
+    requestedBy: null,
+    itemCode: 'INV-0002',
+    itemName: 'Toner cartridge',
+    accountCode: null,
+  });
+
+  it('writes a shortage off as a loss of assets', async () => {
+    const post = posted();
+    queuedResults.push([], [adjustment(8, 10)], [{ itemCode: 'INV-0002', fundClusterId: 1, balance: '1000.00' }]);
+    await ledgerService.postStockAdjustment(41, 1);
+    expect(post.mock.calls[0][0].lines).toEqual([
+      expect.objectContaining({ accountCode: ACCOUNTS.LOSS_OF_ASSETS, debit: 200 }),
+      expect.objectContaining({ accountCode: '1040401000', credit: 200, subsidiary: 'INV-0002' }),
+    ]);
+  });
+
+  it('writes off no more than the stock in the books', async () => {
+    const post = posted();
+    queuedResults.push([], [adjustment(0, 10)], [{ itemCode: 'INV-0002', fundClusterId: 1, balance: '300.00' }]);
+    await ledgerService.postStockAdjustment(41, 1);
+    expect(post.mock.calls[0][0].lines[0].debit).toBe(300);
+  });
+
+  it('takes an overage up as income', async () => {
+    const post = posted();
+    queuedResults.push([], [adjustment(12, 10)], [{ itemCode: 'INV-0002', fundClusterId: 1, balance: '0.00' }]);
+    await ledgerService.postStockAdjustment(41, 1);
+    expect(post.mock.calls[0][0].lines).toEqual([
+      expect.objectContaining({ accountCode: '1040401000', debit: 200 }),
+      expect.objectContaining({ accountCode: ACCOUNTS.MISCELLANEOUS_INCOME, credit: 200 }),
+    ]);
+  });
+
+  it('posts nothing for an item never in the books, or an old adjustment without the previous count', async () => {
+    const post = posted();
+    queuedResults.push([], [adjustment(8, 10)], []);
+    expect(await ledgerService.postStockAdjustment(41, 1)).toBeNull();
+    queuedResults.push([], [adjustment(8, null)]);
+    expect(await ledgerService.postStockAdjustment(41, 1)).toBeNull();
+    expect(post).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Opening balances
+// ---------------------------------------------------------------------------
+
+describe('opening balances', () => {
+  const lines = [
+    { accountCode: '1010202000', debit: 250000, subsidiary: 'LBP 1234' },
+    { accountCode: '1060501000', debit: 120000, subsidiary: 'PPE-0001' },
+    { accountCode: '1060501100', credit: 24000, subsidiary: 'PPE-0001' },
+    { accountCode: '2010101000', credit: 30000 },
+  ];
+  const chart = ['1010202000', '1060501000', '1060501100', '2010101000'].map(code => ({ code }));
+
+  it('balances the entry to Accumulated Surplus/(Deficit)', async () => {
+    const post = posted();
+    queuedResults.push([], chart);
+    await ledgerService.postOpeningBalances({ fundClusterId: 1, date: new Date(2026, 0, 1), lines }, 1);
+    const input = post.mock.calls[0][0];
+    expect(input.sourceType).toBe('opening_balance');
+    expect(input.sourceId).toBe(1);
+    expect(input.lines.at(-1)).toEqual(expect.objectContaining({ accountCode: ACCOUNTS.ACCUMULATED_SURPLUS, credit: 316000 }));
+  });
+
+  it('accepts only balance sheet accounts', async () => {
+    queuedResults.push([]);
+    await expect(
+      ledgerService.postOpeningBalances({ fundClusterId: 1, date: new Date(2026, 0, 1), lines: [{ accountCode: '4030101000', credit: 100 }] }, 1)
+    ).rejects.toThrow(/not a balance sheet account/);
+  });
+
+  it('allows one opening entry per fund cluster', async () => {
+    queuedResults.push([{ id: 3, jevNo: '01-2026-01-0001', status: 'posted' }]);
+    await expect(ledgerService.postOpeningBalances({ fundClusterId: 1, date: new Date(2026, 0, 1), lines }, 1)).rejects.toThrow(
+      /already has opening balances/
+    );
+  });
+
+  it('leaves records dated before the opening date to the opening entry', async () => {
+    const post = posted();
+    // An issue on 15 Dec 2025, with opening balances as of 1 Jan 2026
+    queuedResults.push(
+      [],
+      [
+        {
+          id: 40,
+          transactionNo: 'INV-T-0040',
+          transactionDate: new Date(2025, 11, 15),
+          transactionType: 'issue',
+          quantity: 5,
+          unitCost: '10.00',
+          reference: null,
+          requestedBy: null,
+          itemCode: 'INV-0001',
+          itemName: 'Paper',
+          accountCode: null,
+        },
+      ],
+      [{ itemCode: 'INV-0001', fundClusterId: 1, balance: '500.00' }],
+      [],
+      [{ date: new Date(2026, 0, 1) }]
+    );
+    expect(await ledgerService.postStockIssue(40, 1)).toBeNull();
+    expect(post).not.toHaveBeenCalled();
   });
 });

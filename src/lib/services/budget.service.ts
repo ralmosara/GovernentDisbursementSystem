@@ -6,9 +6,14 @@ import {
   fundClusters,
   objectOfExpenditure,
   mfoPap,
-  disbursementVouchers
+  disbursementVouchers,
+  allotmentModifications,
+  revenueTargets,
+  revenueSources,
 } from '../db/schema';
 import { eq, and, sum, sql, desc, inArray, or, type SQL } from 'drizzle-orm';
+import { alias } from 'drizzle-orm/mysql-core';
+import { logAudit } from '../middleware/audit-logger';
 
 export interface BudgetAvailability {
   appropriation: number;
@@ -530,6 +535,7 @@ export class BudgetService {
         amount: registryAllotments.amount,
         purpose: registryAllotments.purpose,
         createdAt: registryAllotments.createdAt,
+        originalAmount: registryAllotments.originalAmount,
         updatedAt: registryAllotments.updatedAt,
         appropriation_reference: registryAppropriations.reference,
         appropriation_year: registryAppropriations.year,
@@ -560,6 +566,7 @@ export class BudgetService {
       amount: toNumber(row.amount),
       purpose: row.purpose,
       createdAt: row.createdAt,
+      originalAmount: row.originalAmount === null ? null : toNumber(row.originalAmount),
       updatedAt: row.updatedAt,
       appropriation: {
         id: row.appropriationId,
@@ -786,6 +793,211 @@ export class BudgetService {
         }
       }
     }));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Allotment modifications
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Augment, reduce or realign a released allotment. The allotment's amount becomes the final
+   * budget, so every availability check uses it; the amount first released is kept as
+   * original_amount. An augmentation must fit the appropriation, a reduction cannot take the
+   * allotment below what is obligated or pending, and a realignment moves funds to another
+   * allotment of the same appropriation.
+   */
+  async modifyAllotment(
+    allotmentId: number,
+    data: { type: 'augmentation' | 'reduction' | 'realignment'; amount: number; targetAllotmentId?: number; reference: string; reason?: string; date: Date },
+    userId: number
+  ) {
+    if (!(data.amount > 0)) throw new Error('Enter an amount greater than zero');
+    if (!data.reference?.trim()) throw new Error('Enter the reference of the authority for the change');
+    const realignment = data.type === 'realignment';
+    if (realignment && (!data.targetAllotmentId || data.targetAllotmentId === allotmentId)) throw new Error('Choose the allotment the funds move to');
+    const amount = toCentavos(data.amount);
+
+    await db.transaction(async (tx) => {
+      const ids = realignment ? [allotmentId, data.targetAllotmentId!] : [allotmentId];
+      const rows = await tx
+        .select({ id: registryAllotments.id, appropriationId: registryAllotments.appropriationId, amount: registryAllotments.amount, originalAmount: registryAllotments.originalAmount })
+        .from(registryAllotments)
+        .where(inArray(registryAllotments.id, ids))
+        .for('update');
+      const source = rows.find(r => r.id === allotmentId);
+      if (!source) throw new Error('Allotment not found');
+      const target = realignment ? rows.find(r => r.id === data.targetAllotmentId) : undefined;
+      if (realignment && !target) throw new Error('The allotment to realign to was not found');
+      if (target && target.appropriationId !== source.appropriationId) {
+        throw new Error('Funds can only be realigned between allotments of the same appropriation');
+      }
+
+      const apply = async (row: typeof source, delta: number, type: 'augmentation' | 'reduction' | 'realignment_in' | 'realignment_out', relatedId?: number) => {
+        await tx
+          .update(registryAllotments)
+          .set({ amount: ((toCentavos(toNumber(row.amount)) + delta) / 100).toFixed(2), originalAmount: row.originalAmount ?? row.amount })
+          .where(eq(registryAllotments.id, row.id));
+        await tx.insert(allotmentModifications).values({
+          allotmentId: row.id,
+          modificationType: type,
+          amount: (amount / 100).toFixed(2),
+          relatedAllotmentId: relatedId ?? null,
+          reference: data.reference.trim(),
+          reason: data.reason?.trim() || null,
+          modificationDate: data.date,
+          createdBy: userId,
+        });
+      };
+
+      if (data.type === 'augmentation') {
+        const [appropriation] = await tx
+          .select({ amount: registryAppropriations.amount })
+          .from(registryAppropriations)
+          .where(eq(registryAppropriations.id, source.appropriationId))
+          .for('update');
+        const [allotted] = await tx
+          .select({ total: sum(registryAllotments.amount).mapWith(Number) })
+          .from(registryAllotments)
+          .where(eq(registryAllotments.appropriationId, source.appropriationId));
+        const unallotted = toCentavos(toNumber(appropriation?.amount)) - toCentavos(toNumber(allotted?.total));
+        if (amount > unallotted) throw new Error(`Only ₱${(unallotted / 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })} of the appropriation is not yet allotted`);
+        await apply(source, amount, 'augmentation');
+        return;
+      }
+
+      // Funds already obligated or reserved by pending requests cannot be taken away
+      const [committed] = await tx
+        .select({ total: sum(registryObligations.amount).mapWith(Number) })
+        .from(registryObligations)
+        .where(and(eq(registryObligations.allotmentId, source.id), inArray(registryObligations.status, ['approved', 'pending'])));
+      const free = toCentavos(toNumber(source.amount)) - toCentavos(toNumber(committed?.total));
+      if (amount > free) throw new Error(`Only ₱${(Math.max(free, 0) / 100).toLocaleString('en-PH', { minimumFractionDigits: 2 })} of this allotment is unobligated`);
+      await apply(source, -amount, realignment ? 'realignment_out' : 'reduction', target?.id);
+      if (target) await apply(target, amount, 'realignment_in', source.id);
+    });
+
+    await logAudit({
+      userId,
+      action: 'UPDATE',
+      tableName: 'registry_allotments',
+      recordId: allotmentId,
+      newValues: { modification: data.type, amount: data.amount, targetAllotmentId: data.targetAllotmentId, reference: data.reference },
+    });
+  }
+
+  /** Modifications of an allotment, newest first, with the other allotment of a realignment */
+  async getAllotmentModifications(allotmentId: number) {
+    const related = alias(registryAllotments, 'related_allotment');
+    const relatedObject = alias(objectOfExpenditure, 'related_object');
+    const rows = await db
+      .select({
+        id: allotmentModifications.id,
+        modificationType: allotmentModifications.modificationType,
+        amount: allotmentModifications.amount,
+        reference: allotmentModifications.reference,
+        reason: allotmentModifications.reason,
+        modificationDate: allotmentModifications.modificationDate,
+        relatedAllotmentId: allotmentModifications.relatedAllotmentId,
+        relatedPurpose: related.purpose,
+        relatedObjectCode: relatedObject.code,
+        relatedObjectName: relatedObject.name,
+      })
+      .from(allotmentModifications)
+      .leftJoin(related, eq(allotmentModifications.relatedAllotmentId, related.id))
+      .leftJoin(relatedObject, eq(related.objectOfExpenditureId, relatedObject.id))
+      .where(eq(allotmentModifications.allotmentId, allotmentId))
+      .orderBy(desc(allotmentModifications.modificationDate), desc(allotmentModifications.id));
+    return rows.map(r => ({ ...r, amount: toNumber(r.amount) }));
+  }
+
+  /** Other allotments of the same appropriation, which funds can be realigned to */
+  async getRealignmentTargets(allotmentId: number) {
+    const [allotment] = await db
+      .select({ appropriationId: registryAllotments.appropriationId })
+      .from(registryAllotments)
+      .where(eq(registryAllotments.id, allotmentId))
+      .limit(1);
+    if (!allotment) return [];
+    const rows = await db
+      .select({
+        id: registryAllotments.id,
+        purpose: registryAllotments.purpose,
+        allotmentClass: registryAllotments.allotmentClass,
+        amount: registryAllotments.amount,
+        objectCode: objectOfExpenditure.code,
+        objectName: objectOfExpenditure.name,
+      })
+      .from(registryAllotments)
+      .leftJoin(objectOfExpenditure, eq(registryAllotments.objectOfExpenditureId, objectOfExpenditure.id))
+      .where(and(eq(registryAllotments.appropriationId, allotment.appropriationId), sql`${registryAllotments.id} <> ${allotmentId}`))
+      .orderBy(objectOfExpenditure.code);
+    return rows.map(r => ({ ...r, amount: toNumber(r.amount) }));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Revenue targets (budgeted receipts)
+  // ---------------------------------------------------------------------------
+
+  async getRevenueTargets(fiscalYear: number, fundClusterId?: number) {
+    const rows = await db
+      .select({
+        id: revenueTargets.id,
+        fiscalYear: revenueTargets.fiscalYear,
+        fundClusterId: revenueTargets.fundClusterId,
+        fundClusterCode: fundClusters.code,
+        revenueSourceId: revenueTargets.revenueSourceId,
+        sourceCode: revenueSources.code,
+        sourceName: revenueSources.name,
+        originalAmount: revenueTargets.originalAmount,
+        amount: revenueTargets.amount,
+        remarks: revenueTargets.remarks,
+      })
+      .from(revenueTargets)
+      .innerJoin(revenueSources, eq(revenueTargets.revenueSourceId, revenueSources.id))
+      .innerJoin(fundClusters, eq(revenueTargets.fundClusterId, fundClusters.id))
+      .where(and(eq(revenueTargets.fiscalYear, fiscalYear), fundClusterId ? eq(revenueTargets.fundClusterId, fundClusterId) : undefined))
+      .orderBy(fundClusters.code, revenueSources.code);
+    return rows.map(r => ({ ...r, originalAmount: toNumber(r.originalAmount), amount: toNumber(r.amount) }));
+  }
+
+  /**
+   * Set the budgeted receipts for a source. The first figure set is the original budget; later
+   * changes update the final budget only.
+   */
+  async setRevenueTarget(data: { fiscalYear: number; fundClusterId: number; revenueSourceId: number; amount: number; remarks?: string }, userId: number) {
+    if (!(data.amount >= 0)) throw new Error('Enter the budgeted amount');
+    const amount = data.amount.toFixed(2);
+    const [existing] = await db
+      .select({ id: revenueTargets.id })
+      .from(revenueTargets)
+      .where(
+        and(
+          eq(revenueTargets.fiscalYear, data.fiscalYear),
+          eq(revenueTargets.fundClusterId, data.fundClusterId),
+          eq(revenueTargets.revenueSourceId, data.revenueSourceId)
+        )
+      )
+      .limit(1);
+
+    if (existing) {
+      await db.update(revenueTargets).set({ amount, remarks: data.remarks?.trim() || null }).where(eq(revenueTargets.id, existing.id));
+    } else {
+      await db.insert(revenueTargets).values({
+        fiscalYear: data.fiscalYear,
+        fundClusterId: data.fundClusterId,
+        revenueSourceId: data.revenueSourceId,
+        originalAmount: amount,
+        amount,
+        remarks: data.remarks?.trim() || null,
+        createdBy: userId,
+      });
+    }
+    await logAudit({ userId, action: existing ? 'UPDATE' : 'CREATE', tableName: 'revenue_targets', recordId: existing?.id ?? 0, newValues: data });
+  }
+
+  async deleteRevenueTarget(id: number, userId: number) {
+    await db.delete(revenueTargets).where(eq(revenueTargets.id, id));
+    await logAudit({ userId, action: 'DELETE', tableName: 'revenue_targets', recordId: id });
   }
 }
 

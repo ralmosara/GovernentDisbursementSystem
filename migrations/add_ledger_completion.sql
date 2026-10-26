@@ -3,7 +3,7 @@
 -- Safe to re-run: seeds use INSERT IGNORE. New columns are added by
 -- scripts/run-government-accounting-migration.ts (asset_categories.account_code,
 -- cash_advances.total_expenses, cash_advances.refund_amount,
--- inventory_items.account_code).
+-- inventory_items.account_code, inventory_transactions.previous_quantity).
 
 INSERT IGNORE INTO `chart_of_accounts` (`code`, `title`, `account_type`, `normal_balance`) VALUES
 ('1030599000', 'Other Receivables', 'asset', 'debit'),
@@ -47,3 +47,7 @@ INSERT IGNORE INTO `chart_of_accounts` (`code`, `title`, `account_type`, `normal
 ('5020308000', 'Medical, Dental and Laboratory Supplies Expenses', 'expense', 'debit'),
 ('5020309000', 'Fuel, Oil and Lubricants Expenses', 'expense', 'debit'),
 ('5020399000', 'Other Supplies and Materials Expenses', 'expense', 'debit');
+
+-- Shortages found on a physical count
+INSERT IGNORE INTO `chart_of_accounts` (`code`, `title`, `account_type`, `normal_balance`) VALUES
+('5050408000', 'Loss of Assets', 'expense', 'debit');

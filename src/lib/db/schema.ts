@@ -115,6 +115,8 @@ export const registryAllotments = mysqlTable('registry_allotments', {
   mfoPapId: int('mfo_pap_id'),
   allotmentClass: varchar('allotment_class', { length: 100 }).notNull(),
   amount: decimal('amount', { precision: 15, scale: 2 }).notNull(),
+  // Amount as first released; set when the allotment is first modified
+  originalAmount: decimal('original_amount', { precision: 15, scale: 2 }),
   purpose: text('purpose').notNull(),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
@@ -134,6 +136,34 @@ export const registryObligations = mysqlTable('registry_obligations', {
   createdBy: int('created_by').notNull(),
   approvedBy: int('approved_by'),
   approvedAt: datetime('approved_at'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
+});
+
+/** A change to an allotment after release; a realignment is a pair of rows */
+export const allotmentModifications = mysqlTable('allotment_modifications', {
+  id: int('id').primaryKey().autoincrement(),
+  allotmentId: int('allotment_id').notNull(),
+  modificationType: mysqlEnum('modification_type', ['augmentation', 'reduction', 'realignment_in', 'realignment_out']).notNull(),
+  amount: decimal('amount', { precision: 15, scale: 2 }).notNull(),
+  relatedAllotmentId: int('related_allotment_id'),
+  reference: varchar('reference', { length: 100 }).notNull(),
+  reason: text('reason'),
+  modificationDate: date('modification_date').notNull(),
+  createdBy: int('created_by').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+/** Budgeted receipts per revenue source, fund cluster and fiscal year */
+export const revenueTargets = mysqlTable('revenue_targets', {
+  id: int('id').primaryKey().autoincrement(),
+  fiscalYear: int('fiscal_year').notNull(),
+  fundClusterId: int('fund_cluster_id').notNull(),
+  revenueSourceId: int('revenue_source_id').notNull(),
+  originalAmount: decimal('original_amount', { precision: 15, scale: 2 }).notNull(),
+  amount: decimal('amount', { precision: 15, scale: 2 }).notNull(),
+  remarks: text('remarks'),
+  createdBy: int('created_by').notNull(),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow().onUpdateNow(),
 });
@@ -669,6 +699,8 @@ export const inventoryTransactions = mysqlTable('inventory_transactions', {
   quantity: int('quantity').notNull(),
   unitCost: decimal('unit_cost', { precision: 15, scale: 2 }),
   reference: varchar('reference', { length: 100 }), // PO, RIS, etc.
+  // Adjustments only: the on-hand quantity the counted figure replaced
+  previousQuantity: int('previous_quantity'),
   requestedBy: varchar('requested_by', { length: 255 }),
   remarks: text('remarks'),
   createdBy: int('created_by').notNull(),

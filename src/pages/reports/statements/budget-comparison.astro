@@ -32,7 +32,7 @@ const amountCells = (line: { original: number; final: number; actual: number; di
 <MainLayout title="Statement of Comparison of Budget and Actual Amounts - Philippine Government FMS">
   <PageHeader
     title="Statement of Comparison of Budget and Actual Amounts"
-    description="Allotments by class against obligations incurred for the fiscal year (PPSAS 24)."
+    description="Budgeted against collected receipts, and allotments by class against obligations incurred, for the fiscal year (PPSAS 24)."
     breadcrumbs={[{ label: 'Reports', href: '/reports' }, { label: 'Financial statements', href: '/reports/statements' }, { label: 'Budget and actual' }]}
   >
     <button slot="actions" type="button" class="btn btn-secondary" onclick="window.print()">
@@ -79,6 +79,22 @@ const amountCells = (line: { original: number; final: number; actual: number; di
           </tr>
         </thead>
         <tbody>
+          <tr class="bg-gray-50"><th scope="rowgroup" colspan="5" class="!text-gray-800">Receipts</th></tr>
+          {statement.receipts.lines.length === 0 && (
+            <tr><td colspan="5" class="text-center text-gray-500 py-4">No revenue targets or collections for {year}. Set targets under <a href="/budget/revenue-targets" class="underline">Budget → Revenue targets</a>.</td></tr>
+          )}
+          {statement.receipts.lines.map(line => (
+            <tr>
+              <td class="pl-6">{line.label}</td>
+              {amountCells(line).map(v => <td class="text-right tabular-nums">{statementAmount(v)}</td>)}
+            </tr>
+          ))}
+          <tr class="font-semibold">
+            <td>{statement.receipts.total.label}</td>
+            {amountCells(statement.receipts.total).map(v => <td class="text-right tabular-nums border-t border-gray-200">{statementAmount(v)}</td>)}
+          </tr>
+        </tbody>
+        <tbody>
           <tr class="bg-gray-50"><th scope="rowgroup" colspan="5" class="!text-gray-800">Payments</th></tr>
           {statement.lines.length === 0 && (
             <tr><td colspan="5" class="text-center text-gray-500 py-6">No appropriations or allotments recorded for {year}.</td></tr>
@@ -101,8 +117,7 @@ const amountCells = (line: { original: number; final: number; actual: number; di
   </article>
 
   <ul class="text-sm text-gray-600 mt-6 max-w-3xl list-disc pl-5 space-y-1">
-    <li>Budgeted amounts are the allotments released under the year's appropriations; actual amounts are approved obligations, the basis the budget is prepared on.</li>
-    <li>Budget modifications are not recorded separately, so the original and final budget are the same.</li>
-    <li>Receipts are not budgeted in the system, so only payments are shown.</li>
+    <li>Payments: the original budget is each allotment as first released, and the final budget is after augmentations, reductions and realignments. Actual amounts are approved obligations, the basis the budget is prepared on.</li>
+    <li>Receipts: budgeted amounts are the revenue targets; actual amounts are official receipts and collections on receivables dated in the year.</li>
   </ul>
 </MainLayout>

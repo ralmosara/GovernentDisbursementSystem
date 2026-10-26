@@ -1,5 +1,6 @@
 ---
 import MainLayout from '../../../layouts/MainLayout.astro';
+import Modal from '../../../components/ui/Modal.astro';
 import { budgetService } from '../../../lib/services/budget.service';
 
 const user = Astro.locals.user;
@@ -20,10 +21,21 @@ if (!allotment) {
   return Astro.redirect('/budget/allotments');
 }
 
-const [availability, obligations] = await Promise.all([
+const [availability, obligations, modifications, realignTargets] = await Promise.all([
   budgetService.getBudgetAvailability(id),
-  budgetService.getObligationsByAllotment(id)
+  budgetService.getObligationsByAllotment(id),
+  budgetService.getAllotmentModifications(id),
+  budgetService.getRealignmentTargets(id)
 ]);
+
+const roles = user.roles ?? [];
+const canModify = roles.some(role => role === 'budget_officer' || role === 'administrator');
+const modificationLabels: Record<string, string> = {
+  augmentation: 'Augmentation',
+  reduction: 'Reduction',
+  realignment_in: 'Realigned in',
+  realignment_out: 'Realigned out'
+};
 
 const peso = (n: number) => `₱${n.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const pct = (part: number) => (availability.allotment > 0 ? (part / availability.allotment) * 100 : 0);
@@ -61,6 +73,12 @@ const statusBadge: Record<string, string> = {
           </p>
         </div>
         <div class="flex gap-3">
+          {canModify && (
+            <button type="button" class="btn btn-secondary btn-md" onclick="document.getElementById('modify-dialog').showModal()">
+              <i class="pi pi-sliders-h mr-2" aria-hidden="true"></i>
+              Modify Allotment
+            </button>
+          )}
           <a href={`/budget/appropriations/${allotment.appropriationId}`} class="btn btn-secondary btn-md">
             <i class="pi pi-wallet mr-2"></i>
             View Appropriation
@@ -132,6 +150,9 @@ const statusBadge: Record<string, string> = {
           <div class="p-4 bg-blue-50 rounded-lg">
             <p class="text-xs text-gray-600 mb-1">Allotment</p>
             <p class="text-lg font-bold text-blue-700">{peso(availability.allotment)}</p>
+            {allotment.originalAmount !== null && (
+              <p class="text-xs text-gray-600 mt-1">Originally {peso(allotment.originalAmount)}</p>
+            )}
           </div>
           <div class="p-4 bg-green-50 rounded-lg">
             <p class="text-xs text-gray-600 mb-1">Approved Obligations</p>
@@ -176,6 +197,48 @@ const statusBadge: Record<string, string> = {
         </div>
       </div>
     </div>
+
+    <!-- Modifications -->
+    {modifications.length > 0 && (
+      <div class="card mb-6">
+        <div class="card-header">
+          <h3 class="text-lg font-semibold text-gray-900">Modifications ({modifications.length})</h3>
+        </div>
+        <div class="card-body overflow-x-auto">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Type</th>
+                <th>Reference</th>
+                <th>Details</th>
+                <th class="text-right">Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {modifications.map(m => (
+                <tr>
+                  <td class="text-sm whitespace-nowrap">{formatDate(m.modificationDate)}</td>
+                  <td class="text-sm">{modificationLabels[m.modificationType]}</td>
+                  <td class="text-sm font-mono">{m.reference}</td>
+                  <td class="text-sm text-gray-700">
+                    {m.relatedAllotmentId && (
+                      <a href={`/budget/allotments/${m.relatedAllotmentId}`} class="text-primary-600 hover:underline">
+                        {m.modificationType === 'realignment_out' ? 'To' : 'From'} {m.relatedObjectCode} – {m.relatedObjectName}
+                      </a>
+                    )}
+                    {m.reason && <span class="block">{m.reason}</span>}
+                  </td>
+                  <td class="text-right font-medium whitespace-nowrap">
+                    {m.modificationType === 'reduction' || m.modificationType === 'realignment_out' ? '−' : '+'}{peso(m.amount)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    )}
 
     <!-- Obligations -->
     <div class="card">
@@ -238,4 +301,85 @@ const statusBadge: Record<string, string> = {
       </div>
     </div>
   </div>
+
+  {canModify && (
+    <Modal id="modify-dialog" title="Modify allotment" width="medium">
+      <form id="modify-form" method="dialog" class="space-y-4">
+        <p class="text-sm text-gray-700">
+          The allotment stays at {peso(availability.allotment)} until the change is saved. Funds already obligated or
+          reserved by pending requests ({peso(availability.obligation + availability.pendingObligation)}) cannot be reduced or moved.
+        </p>
+        <fieldset>
+          <legend class="form-label form-label-required">Change</legend>
+          <div class="flex flex-wrap gap-4 mt-1">
+            <label class="flex items-center gap-2 text-sm"><input type="radio" name="type" value="augmentation" checked /> Augment</label>
+            <label class="flex items-center gap-2 text-sm"><input type="radio" name="type" value="reduction" /> Reduce</label>
+            <label class="flex items-center gap-2 text-sm"><input type="radio" name="type" value="realignment" disabled={realignTargets.length === 0} /> Realign to another allotment</label>
+          </div>
+        </fieldset>
+        <div id="modify-target" class="hidden">
+          <label for="modify-target-select" class="form-label form-label-required">Move funds to</label>
+          <select id="modify-target-select" name="targetAllotmentId" class="form-select">
+            <option value="">Choose an allotment of the same appropriation</option>
+            {realignTargets.map(t => (
+              <option value={t.id}>{t.objectCode} – {t.objectName} ({t.allotmentClass}, {peso(t.amount)})</option>
+            ))}
+          </select>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label for="modify-amount" class="form-label form-label-required">Amount</label>
+            <input id="modify-amount" name="amount" type="number" step="0.01" min="0.01" class="form-input" required />
+          </div>
+          <div>
+            <label for="modify-date" class="form-label form-label-required">Date</label>
+            <input id="modify-date" name="date" type="date" class="form-input" value={new Date().toLocaleDateString('en-CA')} required />
+          </div>
+        </div>
+        <div>
+          <label for="modify-reference" class="form-label form-label-required">Reference</label>
+          <input id="modify-reference" name="reference" type="text" maxlength="100" class="form-input" placeholder="e.g. SARO or approved modification request number" required />
+        </div>
+        <div>
+          <label for="modify-reason" class="form-label">Reason</label>
+          <textarea id="modify-reason" name="reason" rows="2" class="form-input"></textarea>
+        </div>
+        <p id="modify-error" class="form-error hidden" role="alert"></p>
+      </form>
+      <Fragment slot="footer">
+        <button type="button" class="btn btn-subtle" data-modal-close>Cancel</button>
+        <button type="submit" form="modify-form" class="btn btn-primary">Save change</button>
+      </Fragment>
+    </Modal>
+  )}
 </MainLayout>
+
+<script>
+  const modifyForm = document.getElementById('modify-form') as HTMLFormElement | null;
+  const target = document.getElementById('modify-target');
+  const targetSelect = document.getElementById('modify-target-select') as HTMLSelectElement | null;
+  modifyForm?.querySelectorAll<HTMLInputElement>('input[name="type"]').forEach(radio =>
+    radio.addEventListener('change', () => {
+      const realign = radio.checked && radio.value === 'realignment';
+      target?.classList.toggle('hidden', !realign);
+      if (targetSelect) targetSelect.required = realign;
+    })
+  );
+  modifyForm?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const error = document.getElementById('modify-error')!;
+    const data = new FormData(modifyForm);
+    const id = window.location.pathname.split('/').filter(Boolean).pop();
+    const response = await fetch(`/api/budget/allotments/${id}/modifications`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(Object.fromEntries(data.entries())),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (response.ok) window.location.reload();
+    else {
+      error.textContent = result.message || 'The allotment could not be modified';
+      error.classList.remove('hidden');
+    }
+  });
+</script>

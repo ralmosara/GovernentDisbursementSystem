@@ -75,6 +75,7 @@ const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 
         unposted.disposals.length && `${unposted.disposals.length} asset disposal${unposted.disposals.length === 1 ? '' : 's'}`,
         unposted.stockReceipts.length && `${unposted.stockReceipts.length} stock receipt${unposted.stockReceipts.length === 1 ? '' : 's'}`,
         unposted.stockIssues.length && `${unposted.stockIssues.length} stock issue${unposted.stockIssues.length === 1 ? '' : 's'}`,
+        unposted.stockAdjustments.length && `${unposted.stockAdjustments.length} stock count adjustment${unposted.stockAdjustments.length === 1 ? '' : 's'}`,
       ].filter(Boolean).join(', ')}.
       These were recorded before automatic posting existed, or their posting failed.
       <Fragment slot="actions">
