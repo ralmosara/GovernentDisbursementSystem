@@ -21,13 +21,18 @@ function queryBuilder() {
   return builder;
 }
 
-vi.mock('../../src/lib/db/connection', () => ({
-  db: {
+vi.mock('../../src/lib/db/connection', () => {
+  const db: any = {
     select: vi.fn(() => queryBuilder()),
     insert: vi.fn(() => queryBuilder()),
     update: vi.fn(() => queryBuilder()),
-  },
-}));
+    delete: vi.fn(() => queryBuilder()),
+  };
+  // Transactions run their callback against the same mock
+  db.transaction = vi.fn(async (fn: (tx: unknown) => unknown) => fn(db));
+  return { db };
+});
+vi.mock('../../src/lib/middleware/audit-logger', () => ({ logAudit: vi.fn() }));
 
 /**
  * Queue the results for one getBudgetAvailability() call.
@@ -238,6 +243,63 @@ describe('Budget Service', () => {
           purpose: 'x',
         })
       ).rejects.toThrow('Appropriation not found');
+    });
+  });
+
+  describe('Allotment Modifications', () => {
+    const allotment = (id: number, appropriationId = 1, amount = '1000.00') => ({ id, appropriationId, amount, originalAmount: null });
+    const change = (type: 'augmentation' | 'reduction' | 'realignment', amount: number, targetAllotmentId?: number) => ({
+      type,
+      amount,
+      targetAllotmentId,
+      reference: 'SARO-2025-001',
+      date: new Date(2025, 5, 1),
+    });
+
+    it('should not reduce an allotment below what is obligated or pending', async () => {
+      queuedResults.push([allotment(5)]); // locked allotment
+      queuedResults.push([{ total: 800 }]); // approved and pending obligations
+      const service = await getService();
+
+      await expect(service.modifyAllotment(5, change('reduction', 200.01), 1)).rejects.toThrow('Only ₱200.00 of this allotment is unobligated');
+    });
+
+    it('should reduce within the unobligated balance and keep the original amount', async () => {
+      queuedResults.push([allotment(5)]);
+      queuedResults.push([{ total: 800 }]);
+      const { db } = await import('../../src/lib/db/connection');
+      const service = await getService();
+
+      await service.modifyAllotment(5, change('reduction', 200), 1);
+      expect(db.update).toHaveBeenCalledTimes(1);
+      expect(db.insert).toHaveBeenCalledTimes(1);
+    });
+
+    it('should not augment beyond the unallotted appropriation', async () => {
+      queuedResults.push([allotment(5)]);
+      queuedResults.push([{ amount: '5000.00' }]); // appropriation
+      queuedResults.push([{ total: 4500 }]); // allotted so far
+      const service = await getService();
+
+      await expect(service.modifyAllotment(5, change('augmentation', 600), 1)).rejects.toThrow('Only ₱500.00 of the appropriation');
+    });
+
+    it('should realign only between allotments of the same appropriation', async () => {
+      queuedResults.push([allotment(5, 1), allotment(6, 2)]);
+      const service = await getService();
+
+      await expect(service.modifyAllotment(5, change('realignment', 100, 6), 1)).rejects.toThrow('same appropriation');
+    });
+
+    it('should record both sides of a realignment', async () => {
+      queuedResults.push([allotment(5, 1), allotment(6, 1)]);
+      queuedResults.push([{ total: 0 }]);
+      const { db } = await import('../../src/lib/db/connection');
+      const service = await getService();
+
+      await service.modifyAllotment(5, change('realignment', 300, 6), 1);
+      expect(db.update).toHaveBeenCalledTimes(2);
+      expect(db.insert).toHaveBeenCalledTimes(2);
     });
   });
 

@@ -72,6 +72,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
         quantityOnHand: data.quantityOnHand,
         minimumLevel: data.minimumLevel,
         maximumLevel: data.maximumLevel,
+        accountCode: data.accountCode,
         isActive: data.isActive,
       },
       user.id

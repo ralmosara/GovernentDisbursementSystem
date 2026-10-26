@@ -1,0 +1,235 @@
+---
+import MainLayout from '../../layouts/MainLayout.astro';
+import PageHeader from '../../components/ui/PageHeader.astro';
+import FilterBar from '../../components/ui/FilterBar.astro';
+import Banner from '../../components/ui/Banner.astro';
+import { db } from '../../lib/db/connection';
+import { fundClusters } from '../../lib/db/schema';
+import { ledgerService } from '../../lib/services/ledger.service';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const roles = user.roles ?? [];
+const canPost = roles.some(role => role === 'accountant' || role === 'administrator');
+
+const params = Astro.url.searchParams;
+const [y, m, d] = (params.get('date') ?? '').split('-').map(Number);
+const date = y && m && d ? new Date(y, m - 1, d) : new Date(new Date().getFullYear(), 0, 1);
+
+const [clusters, entries, accounts] = await Promise.all([
+  db.select({ id: fundClusters.id, code: fundClusters.code, name: fundClusters.name }).from(fundClusters),
+  ledgerService.getOpeningBalanceEntries(),
+  ledgerService.getAccounts(),
+]);
+const fundClusterId = parseInt(params.get('fund') ?? '') || clusters.find(c => c.code === '01')?.id || clusters[0]?.id;
+const existing = entries.find(e => e.fundClusterId === fundClusterId);
+const suggestions = existing ? [] : await ledgerService.getOpeningBalanceSuggestions(date);
+
+const titles = new Map(accounts.map(a => [a.code, a.title]));
+const balanceSheet = accounts.filter(a => ['1', '2', '3'].includes(a.code[0]));
+const groups = [...new Set(suggestions.map(s => s.group))];
+const amount = (value: number | undefined) => (value ? value.toFixed(2) : '');
+---
+
+<MainLayout title="Opening balances - Philippine Government FMS">
+  <PageHeader
+    title="Opening balances"
+    description="Balances that existed before the general ledger: property, supplies, advances, cash and payables on the day the books start."
+    breadcrumbs={[{ label: 'Accounting', href: '/accounting/journals' }, { label: 'Opening balances' }]}
+  />
+
+  <FilterBar action="/accounting/opening-balances" resetHref="/accounting/opening-balances" activeCount={[params.get('date'), params.get('fund')].filter(Boolean).length}>
+    <div class="form-group">
+      <label for="date" class="form-label">Opening date</label>
+      <input type="date" id="date" name="date" class="form-input" value={date.toLocaleDateString('en-CA')} />
+    </div>
+    <div class="form-group">
+      <label for="fund" class="form-label">Fund cluster</label>
+      <select id="fund" name="fund" class="form-select">
+        {clusters.map(c => <option value={c.id} selected={fundClusterId === c.id}>{c.code} – {c.name}</option>)}
+      </select>
+    </div>
+  </FilterBar>
+
+  {entries.length > 0 && (
+    <section class="card mb-6" aria-labelledby="entries-heading">
+      <div class="card-header"><h2 id="entries-heading" class="card-title">Opening entries in the books</h2></div>
+      <ul class="divide-y divide-gray-200">
+        {entries.map(e => (
+          <li class="px-5 py-3 text-sm flex flex-wrap gap-x-4">
+            <a href={`/accounting/journals/${e.id}`} class="font-medium text-primary-600 hover:underline">JEV {e.jevNo}</a>
+            <span>Fund cluster {clusters.find(c => c.id === e.fundClusterId)?.code}</span>
+            <span>as of {new Date(e.date).toLocaleDateString('en-PH', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
+            {e.status === 'reversed' && <span class="text-red-700">reversed</span>}
+          </li>
+        ))}
+      </ul>
+    </section>
+  )}
+
+  {existing ? (
+    <Banner appearance="info" title="This fund cluster already has opening balances">
+      Correct them with a <a href="/accounting/journals/create" class="underline">manual JEV</a>.
+    </Banner>
+  ) : (
+    <form id="opening-form" class="space-y-6" data-date={date.toLocaleDateString('en-CA')} data-fund={fundClusterId}>
+      <Banner appearance="info" title="How this works">
+        Lines below are suggested from the asset, inventory and cash advance records as of the opening date. Review them, untick
+        anything already in the books through a posted DV, and add cash, payables and other balances. The difference between
+        debits and credits goes to Accumulated Surplus/(Deficit). Records dated before the opening date are then left out of
+        automatic posting, so set the date to the day the books start.
+      </Banner>
+
+      {groups.map(group => (
+        <section class="card" aria-label={group}>
+          <div class="card-header"><h2 class="card-title">{group}</h2></div>
+          <div class="overflow-x-auto">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th scope="col" class="w-10"><span class="sr-only">Include</span></th>
+                  <th scope="col">Account</th>
+                  <th scope="col">Subsidiary</th>
+                  <th scope="col">Description</th>
+                  <th scope="col" class="!text-right">Debit</th>
+                  <th scope="col" class="!text-right">Credit</th>
+                </tr>
+              </thead>
+              <tbody>
+                {suggestions.filter(s => s.group === group).map(s => (
+                  <tr data-line data-account={s.accountCode} data-subsidiary={s.subsidiary ?? ''} data-description={s.description ?? ''}>
+                    <td><input type="checkbox" data-include checked aria-label={`Include ${s.subsidiary}`} /></td>
+                    <td class="text-sm"><span class="font-mono">{s.accountCode}</span> {titles.get(s.accountCode)}</td>
+                    <td class="text-sm font-mono">{s.subsidiary}</td>
+                    <td class="text-sm text-gray-700">{s.description}</td>
+                    <td><input type="number" step="0.01" min="0" class="form-input text-right w-36" data-debit value={amount(s.debit)} aria-label="Debit" /></td>
+                    <td><input type="number" step="0.01" min="0" class="form-input text-right w-36" data-credit value={amount(s.credit)} aria-label="Credit" /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ))}
+
+      <section class="card" aria-labelledby="other-heading">
+        <div class="card-header flex items-center justify-between">
+          <h2 id="other-heading" class="card-title">Cash, payables and other balances</h2>
+          <button type="button" id="add-line" class="btn btn-secondary btn-sm"><i class="pi pi-plus" aria-hidden="true"></i> Add line</button>
+        </div>
+        <div class="overflow-x-auto">
+          <table class="table">
+            <thead>
+              <tr>
+                <th scope="col">Account</th>
+                <th scope="col">Subsidiary</th>
+                <th scope="col" class="!text-right">Debit</th>
+                <th scope="col" class="!text-right">Credit</th>
+                <th scope="col"><span class="sr-only">Remove</span></th>
+              </tr>
+            </thead>
+            <tbody id="other-lines"></tbody>
+          </table>
+        </div>
+        <template id="line-template">
+          <tr data-line data-custom>
+            <td>
+              <select class="form-select" data-account-select aria-label="Account">
+                <option value="">Choose an account</option>
+                {balanceSheet.map(a => <option value={a.code}>{a.code} – {a.title}</option>)}
+              </select>
+            </td>
+            <td><input type="text" class="form-input" data-subsidiary-input aria-label="Subsidiary" placeholder="e.g. bank account, payee" /></td>
+            <td><input type="number" step="0.01" min="0" class="form-input text-right w-36" data-debit aria-label="Debit" /></td>
+            <td><input type="number" step="0.01" min="0" class="form-input text-right w-36" data-credit aria-label="Credit" /></td>
+            <td><button type="button" class="btn btn-subtle btn-sm" data-remove aria-label="Remove line"><i class="pi pi-trash" aria-hidden="true"></i></button></td>
+          </tr>
+        </template>
+      </section>
+
+      <section class="card p-5" aria-live="polite">
+        <dl class="grid grid-cols-1 sm:grid-cols-3 gap-4 text-sm">
+          <div><dt class="text-gray-600">Debits</dt><dd class="text-lg font-semibold tabular-nums" id="total-debit">₱0.00</dd></div>
+          <div><dt class="text-gray-600">Credits</dt><dd class="text-lg font-semibold tabular-nums" id="total-credit">₱0.00</dd></div>
+          <div><dt class="text-gray-600">Accumulated Surplus/(Deficit)</dt><dd class="text-lg font-semibold tabular-nums" id="total-equity">₱0.00</dd></div>
+        </dl>
+        <p id="opening-error" class="form-error hidden mt-3" role="alert"></p>
+        {canPost ? (
+          <button type="submit" class="btn btn-primary mt-4">Post opening balances</button>
+        ) : (
+          <p class="text-sm text-gray-600 mt-4">Only accountants can post opening balances.</p>
+        )}
+      </section>
+    </form>
+  )}
+</MainLayout>
+
+<script>
+  const form = document.getElementById('opening-form') as HTMLFormElement | null;
+  const peso = (n: number) => `₱${Math.abs(n).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  const centavos = (input: Element | null) => Math.round((parseFloat((input as HTMLInputElement | null)?.value || '0') || 0) * 100);
+
+  const lines = () =>
+    [...(form?.querySelectorAll<HTMLTableRowElement>('tr[data-line]') ?? [])]
+      .filter(row => row.dataset.custom !== undefined || (row.querySelector('[data-include]') as HTMLInputElement).checked)
+      .map(row => ({
+        accountCode: row.dataset.custom !== undefined ? (row.querySelector('[data-account-select]') as HTMLSelectElement).value : row.dataset.account!,
+        subsidiary: row.dataset.custom !== undefined ? (row.querySelector('[data-subsidiary-input]') as HTMLInputElement).value.trim() : row.dataset.subsidiary,
+        description: row.dataset.description || undefined,
+        debit: centavos(row.querySelector('[data-debit]')),
+        credit: centavos(row.querySelector('[data-credit]')),
+      }))
+      .filter(line => line.debit > 0 || line.credit > 0);
+
+  const update = () => {
+    const all = lines();
+    const debit = all.reduce((t, l) => t + l.debit, 0);
+    const credit = all.reduce((t, l) => t + l.credit, 0);
+    document.getElementById('total-debit')!.textContent = peso(debit / 100);
+    document.getElementById('total-credit')!.textContent = peso(credit / 100);
+    const equity = debit - credit;
+    document.getElementById('total-equity')!.textContent = `${peso(equity / 100)} ${equity >= 0 ? 'credit' : 'debit'}`;
+  };
+
+  form?.addEventListener('input', update);
+  form?.addEventListener('change', update);
+  document.getElementById('add-line')?.addEventListener('click', () => {
+    const template = document.getElementById('line-template') as HTMLTemplateElement;
+    document.getElementById('other-lines')!.append(template.content.cloneNode(true));
+  });
+  form?.addEventListener('click', event => {
+    const remove = (event.target as Element).closest('[data-remove]');
+    if (remove) {
+      remove.closest('tr')?.remove();
+      update();
+    }
+  });
+  form?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const error = document.getElementById('opening-error')!;
+    const all = lines();
+    if (all.some(l => !l.accountCode)) {
+      error.textContent = 'Choose the account for every added line';
+      error.classList.remove('hidden');
+      return;
+    }
+    if (!confirm('Post these opening balances? They can only be corrected with a manual JEV afterwards.')) return;
+    const response = await fetch('/api/accounting/opening-balances', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        fundClusterId: form.dataset.fund,
+        date: form.dataset.date,
+        lines: all.map(l => ({ ...l, debit: l.debit / 100, credit: l.credit / 100 })),
+      }),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (response.ok) window.location.href = `/accounting/journals/${result.id}`;
+    else {
+      error.textContent = result.message || 'The opening balances could not be posted';
+      error.classList.remove('hidden');
+    }
+  });
+  update();
+</script>

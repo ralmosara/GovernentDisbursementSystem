@@ -1090,6 +1090,88 @@ export class CashService {
 
     return await query;
   }
+
+  /**
+   * Approved DVs that could have paid a cash advance: same fund cluster and amount, and not
+   * already linked to another cash advance
+   */
+  async getDvsForCashAdvance(caId: number) {
+    const [ca] = await db.select().from(cashAdvances).where(eq(cashAdvances.id, caId)).limit(1);
+    if (!ca) return [];
+    return db
+      .select({ id: disbursementVouchers.id, dvNo: disbursementVouchers.dvNo, payeeName: disbursementVouchers.payeeName, amount: disbursementVouchers.amount, status: disbursementVouchers.status })
+      .from(disbursementVouchers)
+      .where(
+        and(
+          inArray(disbursementVouchers.status, ['approved', 'paid']),
+          isNull(disbursementVouchers.deletedAt),
+          eq(disbursementVouchers.fundClusterId, ca.fundClusterId),
+          eq(disbursementVouchers.amount, ca.amount),
+          sql`NOT EXISTS (SELECT 1 FROM ${cashAdvances} WHERE ${cashAdvances.dvId} = ${disbursementVouchers.id} AND ${cashAdvances.id} <> ${caId})`
+        )
+      )
+      .orderBy(desc(disbursementVouchers.dvDate));
+  }
+
+  /** Release an approved cash advance paid through a DV, and move it into Advances to Officers */
+  async releaseCashAdvance(caId: number, dvId: number, userId: number): Promise<void> {
+    const [ca] = await db.select().from(cashAdvances).where(eq(cashAdvances.id, caId)).limit(1);
+    if (!ca) throw new Error('Cash advance not found');
+    if (ca.status !== 'approved') throw new Error(`Only approved cash advances can be released (this one is ${ca.status})`);
+    if (!dvId) throw new Error('Choose the disbursement voucher that paid this cash advance');
+
+    const eligible = await this.getDvsForCashAdvance(caId);
+    if (!eligible.some(dv => dv.id === dvId)) {
+      throw new Error('That DV cannot pay this advance. It must be approved, in the same fund cluster, for the same amount, and not linked to another cash advance.');
+    }
+
+    await db.update(cashAdvances).set({ status: 'released', dvId }).where(eq(cashAdvances.id, caId));
+    await ledgerService.tryPost(`cash advance ${ca.caNo}`, () => ledgerService.postCashAdvanceGranted(caId, userId));
+  }
+
+  /** Record a released advance's liquidation; spending above the advance is reimbursed separately */
+  async liquidateCashAdvance(caId: number, data: { dateLiquidated: Date; totalExpenses: number; remarks: string }, userId: number): Promise<{ refund: number; shortage: number }> {
+    const [ca] = await db.select().from(cashAdvances).where(eq(cashAdvances.id, caId)).limit(1);
+    if (!ca) throw new Error('Cash advance not found');
+    if (ca.status !== 'released') throw new Error('Cash advance must be released before liquidation');
+    if (!(data.totalExpenses >= 0)) throw new Error('Enter the total expenses supported by receipts');
+
+    const advance = Math.round(parseFloat(ca.amount) * 100);
+    const spent = Math.round(data.totalExpenses * 100);
+    const refund = Math.max(0, advance - spent) / 100;
+    const shortage = Math.max(0, spent - advance) / 100;
+
+    await db
+      .update(cashAdvances)
+      .set({
+        status: 'liquidated',
+        dateLiquidated: data.dateLiquidated,
+        totalExpenses: (spent / 100).toFixed(2),
+        refundAmount: refund.toFixed(2),
+        remarks: data.remarks,
+      })
+      .where(eq(cashAdvances.id, caId));
+    if (ca.dvId) {
+      await ledgerService.tryPost(`cash advance ${ca.caNo} liquidation`, () => ledgerService.postCashAdvanceLiquidation(caId, userId));
+    }
+    return { refund, shortage };
+  }
+
+  /** A released advance returned unused: the whole amount is refunded */
+  async returnCashAdvance(caId: number, userId: number): Promise<void> {
+    const [ca] = await db.select().from(cashAdvances).where(eq(cashAdvances.id, caId)).limit(1);
+    if (!ca) throw new Error('Cash advance not found');
+    const wasReleased = ca.status === 'released';
+    if (!wasReleased && ca.status !== 'draft' && ca.status !== 'approved') throw new Error(`A ${ca.status} cash advance cannot be returned`);
+
+    await db
+      .update(cashAdvances)
+      .set(wasReleased ? { status: 'returned', dateLiquidated: new Date(), totalExpenses: '0.00', refundAmount: ca.amount } : { status: 'returned' })
+      .where(eq(cashAdvances.id, caId));
+    if (wasReleased && ca.dvId) {
+      await ledgerService.tryPost(`cash advance ${ca.caNo} return`, () => ledgerService.postCashAdvanceLiquidation(caId, userId));
+    }
+  }
 }
 
 // Export singleton instance

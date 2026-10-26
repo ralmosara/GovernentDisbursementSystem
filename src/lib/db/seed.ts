@@ -163,6 +163,7 @@ export async function seed() {
 
     // Try to insert or update admin user
     await db.insert(users).values({
+      employeeNo: 'ADMIN-0001',
       username: 'admin',
       email: 'admin@agency.gov.ph',
       passwordHash: hashedPassword,

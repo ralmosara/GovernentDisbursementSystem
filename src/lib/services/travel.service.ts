@@ -11,6 +11,7 @@ import {
 } from '../db/schema';
 import { eq, and, desc, sql, gte, lte, or, isNull } from 'drizzle-orm';
 import { generateSerialNumber } from '../utils/serial-generator';
+import { ledgerService } from './ledger.service';
 
 export interface ItineraryInput {
   fundClusterId: number;
@@ -609,6 +610,12 @@ export class TravelService {
         newValues: { status: 'approved', reviewedBy, reviewedDate: new Date() },
       });
 
+      // Travels without a cash advance were paid by reimbursement DV; nothing to liquidate
+      await ledgerService.tryPost(`liquidation ${lr.lrNo}`, async () => {
+        const [iot] = await db.select({ dvId: itineraryOfTravel.dvId }).from(itineraryOfTravel).where(eq(itineraryOfTravel.id, lr.iotId)).limit(1);
+        if (iot?.dvId) await ledgerService.postTravelLiquidation(lrId, reviewedBy);
+      });
+
       return { success: true };
     } catch (error) {
       console.error('Error approving liquidation:', error);
@@ -907,6 +914,12 @@ export class TravelService {
         tableName: 'itinerary_of_travel',
         recordId: iotId,
         newValues: { dvId },
+      });
+
+      // Posts now if the DV is already approved; otherwise when its approval completes
+      await ledgerService.tryPost(`travel ${iot.iotNo} advance`, async () => {
+        const [dv] = await db.select({ status: disbursementVouchers.status }).from(disbursementVouchers).where(eq(disbursementVouchers.id, dvId)).limit(1);
+        if (dv?.status === 'approved' || dv?.status === 'paid') await ledgerService.postTravelAdvanceGranted(iotId, userId);
       });
 
       return { success: true };

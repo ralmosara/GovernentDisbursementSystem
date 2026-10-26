@@ -83,10 +83,10 @@ export async function validateCSRFToken(
         submittedToken = body.csrf_token || body.csrfToken;
       } else if (contentType?.includes('application/x-www-form-urlencoded')) {
         const formData = await request.clone().formData();
-        submittedToken = formData.get('csrf_token')?.toString();
+        submittedToken = formData.get('csrf_token')?.toString() ?? null;
       } else if (contentType?.includes('multipart/form-data')) {
         const formData = await request.clone().formData();
-        submittedToken = formData.get('csrf_token')?.toString();
+        submittedToken = formData.get('csrf_token')?.toString() ?? null;
       }
     } catch (error) {
       console.error('Error parsing request for CSRF token:', error);
@@ -109,7 +109,7 @@ export async function validateCSRFToken(
  * @param b - Second string
  * @returns {boolean} True if strings are equal
  */
-function timingSafeEqual(a: string, b: string): boolean {
+export function timingSafeEqual(a: string, b: string): boolean {
   if (a.length !== b.length) {
     return false;
   }

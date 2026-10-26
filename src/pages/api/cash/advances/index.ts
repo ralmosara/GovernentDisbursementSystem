@@ -2,7 +2,7 @@ import type { APIRoute } from 'astro';
 import { cashService } from '../../../../lib/services/cash.service';
 import { logCreate } from '../../../../lib/middleware/audit-logger';
 
-export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
+export const POST: APIRoute = async ({ request, locals }) => {
   try {
     const user = locals.user;
 
@@ -54,8 +54,7 @@ export const POST: APIRoute = async ({ request, locals, clientAddress }) => {
         status: 'draft',
       },
       user.id,
-      clientAddress,
-      request.headers.get('user-agent') || undefined
+      request
     );
 
     return new Response(

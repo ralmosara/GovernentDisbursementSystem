@@ -71,6 +71,7 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
       unitCost: data.unitCost,
       minimumLevel: data.minimumLevel,
       maximumLevel: data.maximumLevel,
+      accountCode: data.accountCode,
       isActive: data.isActive,
     });
 

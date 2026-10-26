@@ -1,0 +1,118 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import PageHeader from '../../../components/ui/PageHeader.astro';
+import FilterBar from '../../../components/ui/FilterBar.astro';
+import Banner from '../../../components/ui/Banner.astro';
+import StatementHeader from '../../../components/reports/StatementHeader.astro';
+import { db } from '../../../lib/db/connection';
+import { fundClusters } from '../../../lib/db/schema';
+import { financialStatementsService } from '../../../lib/services/financial-statements.service';
+import { getSetting } from '../../../lib/services/settings.service';
+import { statementAmount, longDate, dateParam } from '../../../lib/ui/statement';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const params = Astro.url.searchParams;
+const today = new Date();
+const to = dateParam(params.get('to'), new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59), true);
+const from = dateParam(params.get('from'), new Date(to.getFullYear(), 0, 1), false);
+const fundClusterId = parseInt(params.get('fund') ?? '') || undefined;
+
+const [statement, clusters, agencyName] = await Promise.all([
+  financialStatementsService.getChangesInEquity(from, to, fundClusterId),
+  db.select({ id: fundClusters.id, code: fundClusters.code, name: fundClusters.name }).from(fundClusters),
+  getSetting('agency_name').catch(() => ''),
+]);
+
+const cluster = clusters.find(c => c.id === fundClusterId);
+const dayBefore = new Date(from.getTime() - 1);
+---
+
+<MainLayout title="Statement of Changes in Net Assets/Equity - Philippine Government FMS">
+  <PageHeader
+    title="Statement of Changes in Net Assets/Equity"
+    description="How net assets/equity moved during the period: the surplus or deficit, and entries made directly to equity."
+    breadcrumbs={[{ label: 'Reports', href: '/reports' }, { label: 'Financial statements', href: '/reports/statements' }, { label: 'Changes in net assets/equity' }]}
+  >
+    <button slot="actions" type="button" class="btn btn-secondary" onclick="window.print()">
+      <i class="pi pi-print" aria-hidden="true"></i>
+      Print
+    </button>
+  </PageHeader>
+
+  <FilterBar action="/reports/statements/changes-in-equity" resetHref="/reports/statements/changes-in-equity" activeCount={[params.get('from'), params.get('to'), fundClusterId].filter(Boolean).length}>
+    <div class="form-group">
+      <label for="from" class="form-label">From</label>
+      <input type="date" id="from" name="from" class="form-input" value={from.toLocaleDateString('en-CA')} />
+    </div>
+    <div class="form-group">
+      <label for="to" class="form-label">To</label>
+      <input type="date" id="to" name="to" class="form-input" value={to.toLocaleDateString('en-CA')} />
+    </div>
+    <div class="form-group">
+      <label for="fund" class="form-label">Fund cluster</label>
+      <select id="fund" name="fund" class="form-select">
+        <option value="">All funds (consolidated)</option>
+        {clusters.map(c => <option value={c.id} selected={fundClusterId === c.id}>{c.code} – {c.name}</option>)}
+      </select>
+    </div>
+  </FilterBar>
+
+  {!statement.reconciles && (
+    <Banner appearance="error" title="The movements don't add up to the closing balance" class="mb-6">
+      This points to an unbalanced entry. Check the <a href={`/accounting/trial-balance?asOf=${to.toLocaleDateString('en-CA')}`} class="underline">trial balance</a>.
+    </Banner>
+  )}
+
+  <article class="card max-w-3xl" aria-label="Statement of Changes in Net Assets/Equity">
+    <StatementHeader
+      agencyName={agencyName}
+      title="Statement of Changes in Net Assets/Equity"
+      fund={cluster ? `Fund Cluster ${cluster.code} – ${cluster.name}` : 'All fund clusters'}
+      period={`For the period ${longDate(from)} to ${longDate(to)}`}
+    />
+    <table class="table">
+      <thead>
+        <tr>
+          <th scope="col"><span class="sr-only">Item</span></th>
+          <th scope="col" class="!text-right">Accumulated surplus/(deficit)</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr class="font-semibold">
+          <td>Balance at {longDate(dayBefore)}</td>
+          <td class="text-right tabular-nums">{statementAmount(statement.opening)}</td>
+        </tr>
+        <tr><th scope="rowgroup" colspan="2" class="!text-gray-700">Changes during the period</th></tr>
+        <tr>
+          <td class="pl-6">
+            <a href={`/reports/statements/financial-performance?from=${from.toLocaleDateString('en-CA')}&to=${to.toLocaleDateString('en-CA')}${fundClusterId ? `&fund=${fundClusterId}` : ''}`} class="hover:underline">
+              Surplus/(deficit) for the period
+            </a>
+          </td>
+          <td class="text-right tabular-nums">{statementAmount(statement.surplus)}</td>
+        </tr>
+        {statement.adjustments.map(a => (
+          <tr>
+            <td class="pl-6">
+              <a href={`/accounting/general-ledger?account=${a.code}${fundClusterId ? `&fund=${fundClusterId}` : ''}`} class="hover:underline">{a.title}</a>
+              <span class="block text-xs text-gray-500">Entries made directly to equity</span>
+            </td>
+            <td class="text-right tabular-nums">{statementAmount(a.amount)}</td>
+          </tr>
+        ))}
+        <tr class="font-semibold">
+          <td>Total changes during the period</td>
+          <td class="text-right tabular-nums border-t border-gray-200">{statementAmount(statement.changes)}</td>
+        </tr>
+      </tbody>
+      <tfoot>
+        <tr class="border-t-2 border-gray-300 font-semibold">
+          <th scope="row" class="!text-sm !text-gray-800">Balance at {longDate(to)}</th>
+          <td class="text-right tabular-nums">{statementAmount(statement.closing)}</td>
+        </tr>
+      </tfoot>
+    </table>
+  </article>
+</MainLayout>

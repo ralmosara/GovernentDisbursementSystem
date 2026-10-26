@@ -35,10 +35,10 @@ export interface WorkflowStageData {
   stage: ApprovalStage;
   stageOrder: number;
   approverRoleId: number;
-  approverUserId?: number;
-  status: ApprovalStatus;
-  comments?: string;
-  actionDate?: Date;
+  approverUserId?: number | null;
+  status: ApprovalStatus | null;
+  comments?: string | null;
+  actionDate?: Date | null;
 }
 
 export class ApprovalService {
@@ -252,6 +252,8 @@ export class ApprovalService {
     // Fully approved: recognise the expense and liability in the books
     if (!outcome.nextStage) {
       await ledgerService.tryPost(`DV #${dvId} approval`, () => ledgerService.postDvApproval(dvId, userId));
+      await ledgerService.tryPost(`DV #${dvId} advances`, () => ledgerService.postAdvancesForDv(dvId, userId));
+      await ledgerService.tryPost(`DV #${dvId} stock receipts`, () => ledgerService.postStockReceiptsForDv(dvId, userId));
     }
 
     if (outcome.nextStage) {

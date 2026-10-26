@@ -1,5 +1,8 @@
 ---
 import MainLayout from '../../../layouts/MainLayout.astro';
+import Modal from '../../../components/ui/Modal.astro';
+import { cashService } from '../../../lib/services/cash.service';
+import { ledgerService } from '../../../lib/services/ledger.service';
 import { db } from '../../../lib/db/connection';
 import { cashAdvances, fundClusters, users, disbursementVouchers } from '../../../lib/db/schema';
 import { eq } from 'drizzle-orm';
@@ -92,6 +95,13 @@ if (cashAdvance.liquidationDvId) {
   }
 }
 
+// DVs that could have paid the advance, offered when releasing it
+const releaseDvs = cashAdvance.status === 'approved' ? await cashService.getDvsForCashAdvance(id) : [];
+const [grantJev, liquidationJev] = await Promise.all([
+  ledgerService.findBySource('ca_granted', id).catch(() => null),
+  ledgerService.findBySource('ca_liquidation', id).catch(() => null),
+]);
+
 // Calculate days outstanding
 const today = new Date();
 const issuedDate = new Date(cashAdvance.dateIssued);
@@ -123,7 +133,7 @@ if (cashAdvance.dueDateReturn && cashAdvance.status !== 'liquidated') {
         </button>
       )}
       {cashAdvance.status === 'approved' && (
-        <button class="btn btn-primary" onclick={`updateStatus(${id}, 'released')`}>
+        <button class="btn btn-primary" onclick="document.getElementById('release-dialog').showModal()">
           <i class="pi pi-send"></i>
           Release
         </button>
@@ -301,6 +311,15 @@ if (cashAdvance.dueDateReturn && cashAdvance.status !== 'liquidated') {
         <p class="no-data">No disbursement voucher has been created for this cash advance yet.</p>
       )}
 
+      {(grantJev || liquidationJev) && (
+        <p class="document-meta">
+          In the books:
+          {grantJev && <a href={`/accounting/journals/${grantJev.id}`}> advance granted (JEV {grantJev.jevNo})</a>}
+          {grantJev && liquidationJev && ' · '}
+          {liquidationJev && <a href={`/accounting/journals/${liquidationJev.id}`}>liquidated (JEV {liquidationJev.jevNo})</a>}
+        </p>
+      )}
+
       {liquidationDV ? (
         <div class="document-item">
           <div class="document-icon badge-success">
@@ -333,6 +352,39 @@ if (cashAdvance.dueDateReturn && cashAdvance.status !== 'liquidated') {
       ) : null}
     </div>
   </div>
+
+  {cashAdvance.status === 'approved' && (
+    <Modal id="release-dialog" title={`Release ${cashAdvance.caNo}`} width="medium">
+      <form id="release-form" method="dialog" class="space-y-3">
+        <p class="text-sm text-gray-700">
+          Choose the disbursement voucher that paid this advance. Releasing it records the amount under
+          Advances to Officers and Employees until it is liquidated.
+        </p>
+        {releaseDvs.length === 0 ? (
+          <p class="text-sm text-gray-700">
+            No approved DV matches: it must be in fund cluster {cashAdvance.fundCluster?.code}, for exactly
+            ₱{Number(cashAdvance.amount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}, and not linked to another cash advance.
+            <a href="/disbursements/create" class="text-primary-600 hover:underline">Prepare the DV</a> and release the advance once it is approved.
+          </p>
+        ) : (
+          <div>
+            <label for="release-dv" class="form-label form-label-required">Disbursement voucher</label>
+            <select id="release-dv" name="dvId" class="form-select" required>
+              <option value="">Choose a DV</option>
+              {releaseDvs.map(dv => (
+                <option value={dv.id}>{dv.dvNo} · {dv.payeeName} · {dv.status}</option>
+              ))}
+            </select>
+          </div>
+        )}
+        <p id="release-error" class="form-error hidden" role="alert"></p>
+      </form>
+      <Fragment slot="footer">
+        <button type="button" class="btn btn-subtle" data-modal-close>Cancel</button>
+        <button type="submit" form="release-form" class="btn btn-primary" disabled={releaseDvs.length === 0}>Release</button>
+      </Fragment>
+    </Modal>
+  )}
 
   {cashAdvance.remarks && (
     <div class="card">
@@ -376,6 +428,24 @@ if (cashAdvance.dueDateReturn && cashAdvance.status !== 'liquidated') {
 
   // Make function available globally
   (window as any).updateStatus = updateStatus;
+
+  const releaseForm = document.getElementById('release-form') as HTMLFormElement | null;
+  releaseForm?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const error = document.getElementById('release-error')!;
+    const id = window.location.pathname.split('/').filter(Boolean).pop();
+    const response = await fetch(`/api/cash/advances/${id}/status`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'released', dvId: (releaseForm.elements.namedItem('dvId') as HTMLSelectElement | null)?.value }),
+    });
+    const data = await response.json();
+    if (response.ok) window.location.reload();
+    else {
+      error.textContent = data.error || 'The cash advance could not be released';
+      error.classList.remove('hidden');
+    }
+  });
 </script>
 
 <style>

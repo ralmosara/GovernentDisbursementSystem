@@ -89,6 +89,24 @@
         <p class="mt-1 text-xs text-gray-500">Minimum acquisition cost to be capitalized as an asset</p>
       </div>
 
+      <!-- PPE account -->
+      <div class="form-group">
+        <label for="accountCode" class="block text-sm font-medium text-gray-700">
+          PPE account
+        </label>
+        <select
+          id="accountCode"
+          v-model="formData.accountCode"
+          class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+        >
+          <option value="">Machinery (default)</option>
+          <option v-for="account in PPE_ACCOUNTS" :key="account.code" :value="account.code">
+            {{ account.code }} – {{ account.title }}
+          </option>
+        </select>
+        <p class="mt-1 text-xs text-gray-500">General ledger account these assets are carried in; depreciation and disposals post to its accumulated depreciation</p>
+      </div>
+
       <!-- Is Active (checkbox) -->
       <div class="form-group">
         <div class="flex items-start">
@@ -150,6 +168,7 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue';
+import { PPE_ACCOUNTS } from '../../../lib/constants/property';
 
 interface Props {
   categoryId?: string;
@@ -163,6 +182,7 @@ interface FormData {
   usefulLife?: number;
   depreciationMethod?: string;
   capitalizationThreshold?: string;
+  accountCode: string;
   isActive: boolean;
 }
 
@@ -172,6 +192,7 @@ const formData = ref<FormData>({
   usefulLife: undefined,
   depreciationMethod: '',
   capitalizationThreshold: '',
+  accountCode: '',
   isActive: true,
 });
 
@@ -203,6 +224,7 @@ async function loadAssetCategory() {
       usefulLife: data.usefulLife,
       depreciationMethod: data.depreciationMethod || '',
       capitalizationThreshold: data.capitalizationThreshold || '',
+      accountCode: data.accountCode || '',
       isActive: data.isActive,
     };
   } catch (error) {

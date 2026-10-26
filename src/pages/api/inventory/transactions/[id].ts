@@ -62,7 +62,7 @@ export const DELETE: APIRoute = async ({ params, locals }) => {
       });
     }
 
-    await assetService.deleteInventoryTransaction(id);
+    await assetService.deleteInventoryTransaction(id, user.id);
 
     return new Response(JSON.stringify({ success: true }), {
       status: 200,

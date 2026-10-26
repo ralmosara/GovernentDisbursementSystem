@@ -34,6 +34,7 @@ export const navSections: NavSection[] = [
       { href: '/budget/appropriations', label: 'Appropriations', icon: 'pi-wallet' },
       { href: '/budget/allotments', label: 'Allotments', icon: 'pi-chart-pie' },
       { href: '/budget/obligations', label: 'Obligations', icon: 'pi-book' },
+      { href: '/budget/revenue-targets', label: 'Revenue targets', icon: 'pi-flag' },
     ],
   },
   {
@@ -56,6 +57,8 @@ export const navSections: NavSection[] = [
       { href: '/accounting/trial-balance', label: 'Trial balance', icon: 'pi-calculator' },
       { href: '/accounting/chart-of-accounts', label: 'Chart of accounts', icon: 'pi-sitemap' },
       { href: '/accounting/nca', label: 'NCA registry', icon: 'pi-wallet' },
+      { href: '/accounting/depreciation', label: 'Depreciation', icon: 'pi-chart-line' },
+      { href: '/accounting/opening-balances', label: 'Opening balances', icon: 'pi-flag-fill' },
       { href: '/accounting/year-end', label: 'Year-end closing', icon: 'pi-lock' },
     ],
   },
@@ -152,6 +155,7 @@ export const navSections: NavSection[] = [
     icon: 'pi-chart-bar',
     items: [
       { href: '/reports', label: 'All reports', icon: 'pi-th-large' },
+      { href: '/reports/statements', label: 'Financial statements', icon: 'pi-building-columns' },
       { href: '/reports/insights', label: 'Process insights', icon: 'pi-stopwatch' },
       { href: '/reports/bir/taxes-withheld', label: 'BIR: taxes withheld / 2307', icon: 'pi-percentage' },
       { href: '/reports/cash/disbursements-issued', label: 'Checks & ADA issued (RCI/RADAI)', icon: 'pi-credit-card' },

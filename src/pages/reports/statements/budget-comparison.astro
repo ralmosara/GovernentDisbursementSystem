@@ -1,0 +1,123 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import PageHeader from '../../../components/ui/PageHeader.astro';
+import FilterBar from '../../../components/ui/FilterBar.astro';
+import StatementHeader from '../../../components/reports/StatementHeader.astro';
+import { db } from '../../../lib/db/connection';
+import { fundClusters } from '../../../lib/db/schema';
+import { financialStatementsService } from '../../../lib/services/financial-statements.service';
+import { getSetting } from '../../../lib/services/settings.service';
+import { statementAmount } from '../../../lib/ui/statement';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const params = Astro.url.searchParams;
+const currentYear = new Date().getFullYear();
+const year = parseInt(params.get('year') ?? '') || currentYear;
+const fundClusterId = parseInt(params.get('fund') ?? '') || undefined;
+
+const [statement, clusters, agencyName] = await Promise.all([
+  financialStatementsService.getBudgetComparison(year, fundClusterId),
+  db.select({ id: fundClusters.id, code: fundClusters.code, name: fundClusters.name }).from(fundClusters),
+  getSetting('agency_name').catch(() => ''),
+]);
+
+const cluster = clusters.find(c => c.id === fundClusterId);
+const years = Array.from({ length: 6 }, (_, i) => currentYear + 1 - i);
+const amountCells = (line: { original: number; final: number; actual: number; difference: number }) =>
+  [line.original, line.final, line.actual, line.difference];
+---
+
+<MainLayout title="Statement of Comparison of Budget and Actual Amounts - Philippine Government FMS">
+  <PageHeader
+    title="Statement of Comparison of Budget and Actual Amounts"
+    description="Budgeted against collected receipts, and allotments by class against obligations incurred, for the fiscal year (PPSAS 24)."
+    breadcrumbs={[{ label: 'Reports', href: '/reports' }, { label: 'Financial statements', href: '/reports/statements' }, { label: 'Budget and actual' }]}
+  >
+    <button slot="actions" type="button" class="btn btn-secondary" onclick="window.print()">
+      <i class="pi pi-print" aria-hidden="true"></i>
+      Print
+    </button>
+  </PageHeader>
+
+  <FilterBar action="/reports/statements/budget-comparison" resetHref="/reports/statements/budget-comparison" activeCount={[params.get('year'), fundClusterId].filter(Boolean).length}>
+    <div class="form-group">
+      <label for="year" class="form-label">Fiscal year</label>
+      <select id="year" name="year" class="form-select">
+        {years.map(y => <option value={y} selected={y === year}>{y}</option>)}
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="fund" class="form-label">Fund cluster</label>
+      <select id="fund" name="fund" class="form-select">
+        <option value="">All funds (consolidated)</option>
+        {clusters.map(c => <option value={c.id} selected={fundClusterId === c.id}>{c.code} – {c.name}</option>)}
+      </select>
+    </div>
+  </FilterBar>
+
+  <article class="card" aria-label="Statement of Comparison of Budget and Actual Amounts">
+    <StatementHeader
+      agencyName={agencyName}
+      title="Statement of Comparison of Budget and Actual Amounts"
+      fund={cluster ? `Fund Cluster ${cluster.code} – ${cluster.name}` : 'All fund clusters'}
+      period={`For the year ended December 31, ${year}`}
+    />
+    <div class="relative overflow-x-auto">
+      <table class="table">
+        <thead>
+          <tr>
+            <th scope="col" rowspan="2"><span class="sr-only">Particulars</span></th>
+            <th scope="colgroup" colspan="2" class="!text-center">Budgeted amounts</th>
+            <th scope="col" rowspan="2" class="!text-right">Actual amounts on comparable basis</th>
+            <th scope="col" rowspan="2" class="!text-right">Difference: final budget and actual</th>
+          </tr>
+          <tr>
+            <th scope="col" class="!text-right">Original</th>
+            <th scope="col" class="!text-right">Final</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="bg-gray-50"><th scope="rowgroup" colspan="5" class="!text-gray-800">Receipts</th></tr>
+          {statement.receipts.lines.length === 0 && (
+            <tr><td colspan="5" class="text-center text-gray-500 py-4">No revenue targets or collections for {year}. Set targets under <a href="/budget/revenue-targets" class="underline">Budget → Revenue targets</a>.</td></tr>
+          )}
+          {statement.receipts.lines.map(line => (
+            <tr>
+              <td class="pl-6">{line.label}</td>
+              {amountCells(line).map(v => <td class="text-right tabular-nums">{statementAmount(v)}</td>)}
+            </tr>
+          ))}
+          <tr class="font-semibold">
+            <td>{statement.receipts.total.label}</td>
+            {amountCells(statement.receipts.total).map(v => <td class="text-right tabular-nums border-t border-gray-200">{statementAmount(v)}</td>)}
+          </tr>
+        </tbody>
+        <tbody>
+          <tr class="bg-gray-50"><th scope="rowgroup" colspan="5" class="!text-gray-800">Payments</th></tr>
+          {statement.lines.length === 0 && (
+            <tr><td colspan="5" class="text-center text-gray-500 py-6">No appropriations or allotments recorded for {year}.</td></tr>
+          )}
+          {statement.lines.map(line => (
+            <tr>
+              <td class="pl-6">{line.label}</td>
+              {amountCells(line).map(v => <td class="text-right tabular-nums">{statementAmount(v)}</td>)}
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr class="border-t-2 border-gray-300 font-semibold">
+            <th scope="row" class="!text-sm !text-gray-800">{statement.total.label.toUpperCase()}</th>
+            {amountCells(statement.total).map(v => <td class="text-right tabular-nums">{statementAmount(v)}</td>)}
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </article>
+
+  <ul class="text-sm text-gray-600 mt-6 max-w-3xl list-disc pl-5 space-y-1">
+    <li>Payments: the original budget is each allotment as first released, and the final budget is after augmentations, reductions and realignments. Actual amounts are approved obligations, the basis the budget is prepared on.</li>
+    <li>Receipts: budgeted amounts are the revenue targets; actual amounts are official receipts and collections on receivables dated in the year.</li>
+  </ul>
+</MainLayout>

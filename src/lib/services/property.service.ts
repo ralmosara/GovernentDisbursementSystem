@@ -2,6 +2,8 @@ import { db } from '../db/connection';
 import { propertyIssuances, fixedAssets, assetCategories } from '../db/schema';
 import { and, asc, desc, eq, like, sql } from 'drizzle-orm';
 import { logAudit } from '../middleware/audit-logger';
+import { CAPITALIZATION_THRESHOLD } from '../constants/property';
+import { ledgerService } from './ledger.service';
 
 /**
  * Property accountability. Every item of property in use is issued to one accountable
@@ -10,8 +12,7 @@ import { logAudit } from '../middleware/audit-logger';
  * issuance and opens the next; a return sends the item back to the supply office.
  */
 
-/** PPE capitalization threshold (COA Circular No. 2022-004) */
-export const CAPITALIZATION_THRESHOLD = 50000;
+export { CAPITALIZATION_THRESHOLD };
 
 export function documentTypeFor(acquisitionCost: number): 'PAR' | 'ICS' {
   return acquisitionCost >= CAPITALIZATION_THRESHOLD ? 'PAR' : 'ICS';
@@ -92,6 +93,10 @@ export class PropertyService {
     });
 
     await logAudit({ userId, action: 'CREATE', tableName: 'property_issuances', recordId: id, newValues: { documentNo, assetNo: asset.assetNo, issuedTo: input.issuedTo } });
+    // Semi-expendable property is expensed when first issued (later transfers post nothing)
+    if (documentType === 'ICS') {
+      await ledgerService.tryPost(`ICS ${documentNo}`, () => ledgerService.postSemiExpendableIssue(asset.id, userId));
+    }
     return { id, documentNo };
   }
 

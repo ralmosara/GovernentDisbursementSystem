@@ -43,6 +43,9 @@ export const ACCESS_RULES: AccessRule[] = [
   // Budget
   { pattern: '/api/budget/appropriations', roles: ['budget_officer'], description: 'Record appropriations' },
   { pattern: '/api/budget/allotments', roles: ['budget_officer'], description: 'Record allotments' },
+  { pattern: '/api/budget/allotments/*/modifications', roles: ['budget_officer'], description: 'Augment, reduce or realign allotments' },
+  { pattern: '/api/budget/revenue-targets', roles: ['budget_officer'], description: 'Set budgeted receipts per revenue source' },
+  { pattern: '/api/budget/revenue-targets/*', roles: ['budget_officer'], description: 'Remove budgeted receipts' },
   { pattern: '/api/budget/obligations/*/approve', roles: ['budget_officer'], description: 'Certify obligation requests (ORS/BURS)' },
   { pattern: '/api/budget/obligations/*/reject', roles: ['budget_officer'], description: 'Reject obligation requests' },
   { pattern: '/api/budget/obligations', roles: ['budget_officer', 'division_staff', 'accountant'], description: 'Prepare obligation requests' },

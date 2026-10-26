@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
+import { SUPPLY_ACCOUNTS } from '../../../lib/constants/inventory';
 
 interface Props {
   initialData?: any;
@@ -16,6 +17,7 @@ const formData = ref({
   quantityOnHand: props.initialData?.quantityOnHand || 0,
   minimumLevel: props.initialData?.minimumLevel || 0,
   maximumLevel: props.initialData?.maximumLevel || 0,
+  accountCode: props.initialData?.accountCode || SUPPLY_ACCOUNTS[0].code,
   isActive: props.initialData?.isActive !== false,
 });
 
@@ -184,6 +186,23 @@ function handleCancel() {
           :class="{ 'border-red-500': errors.unitCost }"
         />
         <p v-if="errors.unitCost" class="mt-1 text-sm text-red-600">{{ errors.unitCost }}</p>
+      </div>
+
+      <!-- Inventory account -->
+      <div class="md:col-span-2">
+        <label for="accountCode" class="block text-sm font-medium text-gray-700">
+          Inventory account
+        </label>
+        <select
+          id="accountCode"
+          v-model="formData.accountCode"
+          class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500"
+        >
+          <option v-for="account in SUPPLY_ACCOUNTS" :key="account.code" :value="account.code">
+            {{ account.code }} – {{ account.title }}
+          </option>
+        </select>
+        <p class="mt-1 text-xs text-gray-500">Where stock received against a DV is carried in the books until issued</p>
       </div>
 
       <!-- Quantity on Hand -->

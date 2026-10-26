@@ -13,7 +13,7 @@ export const POST: APIRoute = async ({ params, locals }) => {
   }
 
   try {
-    const id = parseInt(params.id);
+    const id = parseInt(params.id ?? '');
 
     if (isNaN(id)) {
       return new Response(
