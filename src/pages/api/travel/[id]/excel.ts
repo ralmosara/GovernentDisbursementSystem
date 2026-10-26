@@ -22,6 +22,8 @@ export const GET: APIRoute = async ({ params, locals }) => {
       });
     }
 
+    const employeeName = iot.employee ? `${iot.employee.firstName} ${iot.employee.lastName}` : 'N/A';
+
     // Create workbook
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet('Itinerary of Travel');
@@ -101,10 +103,10 @@ export const GET: APIRoute = async ({ params, locals }) => {
       currentRow++;
     };
 
-    addField('Name of Employee:', `${iot.employee.firstName} ${iot.employee.lastName}`);
-    addField('Position:', iot.employee.position || 'N/A');
-    addField('Division/Office:', iot.employee.division || 'N/A');
-    addField('Employee No:', iot.employee.employeeNo);
+    addField('Name of Employee:', employeeName);
+    addField('Position:', iot.employee?.position || 'N/A');
+    addField('Division/Office:', iot.employee?.divisionOffice || 'N/A');
+    addField('Employee No:', iot.employee?.employeeNo || 'N/A');
     currentRow++;
 
     // Travel Information
@@ -112,7 +114,7 @@ export const GET: APIRoute = async ({ params, locals }) => {
     addField('Purpose of Travel:', iot.iot.purpose);
     addField('Departure Date:', formatDate(iot.iot.departureDate));
     addField('Return Date:', formatDate(iot.iot.returnDate));
-    addField('Fund Cluster:', iot.fundCluster.name);
+    addField('Fund Cluster:', iot.fundCluster?.name || 'N/A');
     currentRow += 2;
 
     // Itinerary Details
@@ -202,7 +204,7 @@ export const GET: APIRoute = async ({ params, locals }) => {
     // Signatures
     worksheet.mergeCells(currentRow, 1, currentRow + 3, 2);
     const travelerSig = worksheet.getCell(currentRow, 1);
-    travelerSig.value = `\n\n_______________________________\n${iot.employee.firstName} ${iot.employee.lastName}\nTraveler's Signature\nDate: ______________`;
+    travelerSig.value = `\n\n_______________________________\n${employeeName}\nTraveler's Signature\nDate: ______________`;
     travelerSig.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
     applyBorder(travelerSig);
 

@@ -35,10 +35,10 @@ export interface WorkflowStageData {
   stage: ApprovalStage;
   stageOrder: number;
   approverRoleId: number;
-  approverUserId?: number;
-  status: ApprovalStatus;
-  comments?: string;
-  actionDate?: Date;
+  approverUserId?: number | null;
+  status: ApprovalStatus | null;
+  comments?: string | null;
+  actionDate?: Date | null;
 }
 
 export class ApprovalService {

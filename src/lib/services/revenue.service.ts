@@ -376,7 +376,8 @@ export class RevenueService {
    */
   async getTotalRevenue(startDate: Date, endDate: Date, filters?: RevenueFilters) {
     try {
-      let query = db
+      // One where(): a second call would replace the date range rather than add to it
+      const result = await db
         .select({
           total: sum(revenueEntries.amount).as('total'),
         })
@@ -384,19 +385,11 @@ export class RevenueService {
         .where(
           and(
             gte(revenueEntries.entryDate, startDate),
-            lte(revenueEntries.entryDate, endDate)
+            lte(revenueEntries.entryDate, endDate),
+            filters?.revenueSourceId ? eq(revenueEntries.revenueSourceId, filters.revenueSourceId) : undefined,
+            filters?.fundClusterId ? eq(revenueEntries.fundClusterId, filters.fundClusterId) : undefined
           )
         );
-
-      if (filters?.revenueSourceId) {
-        query = query.where(eq(revenueEntries.revenueSourceId, filters.revenueSourceId)) as any;
-      }
-
-      if (filters?.fundClusterId) {
-        query = query.where(eq(revenueEntries.fundClusterId, filters.fundClusterId)) as any;
-      }
-
-      const result = await query;
 
       return {
         total: result[0]?.total ? parseFloat(result[0].total as string) : 0,

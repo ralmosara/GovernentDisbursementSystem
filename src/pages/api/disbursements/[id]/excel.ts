@@ -50,9 +50,9 @@ export const GET: APIRoute = async ({ params, locals }) => {
         name: disbursement.objectOfExpenditure?.name || ''
       },
       responsibilityCenter: disbursement.responsibilityCenter || undefined,
-      mfoPap: disbursement.mfoPap ? {
+      mfoPap: disbursement.mfoPap?.code ? {
         code: disbursement.mfoPap.code,
-        description: disbursement.mfoPap.description
+        description: disbursement.mfoPap.description ?? ''
       } : undefined,
       paymentMode: disbursement.paymentMode
     };

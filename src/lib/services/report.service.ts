@@ -67,101 +67,34 @@ export class ReportService {
       }
     }
 
-    // Build base query for aggregating budget data by object of expenditure
-    const baseConditions = [eq(registryAppropriations.year, fiscalYear)];
-    if (fundClusterId) {
-      baseConditions.push(eq(registryAppropriations.fundClusterId, fundClusterId));
-    }
+    const [appropriationTotal, allotments, obligations, disbursements] = await Promise.all([
+      this.appropriationTotal(fiscalYear, fundClusterId),
+      this.allotmentsByObject(fiscalYear, fundClusterId),
+      this.obligationsByObject(fiscalYear, fundClusterId),
+      this.disbursementsByObject({ fiscalYear, fundClusterId }),
+    ]);
 
-    // Get budget data grouped by object of expenditure
-    const budgetData = await db
-      .select({
-        objectCode: objectOfExpenditure.code,
-        objectName: objectOfExpenditure.name,
-        objectCategory: objectOfExpenditure.category,
-        appropriation: sum(registryAppropriations.amount).mapWith(Number),
-        allotment: sum(registryAllotments.amount).mapWith(Number),
-        obligations: sum(
-          sql`CASE WHEN ${registryObligations.status} = 'approved' THEN ${registryObligations.amount} ELSE 0 END`
-        ).mapWith(Number),
-      })
-      .from(registryAppropriations)
-      .leftJoin(
-        registryAllotments,
-        eq(registryAppropriations.id, registryAllotments.appropriationId)
-      )
-      .leftJoin(
-        objectOfExpenditure,
-        eq(registryAllotments.objectOfExpenditureId, objectOfExpenditure.id)
-      )
-      .leftJoin(
-        registryObligations,
-        eq(registryAllotments.id, registryObligations.allotmentId)
-      )
-      .where(and(...baseConditions))
-      .groupBy(
-        objectOfExpenditure.id,
-        objectOfExpenditure.code,
-        objectOfExpenditure.name,
-        objectOfExpenditure.category
-      );
-
-    // Get disbursements (cleared payments only) grouped by object of expenditure
-    const disbursementConditions = [
-      eq(disbursementVouchers.fiscalYear, fiscalYear),
-      eq(payments.status, 'cleared'),
-    ];
-    if (fundClusterId) {
-      disbursementConditions.push(eq(disbursementVouchers.fundClusterId, fundClusterId));
-    }
-
-    const disbursementData = await db
-      .select({
-        objectCode: objectOfExpenditure.code,
-        disbursements: sum(payments.amount).mapWith(Number),
-      })
-      .from(payments)
-      .innerJoin(disbursementVouchers, eq(payments.dvId, disbursementVouchers.id))
-      .leftJoin(
-        objectOfExpenditure,
-        eq(disbursementVouchers.objectExpenditureId, objectOfExpenditure.id)
-      )
-      .where(and(...disbursementConditions))
-      .groupBy(objectOfExpenditure.code);
-
-    // Create disbursement lookup map
-    const disbursementMap = new Map<string, number>();
-    disbursementData.forEach((item) => {
-      if (item.objectCode) {
-        disbursementMap.set(item.objectCode, item.disbursements || 0);
-      }
-    });
-
-    // Combine budget and disbursement data
-    const items: BARReportItem[] = budgetData
-      .filter((row) => row.objectCode) // Only include rows with object codes
-      .map((row) => {
-        const appropriation = row.appropriation || 0;
-        const allotment = row.allotment || 0;
-        const obligations = row.obligations || 0;
-        const disbursements = disbursementMap.get(row.objectCode!) || 0;
-        const unobligated = allotment - obligations;
-        const available = appropriation - allotment;
-        const utilizationRate = appropriation > 0 ? (obligations / appropriation) * 100 : 0;
-
-        return {
-          objectCode: row.objectCode!,
-          objectName: row.objectName!,
-          category: row.objectCategory!,
-          appropriation,
-          allotment,
-          obligations,
-          disbursements,
-          unobligated,
-          available,
-          utilizationRate,
-        };
-      });
+    // Appropriations are not itemised by object of expenditure: each object's share is what
+    // was allotted to it, and the rest of the appropriation is shown on its own line
+    const item = (objectCode: string, objectName: string, category: string, appropriation: number, allotment: number, objectId?: number): BARReportItem => {
+      const obligated = objectId ? obligations.get(objectId) ?? 0 : 0;
+      return {
+        objectCode,
+        objectName,
+        category,
+        appropriation,
+        allotment,
+        obligations: obligated,
+        disbursements: objectId ? disbursements.get(objectId) ?? 0 : 0,
+        unobligated: allotment - obligated,
+        available: appropriation - allotment,
+        utilizationRate: appropriation > 0 ? (obligated / appropriation) * 100 : 0,
+      };
+    };
+    const items = allotments.map(a => item(a.objectCode, a.objectName, a.category, a.total, a.total, a.objectId));
+    const allotted = allotments.reduce((total, a) => total + a.total, 0);
+    const unallotted = Math.round((appropriationTotal - allotted) * 100) / 100;
+    if (unallotted !== 0) items.push(item('', 'Appropriations not yet allotted', '', unallotted, 0));
 
     // Calculate totals
     const totals = items.reduce(
@@ -196,6 +129,79 @@ export class ReportService {
       items,
       totals,
     };
+  }
+
+  // Budget figures are each summed in their own query: joining appropriations, allotments,
+  // obligations and payments in one query repeats every amount once per row of the others.
+
+  private appropriationFilter(fiscalYear: number, fundClusterId?: number) {
+    return and(
+      eq(registryAppropriations.year, fiscalYear),
+      fundClusterId ? eq(registryAppropriations.fundClusterId, fundClusterId) : undefined
+    );
+  }
+
+  private async appropriationTotal(fiscalYear: number, fundClusterId?: number): Promise<number> {
+    const [row] = await db
+      .select({ total: sum(registryAppropriations.amount).mapWith(Number) })
+      .from(registryAppropriations)
+      .where(this.appropriationFilter(fiscalYear, fundClusterId));
+    return row?.total || 0;
+  }
+
+  /** Allotments per object of expenditure */
+  private async allotmentsByObject(fiscalYear: number, fundClusterId?: number) {
+    const rows = await db
+      .select({
+        objectId: objectOfExpenditure.id,
+        objectCode: objectOfExpenditure.code,
+        objectName: objectOfExpenditure.name,
+        category: objectOfExpenditure.category,
+        total: sum(registryAllotments.amount).mapWith(Number),
+      })
+      .from(registryAllotments)
+      .innerJoin(registryAppropriations, eq(registryAllotments.appropriationId, registryAppropriations.id))
+      .innerJoin(objectOfExpenditure, eq(registryAllotments.objectOfExpenditureId, objectOfExpenditure.id))
+      .where(this.appropriationFilter(fiscalYear, fundClusterId))
+      .groupBy(objectOfExpenditure.id, objectOfExpenditure.code, objectOfExpenditure.name, objectOfExpenditure.category)
+      .orderBy(objectOfExpenditure.code);
+    return rows.map(r => ({ ...r, total: r.total || 0 }));
+  }
+
+  /** Approved obligations per object of expenditure, keyed by object id */
+  private async obligationsByObject(fiscalYear: number, fundClusterId?: number): Promise<Map<number, number>> {
+    const rows = await db
+      .select({ objectId: registryAllotments.objectOfExpenditureId, total: sum(registryObligations.amount).mapWith(Number) })
+      .from(registryObligations)
+      .innerJoin(registryAllotments, eq(registryObligations.allotmentId, registryAllotments.id))
+      .innerJoin(registryAppropriations, eq(registryAllotments.appropriationId, registryAppropriations.id))
+      .where(and(this.appropriationFilter(fiscalYear, fundClusterId), eq(registryObligations.status, 'approved')))
+      .groupBy(registryAllotments.objectOfExpenditureId);
+    return new Map(rows.map(r => [r.objectId, r.total || 0]));
+  }
+
+  /**
+   * Disbursements per object of expenditure, keyed by object id: the gross amount of each DV
+   * paid by a cleared check or ADA (taxes withheld are disbursed too, through the TRA). A DV
+   * counts once however many payments it has. `months` limits to DVs dated in those months.
+   */
+  private async disbursementsByObject(params: { fiscalYear: number; fundClusterId?: number; months?: [number, number] }): Promise<Map<number, number>> {
+    const { fiscalYear, fundClusterId, months } = params;
+    const rows = await db
+      .select({ objectId: disbursementVouchers.objectExpenditureId, total: sum(disbursementVouchers.amount).mapWith(Number) })
+      .from(disbursementVouchers)
+      .where(
+        and(
+          months
+            ? sql`YEAR(${disbursementVouchers.dvDate}) = ${fiscalYear} AND MONTH(${disbursementVouchers.dvDate}) BETWEEN ${months[0]} AND ${months[1]}`
+            : eq(disbursementVouchers.fiscalYear, fiscalYear),
+          fundClusterId ? eq(disbursementVouchers.fundClusterId, fundClusterId) : undefined,
+          sql`EXISTS (SELECT 1 FROM ${payments} WHERE ${payments.dvId} = ${disbursementVouchers.id} AND ${payments.status} = 'cleared')`
+        )
+      )
+      .groupBy(disbursementVouchers.objectExpenditureId);
+    // DVs with no object of expenditure are kept under 0 so totals still include them
+    return new Map(rows.map(r => [r.objectId ?? 0, r.total || 0]));
   }
 
   /**
@@ -289,29 +295,18 @@ export class ReportService {
         .where(
           and(
             eq(registryAppropriations.fundClusterId, fund.id),
-            eq(registryAppropriations.year, fiscalYear)
+            eq(registryAppropriations.year, fiscalYear),
+            eq(registryObligations.status, 'approved')
           )
         );
 
-      // Disbursements (paid DVs) for this fund
-      const disbursements = await db
-        .select({
-          total: sum(disbursementVouchers.amount).mapWith(Number),
-        })
-        .from(disbursementVouchers)
-        .innerJoin(payments, eq(payments.dvId, disbursementVouchers.id))
-        .where(
-          and(
-            eq(disbursementVouchers.fundClusterId, fund.id),
-            eq(disbursementVouchers.fiscalYear, fiscalYear),
-            eq(payments.status, 'cleared')
-          )
-        );
+      // Disbursements (DVs paid by a cleared check or ADA, each counted once) for this fund
+      const disbursements = await this.disbursementsByObject({ fiscalYear, fundClusterId: fund.id });
 
       const appropriationTotal = appropriations[0]?.total || 0;
       const allotmentTotal = allotments[0]?.total || 0;
       const obligationTotal = obligations[0]?.total || 0;
-      const disbursementTotal = disbursements[0]?.total || 0;
+      const disbursementTotal = [...disbursements.values()].reduce((total, amount) => total + amount, 0);
 
       reportData.push({
         fundCluster: {
@@ -353,11 +348,12 @@ export class ReportService {
   async generateFARNo3(params: { asOfDate: Date; fundClusterId?: number }) {
     const { asOfDate, fundClusterId } = params;
 
-    // Get unpaid obligations (no payment exists)
+    // Approved obligations not yet paid: no DV under the same ORS/BURS has a cleared payment
+    const orsBursNo = sql<string | null>`COALESCE(${registryObligations.orsNumber}, ${registryObligations.bursNumber})`;
     const query = db
       .select({
         id: registryObligations.id,
-        orsBursNo: registryObligations.orsBursNo,
+        orsBursNo,
         obligationDate: registryObligations.obligationDate,
         payee: registryObligations.payee,
         particulars: registryObligations.particulars,
@@ -366,17 +362,6 @@ export class ReportService {
         fundClusterName: fundClusters.name,
       })
       .from(registryObligations)
-      .leftJoin(
-        disbursementVouchers,
-        eq(disbursementVouchers.orsBursNo, registryObligations.orsBursNo)
-      )
-      .leftJoin(
-        payments,
-        and(
-          eq(payments.dvId, disbursementVouchers.id),
-          eq(payments.status, 'cleared')
-        )
-      )
       .innerJoin(
         registryAllotments,
         eq(registryObligations.allotmentId, registryAllotments.id)
@@ -391,7 +376,10 @@ export class ReportService {
       )
       .where(
         and(
-          sql`${payments.id} IS NULL`,
+          eq(registryObligations.status, 'approved'),
+          sql`NOT EXISTS (SELECT 1 FROM ${disbursementVouchers}
+            INNER JOIN ${payments} ON ${payments.dvId} = ${disbursementVouchers.id} AND ${payments.status} = 'cleared'
+            WHERE ${disbursementVouchers.orsBursNo} IN (${registryObligations.orsNumber}, ${registryObligations.bursNumber}))`,
           sql`${registryObligations.obligationDate} <= ${asOfDate}`,
           fundClusterId ? sql`${fundClusters.id} = ${fundClusterId}` : sql`1=1`
         )
@@ -477,7 +465,7 @@ export class ReportService {
         objectName: objectOfExpenditure.name,
         paymentDate: payments.paymentDate,
         paymentType: payments.paymentType,
-        checkNumber: payments.checkNumber,
+        checkNumber: payments.checkNo,
       })
       .from(disbursementVouchers)
       .innerJoin(payments, eq(payments.dvId, disbursementVouchers.id))
@@ -570,50 +558,26 @@ export class ReportService {
     const startMonth = months[0];
     const endMonth = months[2];
 
-    // Get all object of expenditures with budget and actual data
-    const budgetActual = await db
-      .select({
-        objectId: objectOfExpenditure.id,
-        objectCode: objectOfExpenditure.code,
-        objectName: objectOfExpenditure.name,
-        objectCategory: objectOfExpenditure.category,
-        // Budget (allotments)
-        budget: sum(
-          sql`CASE WHEN ${registryAppropriations.year} = ${year} THEN ${registryAllotments.amount} ELSE 0 END`
-        ).mapWith(Number),
-        // Actual (disbursements in quarter)
-        actual: sum(
-          sql`CASE WHEN YEAR(${disbursementVouchers.dvDate}) = ${year} AND MONTH(${disbursementVouchers.dvDate}) BETWEEN ${startMonth} AND ${endMonth} AND ${payments.status} = 'cleared' THEN ${disbursementVouchers.amount} ELSE 0 END`
-        ).mapWith(Number),
-      })
-      .from(objectOfExpenditure)
-      .leftJoin(
-        disbursementVouchers,
-        eq(disbursementVouchers.objectExpenditureId, objectOfExpenditure.id)
-      )
-      .leftJoin(payments, eq(payments.dvId, disbursementVouchers.id))
-      .leftJoin(
-        registryAllotments,
-        eq(registryAllotments.objectOfExpenditureId, objectOfExpenditure.id)
-      )
-      .leftJoin(
-        registryAppropriations,
-        eq(registryAllotments.appropriationId, registryAppropriations.id)
-      )
-      .where(
-        fundClusterId
-          ? or(
-              eq(disbursementVouchers.fundClusterId, fundClusterId),
-              eq(registryAppropriations.fundClusterId, fundClusterId)
-            )
-          : sql`1=1`
-      )
-      .groupBy(
-        objectOfExpenditure.id,
-        objectOfExpenditure.code,
-        objectOfExpenditure.name,
-        objectOfExpenditure.category
-      );
+    // Budget (the year's allotments) and actual (disbursements dated in the quarter) per object
+    // of expenditure, each summed on its own
+    const [allotments, disbursed, objects] = await Promise.all([
+      this.allotmentsByObject(year, fundClusterId),
+      this.disbursementsByObject({ fiscalYear: year, fundClusterId, months: [startMonth, endMonth] }),
+      db
+        .select({ objectId: objectOfExpenditure.id, objectCode: objectOfExpenditure.code, objectName: objectOfExpenditure.name, category: objectOfExpenditure.category })
+        .from(objectOfExpenditure),
+    ]);
+    const budgetActual = objects
+      .filter(o => allotments.some(a => a.objectId === o.objectId) || disbursed.has(o.objectId))
+      .sort((a, b) => a.objectCode.localeCompare(b.objectCode))
+      .map(o => ({
+        objectId: o.objectId,
+        objectCode: o.objectCode,
+        objectName: o.objectName,
+        objectCategory: o.category,
+        budget: allotments.find(a => a.objectId === o.objectId)?.total ?? 0,
+        actual: disbursed.get(o.objectId) ?? 0,
+      }));
 
     const reportData = budgetActual.map((item) => {
       const budget = item.budget || 0;

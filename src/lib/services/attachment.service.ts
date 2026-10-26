@@ -181,10 +181,10 @@ export async function getAllAttachments(filters?: {
       results = results.filter(a => a.uploadedBy === filters.uploadedBy);
     }
     if (filters.startDate) {
-      results = results.filter(a => new Date(a.uploadedAt) >= filters.startDate!);
+      results = results.filter(a => new Date(a.uploadedAt ?? 0) >= filters.startDate!);
     }
     if (filters.endDate) {
-      results = results.filter(a => new Date(a.uploadedAt) <= filters.endDate!);
+      results = results.filter(a => new Date(a.uploadedAt ?? 0) <= filters.endDate!);
     }
   }
 

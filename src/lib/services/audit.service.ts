@@ -17,7 +17,7 @@ export interface AuditLog {
   newValues: any;
   ipAddress: string | null;
   userAgent: string | null;
-  createdAt: Date;
+  createdAt: Date | null;
 }
 
 export interface AuditLogWithUser extends AuditLog {
@@ -85,12 +85,12 @@ export async function getAuditLogs(filters?: {
     }
     if (filters.startDate) {
       filtered = filtered.filter(
-        r => new Date(r.auditLog.createdAt) >= filters.startDate!
+        r => new Date(r.auditLog.createdAt ?? 0) >= filters.startDate!
       );
     }
     if (filters.endDate) {
       filtered = filtered.filter(
-        r => new Date(r.auditLog.createdAt) <= filters.endDate!
+        r => new Date(r.auditLog.createdAt ?? 0) <= filters.endDate!
       );
     }
   }
@@ -100,7 +100,7 @@ export async function getAuditLogs(filters?: {
     ...r.auditLog,
     oldValues: r.auditLog.oldValues ? JSON.parse(r.auditLog.oldValues as any) : null,
     newValues: r.auditLog.newValues ? JSON.parse(r.auditLog.newValues as any) : null,
-    user: r.user,
+    user: r.user ?? undefined,
   }));
 }
 
@@ -136,7 +136,7 @@ export async function getAuditLogById(id: number): Promise<AuditLogWithUser | nu
     newValues: result.auditLog.newValues
       ? JSON.parse(result.auditLog.newValues as any)
       : null,
-    user: result.user,
+    user: result.user ?? undefined,
   };
 }
 
@@ -268,7 +268,7 @@ export function exportAuditLogsToCSV(logs: AuditLogWithUser[]): string {
 
     return [
       log.id,
-      new Date(log.createdAt).toLocaleString('en-PH'),
+      log.createdAt ? new Date(log.createdAt).toLocaleString('en-PH') : '',
       user,
       log.action,
       log.tableName,

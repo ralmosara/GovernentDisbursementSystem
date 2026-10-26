@@ -525,15 +525,12 @@ export class PaymentService {
    * Get payment statistics
    */
   async getPaymentStatistics(fiscalYear?: number): Promise<any> {
-    let query = db.select().from(payments).$dynamic();
-
-    if (fiscalYear) {
-      query = query
-        .innerJoin(disbursementVouchers, eq(payments.dvId, disbursementVouchers.id))
-        .where(eq(disbursementVouchers.fiscalYear, fiscalYear));
-    }
-
-    const allPayments = await query;
+    // Select payment columns only: a bare select() over the join nests each row by table
+    const allPayments = await db
+      .select({ status: payments.status, amount: payments.amount })
+      .from(payments)
+      .innerJoin(disbursementVouchers, eq(payments.dvId, disbursementVouchers.id))
+      .where(fiscalYear ? eq(disbursementVouchers.fiscalYear, fiscalYear) : undefined);
 
     const stats = {
       total: allPayments.length,

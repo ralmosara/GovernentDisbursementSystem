@@ -58,6 +58,12 @@ function normalizeCategoryAccount(code: string | null | undefined): string | nul
   return code;
 }
 
+/** A YYYY-MM-DD date at local midnight; new Date('YYYY-MM-DD') would be UTC midnight, which shifts date comparisons */
+function localDate(value: string): Date {
+  const [year, month, day] = value.slice(0, 10).split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
 /** Blank becomes null (Office Supplies); anything else must be one of the supplies inventory accounts */
 function normalizeSupplyAccount(code: string | null | undefined): string | null {
   if (!code) return null;
@@ -852,7 +858,7 @@ export class AssetService {
       const [result] = await db.insert(assetDisposals).values({
         disposalNo,
         assetId: data.assetId,
-        disposalDate: data.disposalDate,
+        disposalDate: localDate(data.disposalDate),
         disposalMethod: data.disposalMethod,
         disposalValue: data.disposalValue || '0',
         buyerRecipient: data.buyerRecipient,
@@ -894,10 +900,10 @@ export class AssetService {
         conditions.push(eq(assetDisposals.disposalMethod, filters.disposalMethod));
       }
       if (filters?.fromDate) {
-        conditions.push(gte(assetDisposals.disposalDate, filters.fromDate));
+        conditions.push(gte(assetDisposals.disposalDate, localDate(filters.fromDate)));
       }
       if (filters?.toDate) {
-        conditions.push(lte(assetDisposals.disposalDate, filters.toDate));
+        conditions.push(lte(assetDisposals.disposalDate, localDate(filters.toDate)));
       }
 
       const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -1009,7 +1015,7 @@ export class AssetService {
       await db
         .update(assetDisposals)
         .set({
-          disposalDate: data.disposalDate,
+          disposalDate: data.disposalDate === undefined ? undefined : localDate(data.disposalDate),
           disposalMethod: data.disposalMethod,
           disposalValue: data.disposalValue,
           buyerRecipient: data.buyerRecipient,
@@ -1429,10 +1435,10 @@ export class AssetService {
         conditions.push(eq(inventoryTransactions.transactionType, filters.transactionType));
       }
       if (filters?.fromDate) {
-        conditions.push(gte(inventoryTransactions.transactionDate, filters.fromDate));
+        conditions.push(gte(inventoryTransactions.transactionDate, localDate(filters.fromDate)));
       }
       if (filters?.toDate) {
-        conditions.push(lte(inventoryTransactions.transactionDate, filters.toDate));
+        conditions.push(lte(inventoryTransactions.transactionDate, localDate(filters.toDate)));
       }
 
       const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
@@ -1632,10 +1638,10 @@ export class AssetService {
         conditions.push(eq(physicalInventoryCount.itemId, filters.itemId));
       }
       if (filters?.fromDate) {
-        conditions.push(gte(physicalInventoryCount.countDate, filters.fromDate));
+        conditions.push(gte(physicalInventoryCount.countDate, localDate(filters.fromDate)));
       }
       if (filters?.toDate) {
-        conditions.push(lte(physicalInventoryCount.countDate, filters.toDate));
+        conditions.push(lte(physicalInventoryCount.countDate, localDate(filters.toDate)));
       }
 
       const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
