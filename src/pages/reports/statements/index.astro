@@ -1,0 +1,77 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import PageHeader from '../../../components/ui/PageHeader.astro';
+import Banner from '../../../components/ui/Banner.astro';
+import { ledgerService } from '../../../lib/services/ledger.service';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const unposted = await ledgerService.getUnposted().catch(() => null);
+
+const STATEMENTS = [
+  {
+    href: '/reports/statements/financial-position',
+    icon: 'pi-building-columns',
+    title: 'Statement of Financial Position',
+    description: 'Assets, liabilities and net assets/equity at a date, compared with the previous year-end.',
+  },
+  {
+    href: '/reports/statements/financial-performance',
+    icon: 'pi-chart-line',
+    title: 'Statement of Financial Performance',
+    description: 'Revenue, expenses and the surplus or deficit for a period, compared with the same period last year.',
+  },
+  {
+    href: '/reports/statements/changes-in-equity',
+    icon: 'pi-sort-alt',
+    title: 'Statement of Changes in Net Assets/Equity',
+    description: 'How accumulated surplus/(deficit) moved during the period.',
+  },
+  {
+    href: '/reports/statements/cash-flows',
+    icon: 'pi-money-bill',
+    title: 'Statement of Cash Flows',
+    description: 'Cash received and paid, by operating, investing and financing activities (direct method).',
+  },
+  {
+    href: '/reports/statements/budget-comparison',
+    icon: 'pi-chart-bar',
+    title: 'Statement of Comparison of Budget and Actual Amounts',
+    description: 'Allotments by class against obligations incurred for the fiscal year.',
+  },
+];
+---
+
+<MainLayout title="Financial statements - Philippine Government FMS">
+  <PageHeader
+    title="Financial statements"
+    description="General purpose financial statements under PPSAS and the Government Accounting Manual, prepared from the posted journal entries."
+    breadcrumbs={[{ label: 'Reports', href: '/reports' }, { label: 'Financial statements' }]}
+  />
+
+  {unposted && unposted.total > 0 && (
+    <Banner appearance="warning" title={`${unposted.total} transaction${unposted.total === 1 ? ' is' : 's are'} not yet in the books`} class="mb-6">
+      The statements only include posted entries. Post them from <a href="/accounting/journals" class="underline">Accounting → Journal entries</a>.
+    </Banner>
+  )}
+
+  <ul class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    {STATEMENTS.map(s => (
+      <li>
+        <a href={s.href} class="card p-5 flex gap-4 h-full hover:border-primary-500 transition-colors">
+          <i class={`pi ${s.icon} text-2xl text-primary-600 mt-1`} aria-hidden="true"></i>
+          <span>
+            <span class="block font-semibold text-gray-800">{s.title}</span>
+            <span class="block text-sm text-gray-600 mt-1">{s.description}</span>
+          </span>
+        </a>
+      </li>
+    ))}
+  </ul>
+
+  <p class="text-sm text-gray-600 mt-6 max-w-3xl">
+    Depreciation is posted monthly from <a href="/accounting/depreciation" class="underline">Accounting → Depreciation</a>; post it
+    for every month in the period before relying on the statements.
+  </p>
+</MainLayout>

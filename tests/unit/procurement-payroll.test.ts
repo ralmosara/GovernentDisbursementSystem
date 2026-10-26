@@ -198,7 +198,7 @@ describe('payroll posting', () => {
     expect(line(ACCOUNTS.DUE_TO_OFFICERS_EMPLOYEES)?.credit).toBe(26022.45);
   });
 
-  it('pays BIR remittances through the Tax Remittance Advice account', async () => {
+  it('pays BIR remittances through the Tax Remittance Advice, recognising the TRA as a subsidy', async () => {
     const post = vi.spyOn(ledgerService, 'post').mockResolvedValue({ id: 2, jevNo: 'y', created: true });
     queuedResults.push(
       [{ id: 3, remittanceNo: 'REM-2026-0003', remittanceType: 'BIR', month: 10, year: 2026, totalAmount: '827.55', paymentDate: '2026-11-10', referenceNo: 'TRA-1' }],
@@ -206,8 +206,23 @@ describe('payroll posting', () => {
     );
     await ledgerService.postRemittance(3, 1);
     expect(post.mock.calls[0][0].lines).toEqual([
+      expect.objectContaining({ accountCode: ACCOUNTS.CASH_TRA, debit: 827.55 }),
+      expect.objectContaining({ accountCode: ACCOUNTS.SUBSIDY_FROM_NG, credit: 827.55 }),
       expect.objectContaining({ accountCode: ACCOUNTS.DUE_TO_BIR, debit: 827.55 }),
       expect.objectContaining({ accountCode: ACCOUNTS.CASH_TRA, credit: 827.55 }),
+    ]);
+  });
+
+  it('pays other remittances out of Cash-MDS without a TRA', async () => {
+    const post = vi.spyOn(ledgerService, 'post').mockResolvedValue({ id: 2, jevNo: 'y', created: true });
+    queuedResults.push(
+      [{ id: 4, remittanceNo: 'REM-2026-0004', remittanceType: 'GSIS', month: 10, year: 2026, totalAmount: '5000.00', paymentDate: '2026-11-10', referenceNo: null }],
+      [{ id: 1 }]
+    );
+    await ledgerService.postRemittance(4, 1);
+    expect(post.mock.calls[0][0].lines).toEqual([
+      expect.objectContaining({ accountCode: ACCOUNTS.DUE_TO_GSIS, debit: 5000 }),
+      expect.objectContaining({ accountCode: ACCOUNTS.CASH_MDS_REGULAR, credit: 5000 }),
     ]);
   });
 });

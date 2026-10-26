@@ -1,0 +1,143 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import PageHeader from '../../../components/ui/PageHeader.astro';
+import FilterBar from '../../../components/ui/FilterBar.astro';
+import Banner from '../../../components/ui/Banner.astro';
+import StatementHeader from '../../../components/reports/StatementHeader.astro';
+import StatementGroups from '../../../components/reports/StatementGroups.astro';
+import { db } from '../../../lib/db/connection';
+import { fundClusters } from '../../../lib/db/schema';
+import { financialStatementsService } from '../../../lib/services/financial-statements.service';
+import { getSetting } from '../../../lib/services/settings.service';
+import { statementAmount, longDate, dateParam } from '../../../lib/ui/statement';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const params = Astro.url.searchParams;
+const asOf = dateParam(params.get('asOf'), new Date(), true);
+const fundClusterId = parseInt(params.get('fund') ?? '') || undefined;
+// Comparative: the end of the previous fiscal year
+const priorYearEnd = new Date(asOf.getFullYear() - 1, 11, 31, 23, 59, 59);
+
+const [statement, clusters, agencyName] = await Promise.all([
+  financialStatementsService.getFinancialPosition(asOf, priorYearEnd, fundClusterId),
+  db.select({ id: fundClusters.id, code: fundClusters.code, name: fundClusters.name }).from(fundClusters),
+  getSetting('agency_name').catch(() => ''),
+]);
+
+const cluster = clusters.find(c => c.id === fundClusterId);
+const columns = [longDate(asOf), longDate(priorYearEnd)];
+const ledgerLink = (code: string) => `/accounting/general-ledger?account=${code}${fundClusterId ? `&fund=${fundClusterId}` : ''}`;
+const empty = statement.totals.assets.every(a => a === 0) && statement.totals.liabilitiesAndEquity.every(a => a === 0);
+---
+
+<MainLayout title="Statement of Financial Position - Philippine Government FMS">
+  <PageHeader
+    title="Statement of Financial Position"
+    description="Assets, liabilities and net assets/equity from the general ledger, compared with the end of the previous year."
+    breadcrumbs={[{ label: 'Reports', href: '/reports' }, { label: 'Financial statements', href: '/reports/statements' }, { label: 'Financial position' }]}
+  >
+    <button slot="actions" type="button" class="btn btn-secondary" onclick="window.print()">
+      <i class="pi pi-print" aria-hidden="true"></i>
+      Print
+    </button>
+  </PageHeader>
+
+  <FilterBar action="/reports/statements/financial-position" resetHref="/reports/statements/financial-position" activeCount={[params.get('asOf'), fundClusterId].filter(Boolean).length}>
+    <div class="form-group">
+      <label for="asOf" class="form-label">As of</label>
+      <input type="date" id="asOf" name="asOf" class="form-input" value={asOf.toLocaleDateString('en-CA')} />
+    </div>
+    <div class="form-group">
+      <label for="fund" class="form-label">Fund cluster</label>
+      <select id="fund" name="fund" class="form-select">
+        <option value="">All funds (consolidated)</option>
+        {clusters.map(c => <option value={c.id} selected={fundClusterId === c.id}>{c.code} – {c.name}</option>)}
+      </select>
+    </div>
+  </FilterBar>
+
+  {!statement.balanced && (
+    <Banner appearance="error" title="Assets do not equal liabilities and net assets/equity" class="mb-6">
+      The trial balance is out of balance. Check the <a href={`/accounting/trial-balance?asOf=${asOf.toLocaleDateString('en-CA')}`} class="underline">trial balance</a> before using this statement.
+    </Banner>
+  )}
+  {empty && (
+    <Banner appearance="info" title="Nothing in the books yet" class="mb-6">
+      Balances appear once transactions are posted. If transactions exist, post them from
+      <a href="/accounting/journals" class="underline">Accounting → Journal entries</a>.
+    </Banner>
+  )}
+
+  <article class="card" aria-label="Statement of Financial Position">
+    <StatementHeader
+      agencyName={agencyName}
+      title="Statement of Financial Position"
+      fund={cluster ? `Fund Cluster ${cluster.code} – ${cluster.name}` : 'All fund clusters'}
+      period={`As at ${longDate(asOf)}`}
+    />
+    <div class="relative overflow-x-auto">
+      <table class="table">
+        <thead>
+          <tr>
+            <th scope="col"><span class="sr-only">Item</span></th>
+            {columns.map(c => <th scope="col" class="!text-right whitespace-nowrap">{c}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="bg-gray-50"><th scope="rowgroup" colspan={columns.length + 1} class="!text-gray-800">ASSETS</th></tr>
+          <tr><th scope="rowgroup" colspan={columns.length + 1} class="!text-gray-700">Current assets</th></tr>
+          <StatementGroups groups={statement.currentAssets} ledgerLink={ledgerLink} />
+          <tr class="font-semibold">
+            <td>Total current assets</td>
+            {statement.totals.currentAssets.map(t => <td class="text-right tabular-nums border-t border-gray-200">{statementAmount(t)}</td>)}
+          </tr>
+          <tr><th scope="rowgroup" colspan={columns.length + 1} class="!text-gray-700">Non-current assets</th></tr>
+          <StatementGroups groups={statement.nonCurrentAssets} ledgerLink={ledgerLink} />
+          <tr class="font-semibold">
+            <td>Total non-current assets</td>
+            {statement.totals.nonCurrentAssets.map(t => <td class="text-right tabular-nums border-t border-gray-200">{statementAmount(t)}</td>)}
+          </tr>
+          <tr class="font-semibold text-gray-800">
+            <td>TOTAL ASSETS</td>
+            {statement.totals.assets.map(t => <td class="text-right tabular-nums border-t-2 border-gray-300">{statementAmount(t)}</td>)}
+          </tr>
+        </tbody>
+        <tbody>
+          <tr class="bg-gray-50"><th scope="rowgroup" colspan={columns.length + 1} class="!text-gray-800">LIABILITIES</th></tr>
+          <tr><th scope="rowgroup" colspan={columns.length + 1} class="!text-gray-700">Current liabilities</th></tr>
+          <StatementGroups groups={statement.currentLiabilities} ledgerLink={ledgerLink} />
+          <tr class="font-semibold">
+            <td>Total current liabilities</td>
+            {statement.totals.currentLiabilities.map(t => <td class="text-right tabular-nums border-t border-gray-200">{statementAmount(t)}</td>)}
+          </tr>
+          {statement.nonCurrentLiabilities.length > 0 && (
+            <>
+              <tr><th scope="rowgroup" colspan={columns.length + 1} class="!text-gray-700">Non-current liabilities</th></tr>
+              <StatementGroups groups={statement.nonCurrentLiabilities} ledgerLink={ledgerLink} />
+            </>
+          )}
+          <tr class="font-semibold text-gray-800">
+            <td>TOTAL LIABILITIES</td>
+            {statement.totals.liabilities.map(t => <td class="text-right tabular-nums border-t-2 border-gray-300">{statementAmount(t)}</td>)}
+          </tr>
+        </tbody>
+        <tbody>
+          <tr class="bg-gray-50"><th scope="rowgroup" colspan={columns.length + 1} class="!text-gray-800">NET ASSETS/EQUITY</th></tr>
+          <StatementGroups groups={statement.equity} ledgerLink={ledgerLink} />
+          <tr class="font-semibold text-gray-800">
+            <td>TOTAL NET ASSETS/EQUITY</td>
+            {statement.totals.equity.map(t => <td class="text-right tabular-nums border-t border-gray-200">{statementAmount(t)}</td>)}
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr class="border-t-2 border-gray-300 font-semibold">
+            <th scope="row" class="!text-sm !text-gray-800">TOTAL LIABILITIES AND NET ASSETS/EQUITY</th>
+            {statement.totals.liabilitiesAndEquity.map(t => <td class="text-right tabular-nums">{statementAmount(t)}</td>)}
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </article>
+</MainLayout>

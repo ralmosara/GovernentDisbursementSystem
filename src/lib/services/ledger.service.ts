@@ -18,9 +18,22 @@ import {
   payrollTransactions,
   remittances,
   fiscalYearClosings,
+  fixedAssets,
+  assetCategories,
+  assetDisposals,
+  propertyIssuances,
+  cashAdvances,
+  itineraryOfTravel,
+  liquidationReports,
+  inventoryItems,
+  inventoryTransactions,
+  inspectionAcceptanceReports,
+  users,
 } from '../db/schema';
 import { calculateGSISContribution, calculatePhilHealthContribution, calculatePagIBIGContribution } from '../utils/payroll-calculator';
-import { and, asc, desc, eq, gte, inArray, isNull, lte, like, notInArray, sql, type SQL } from 'drizzle-orm';
+import { CAPITALIZATION_THRESHOLD, PPE_ACCOUNTS } from '../constants/property';
+import { SUPPLY_ACCOUNTS, supplyAccountFor } from '../constants/inventory';
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lte, like, ne, notInArray, or, sql, type Column, type SQL } from 'drizzle-orm';
 import { logAudit } from '../middleware/audit-logger';
 
 /**
@@ -45,7 +58,19 @@ import { logAudit } from '../middleware/audit-logger';
  *   Payroll paid out     Dr Due to Officers and Employees  Cr Cash-MDS, Regular
  *   Remittance paid      Dr Due to GSIS/Pag-IBIG/PhilHealth  Cr Cash-MDS (BIR: Cr Cash-Tax Remittance Advice)
  *   Receivable written off  Dr Impairment Loss            Cr Accounts Receivable
+ *   Advance granted      Dr Advances to Officers and Employees  Cr the account the DV was debited to
+ *   Advance liquidated   Dr Expense (up to the advance), Cash-Collecting Officers (refund)
+ *                        Cr Advances to Officers and Employees
+ *   Depreciation (month) Dr Depreciation expense       Cr Accumulated Depreciation (one line per asset)
+ *   ICS issue            Dr Semi-Expendable Expenses   Cr Semi-Expendable Machinery and Equipment
+ *   Asset disposed       Dr Accumulated Depreciation, Other Receivables (proceeds), Loss
+ *                        Cr PPE (cost), Gain
+ *   Supplies into stock  Dr Supplies Inventory          Cr the expense the DV was debited to (IAR deliveries only)
+ *   Supplies issued      Dr Supplies Expense            Cr Supplies Inventory (up to the stock in the books)
  *   Year-end closing     revenue and expense balances → Accumulated Surplus/(Deficit), per fund
+ *
+ * Capital outlay object codes (506xx) are capitalised in the matching PPE account, and
+ * semi-expendable equipment in inventory, rather than expensed.
  *
  * A closed fiscal year accepts no entries; reopening it reverses its closing entries.
  */
@@ -57,6 +82,10 @@ export const ACCOUNTS = {
   CASH_MDS_REGULAR: '1010404000',
   CASH_TRA: '1010407000',
   ACCOUNTS_RECEIVABLE: '1030101000',
+  OTHER_RECEIVABLES: '1030599000',
+  SEMI_EXPENDABLE_EQUIPMENT: '1040501000',
+  MACHINERY: '1060501000',
+  ADVANCES_OFFICERS_EMPLOYEES: '1990104000',
   ACCOUNTS_PAYABLE: '2010101000',
   DUE_TO_OFFICERS_EMPLOYEES: '2010102000',
   DUE_TO_BIR: '2020101000',
@@ -73,9 +102,62 @@ export const ACCOUNTS = {
   RETIREMENT_LIFE_INSURANCE: '5010301000',
   PAGIBIG_CONTRIBUTIONS: '5010302000',
   PHILHEALTH_CONTRIBUTIONS: '5010303000',
+  SEMI_EXPENDABLE_EXPENSE: '5020321000',
+  LOSS_ON_SALE_PPE: '5050404000',
   SUBSIDY_FROM_NG: '4030101000',
+  GAIN_ON_SALE_PPE: '4050104000',
   MISCELLANEOUS_INCOME: '4060101000',
 } as const;
+
+export { PPE_ACCOUNTS };
+
+/** Capital outlay object codes (by 5-digit prefix) and the asset account each is capitalised in */
+const CAPITAL_OUTLAY_ACCOUNTS: Record<string, string> = {
+  '50601': '1060101000', // Land
+  '50602': '1060401000', // Buildings and other structures
+  '50603': '1060501000', // Machinery and equipment
+  '50604': '1060601000', // Transportation equipment
+  '50605': '1060701000', // Furniture, fixtures and books
+  '50606': ACCOUNTS.SEMI_EXPENDABLE_EQUIPMENT, // Semi-expendable: inventory until issued on an ICS
+};
+
+export type AccountType = 'asset' | 'liability' | 'equity' | 'revenue' | 'expense';
+
+/** Account type from the first digit of an RCA code */
+export function accountTypeOf(code: string): AccountType {
+  return ({ '1': 'asset', '2': 'liability', '3': 'equity', '4': 'revenue' } as const)[code[0] as '1'] ?? 'expense';
+}
+
+/** Account a DV's object of expenditure is debited to: capital outlay is capitalised, the rest expensed */
+export function debitAccountFor(objectCode: string): string {
+  if (objectCode.startsWith('506')) return CAPITAL_OUTLAY_ACCOUNTS[objectCode.slice(0, 5)] ?? ACCOUNTS.MACHINERY;
+  return objectCode;
+}
+
+/** The PPE class an asset category is carried in (Machinery when the category names none) */
+export function ppeAccountFor(code: string | null | undefined) {
+  return PPE_ACCOUNTS.find(a => a.code === code) ?? PPE_ACCOUNTS.find(a => a.code === ACCOUNTS.MACHINERY)!;
+}
+
+/**
+ * Straight-line depreciation an asset should have accumulated by the end of a month (1-12).
+ * Depreciation starts the month after acquisition and stops at cost less residual value.
+ * Semi-expendable items (below the capitalization threshold) are not depreciated.
+ */
+export function accumulatedDepreciationThrough(
+  asset: { acquisitionDate: Date | string; cost: number; salvage: number; usefulLife: number },
+  year: number,
+  month: number
+): number {
+  if (asset.cost < CAPITALIZATION_THRESHOLD || !(asset.usefulLife > 0)) return 0;
+  const depreciable = toCentavos(asset.cost) - toCentavos(asset.salvage);
+  if (depreciable <= 0) return 0;
+  const acquired = new Date(asset.acquisitionDate);
+  const months = year * 12 + (month - 1) - (acquired.getFullYear() * 12 + acquired.getMonth());
+  if (months <= 0) return 0;
+  const lifeMonths = asset.usefulLife * 12;
+  return (months >= lifeMonths ? depreciable : Math.round((depreciable * months) / lifeMonths)) / 100;
+}
 
 export type JournalType = 'general' | 'cash_receipts' | 'cash_disbursements' | 'check_disbursements';
 
@@ -99,6 +181,17 @@ export const SOURCE_LABELS: Record<string, string> = {
   payroll_payout: 'Payroll paid',
   remittance: 'Remittance',
   ar_writeoff: 'Receivable written off',
+  ca_granted: 'Cash advance granted',
+  ca_liquidation: 'Cash advance liquidated',
+  travel_advance: 'Travel advance granted',
+  travel_liquidation: 'Travel liquidated',
+  depreciation: 'Depreciation',
+  semi_expendable_issue: 'Semi-expendable issued (ICS)',
+  asset_disposal: 'Asset disposed',
+  asset_disposal_reversal: 'Disposal cancelled',
+  stock_receipt: 'Supplies received into stock',
+  stock_issue: 'Supplies issued (RIS)',
+  stock_reversal: 'Stock transaction cancelled',
   closing: 'Year-end closing',
   closing_reversal: 'Closing reversed',
   manual: 'Manual entry',
@@ -296,12 +389,13 @@ export class LedgerService {
     return result;
   }
 
-  /** Make sure an object-of-expenditure code exists as an expense account */
-  private async ensureExpenseAccount(code: string, title: string) {
+  /** Make sure an account exists, typed by its RCA code (object codes become expense accounts) */
+  private async ensureAccount(code: string, title: string) {
+    const accountType = accountTypeOf(code);
     await db
       .insert(chartOfAccounts)
       .ignore()
-      .values({ code, title, accountType: 'expense', normalBalance: 'debit' });
+      .values({ code, title, accountType, normalBalance: accountType === 'asset' || accountType === 'expense' ? 'debit' : 'credit' });
   }
 
   private async defaultFundClusterId(): Promise<number> {
@@ -346,7 +440,8 @@ export class LedgerService {
 
     if (!dv) throw new Error('Disbursement voucher not found');
     if (!dv.expenseCode) throw new Error(`DV ${dv.dvNo} has no object of expenditure`);
-    await this.ensureExpenseAccount(dv.expenseCode, dv.expenseName ?? dv.expenseCode);
+    const debitAccount = debitAccountFor(dv.expenseCode);
+    if (debitAccount === dv.expenseCode) await this.ensureAccount(debitAccount, dv.expenseName ?? dv.expenseCode);
 
     const gross = num(dv.amount);
     const tax = num(dv.totalTaxWithheld);
@@ -354,7 +449,7 @@ export class LedgerService {
     const rc = dv.responsibilityCenter ?? undefined;
 
     const lines: JournalLineInput[] = [
-      { accountCode: dv.expenseCode, debit: gross, description: dv.particulars, responsibilityCenter: rc },
+      { accountCode: debitAccount, debit: gross, description: dv.particulars, responsibilityCenter: rc },
     ];
     if (tax > 0) lines.push({ accountCode: ACCOUNTS.DUE_TO_BIR, credit: tax, description: 'Taxes withheld', subsidiary: dv.payeeName });
     lines.push({ accountCode: ACCOUNTS.ACCOUNTS_PAYABLE, credit: net, subsidiary: dv.payeeName });
@@ -692,6 +787,13 @@ export class LedgerService {
       sourceId: remittance.id,
       createdBy: userId,
       lines: [
+        // The TRA is a non-cash allocation from DBM: recognise it, then apply it to the tax due
+        ...(remittance.remittanceType === 'BIR'
+          ? [
+              { accountCode: ACCOUNTS.CASH_TRA, debit: amount, description: 'Tax Remittance Advice issued' },
+              { accountCode: ACCOUNTS.SUBSIDY_FROM_NG, credit: amount, description: 'Tax Remittance Advice issued' },
+            ]
+          : []),
         { accountCode: liability, debit: amount, subsidiary: remittance.remittanceType },
         { accountCode: cash, credit: amount },
       ],
@@ -722,6 +824,524 @@ export class LedgerService {
         { accountCode: ACCOUNTS.ACCOUNTS_RECEIVABLE, credit: amount, subsidiary: ar.debtorName },
       ],
     });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Advances to officers and employees (cash advances and travel)
+  // ---------------------------------------------------------------------------
+
+  /** An approved DV, put in the books first, with the account it was debited to */
+  private async approvedDv(dvId: number, userId: number) {
+    const [dv] = await db
+      .select({
+        id: disbursementVouchers.id,
+        dvNo: disbursementVouchers.dvNo,
+        status: disbursementVouchers.status,
+        amount: disbursementVouchers.amount,
+        fundClusterId: disbursementVouchers.fundClusterId,
+        expenseCode: objectOfExpenditure.code,
+      })
+      .from(disbursementVouchers)
+      .leftJoin(objectOfExpenditure, eq(disbursementVouchers.objectExpenditureId, objectOfExpenditure.id))
+      .where(eq(disbursementVouchers.id, dvId))
+      .limit(1);
+    if (!dv) throw new Error('Disbursement voucher not found');
+    if (dv.status !== 'approved' && dv.status !== 'paid') throw new Error(`DV ${dv.dvNo} is not yet approved`);
+    if (!dv.expenseCode) throw new Error(`DV ${dv.dvNo} has no object of expenditure`);
+    await this.postDvApproval(dv.id, userId);
+    return { ...dv, amount: num(dv.amount), account: debitAccountFor(dv.expenseCode) };
+  }
+
+  /** The DV paid an advance, not an expense: move it to Advances to Officers and Employees */
+  private async postAdvanceGranted(source: { type: string; id: number }, dvId: number, employee: string, particulars: string, userId: number) {
+    const dv = await this.approvedDv(dvId, userId);
+    return this.post({
+      date: new Date(),
+      fundClusterId: dv.fundClusterId,
+      journalType: 'general',
+      particulars,
+      sourceType: source.type,
+      sourceId: source.id,
+      createdBy: userId,
+      lines: [
+        { accountCode: ACCOUNTS.ADVANCES_OFFICERS_EMPLOYEES, debit: dv.amount, subsidiary: employee },
+        { accountCode: dv.account, credit: dv.amount, description: `Advance paid by DV ${dv.dvNo}` },
+      ],
+    });
+  }
+
+  /**
+   * Liquidation: expenses up to the advance are recognised and any unused balance is refunded
+   * to the cashier. Spending beyond the advance is reimbursed on its own DV, so it is not
+   * recognised here.
+   */
+  private async postAdvanceLiquidation(
+    source: { type: string; id: number },
+    dvId: number,
+    employee: string,
+    expenses: number,
+    date: Date,
+    particulars: string,
+    userId: number
+  ) {
+    const dv = await this.approvedDv(dvId, userId);
+    const spent = Math.min(toCentavos(expenses), toCentavos(dv.amount));
+    const refund = toCentavos(dv.amount) - spent;
+    const lines: JournalLineInput[] = [];
+    if (spent > 0) lines.push({ accountCode: dv.account, debit: spent / 100, description: 'Expenses liquidated' });
+    if (refund > 0) lines.push({ accountCode: ACCOUNTS.CASH_COLLECTING_OFFICERS, debit: refund / 100, description: 'Unused advance refunded' });
+    lines.push({ accountCode: ACCOUNTS.ADVANCES_OFFICERS_EMPLOYEES, credit: dv.amount, subsidiary: employee });
+    return this.post({
+      date,
+      fundClusterId: dv.fundClusterId,
+      journalType: refund > 0 ? 'cash_receipts' : 'general',
+      particulars,
+      sourceType: source.type,
+      sourceId: source.id,
+      createdBy: userId,
+      lines,
+    });
+  }
+
+  private async cashAdvance(caId: number) {
+    const [ca] = await db
+      .select({
+        id: cashAdvances.id,
+        caNo: cashAdvances.caNo,
+        dvId: cashAdvances.dvId,
+        purpose: cashAdvances.purpose,
+        status: cashAdvances.status,
+        totalExpenses: cashAdvances.totalExpenses,
+        dateLiquidated: cashAdvances.dateLiquidated,
+        employee: sql<string>`CONCAT(${users.firstName}, ' ', ${users.lastName})`,
+      })
+      .from(cashAdvances)
+      .leftJoin(users, eq(cashAdvances.employeeId, users.id))
+      .where(eq(cashAdvances.id, caId))
+      .limit(1);
+    if (!ca) throw new Error('Cash advance not found');
+    if (!ca.dvId) throw new Error(`Cash advance ${ca.caNo} has no disbursement voucher`);
+    return { ...ca, dvId: ca.dvId, employee: ca.employee ?? ca.caNo };
+  }
+
+  async postCashAdvanceGranted(caId: number, userId: number): Promise<PostResult> {
+    const ca = await this.cashAdvance(caId);
+    return this.postAdvanceGranted({ type: 'ca_granted', id: ca.id }, ca.dvId, ca.employee, `To record cash advance ${ca.caNo} granted to ${ca.employee}: ${ca.purpose}`, userId);
+  }
+
+  /** A liquidated advance, or one returned unused (a full refund) */
+  async postCashAdvanceLiquidation(caId: number, userId: number): Promise<PostResult> {
+    const ca = await this.cashAdvance(caId);
+    if (ca.status !== 'liquidated' && ca.status !== 'returned') throw new Error(`Cash advance ${ca.caNo} is not liquidated`);
+    if (ca.status === 'liquidated' && ca.totalExpenses === null) throw new Error(`Cash advance ${ca.caNo} has no liquidation figures`);
+    await this.postCashAdvanceGranted(caId, userId);
+    return this.postAdvanceLiquidation(
+      { type: 'ca_liquidation', id: ca.id },
+      ca.dvId,
+      ca.employee,
+      ca.status === 'returned' ? 0 : num(ca.totalExpenses),
+      ca.dateLiquidated ? new Date(ca.dateLiquidated) : new Date(),
+      `To record liquidation of cash advance ${ca.caNo} by ${ca.employee}`,
+      userId
+    );
+  }
+
+  private async travel(iotId: number) {
+    const [iot] = await db
+      .select({
+        id: itineraryOfTravel.id,
+        iotNo: itineraryOfTravel.iotNo,
+        dvId: itineraryOfTravel.dvId,
+        destination: itineraryOfTravel.destination,
+        employee: sql<string>`CONCAT(${users.firstName}, ' ', ${users.lastName})`,
+      })
+      .from(itineraryOfTravel)
+      .leftJoin(users, eq(itineraryOfTravel.employeeId, users.id))
+      .where(eq(itineraryOfTravel.id, iotId))
+      .limit(1);
+    if (!iot) throw new Error('Itinerary of travel not found');
+    if (!iot.dvId) throw new Error(`Travel ${iot.iotNo} has no cash advance DV`);
+    return { ...iot, dvId: iot.dvId, employee: iot.employee ?? iot.iotNo };
+  }
+
+  async postTravelAdvanceGranted(iotId: number, userId: number): Promise<PostResult> {
+    const iot = await this.travel(iotId);
+    return this.postAdvanceGranted({ type: 'travel_advance', id: iot.id }, iot.dvId, iot.employee, `To record travel cash advance for ${iot.iotNo} (${iot.destination}) granted to ${iot.employee}`, userId);
+  }
+
+  async postTravelLiquidation(lrId: number, userId: number): Promise<PostResult> {
+    const [lr] = await db.select().from(liquidationReports).where(eq(liquidationReports.id, lrId)).limit(1);
+    if (!lr) throw new Error('Liquidation report not found');
+    if (lr.status !== 'approved' && lr.status !== 'settled') throw new Error(`Liquidation ${lr.lrNo} is not approved`);
+    const iot = await this.travel(lr.iotId);
+    await this.postTravelAdvanceGranted(iot.id, userId);
+    return this.postAdvanceLiquidation(
+      { type: 'travel_liquidation', id: lr.id },
+      iot.dvId,
+      iot.employee,
+      num(lr.totalExpenses),
+      lr.reviewedDate ? new Date(lr.reviewedDate) : new Date(),
+      `To record liquidation ${lr.lrNo} of travel ${iot.iotNo} by ${iot.employee}`,
+      userId
+    );
+  }
+
+  /** A DV was approved: record any cash or travel advance it pays */
+  async postAdvancesForDv(dvId: number, userId: number): Promise<void> {
+    const [advances, travels] = await Promise.all([
+      db.select({ id: cashAdvances.id }).from(cashAdvances).where(and(eq(cashAdvances.dvId, dvId), inArray(cashAdvances.status, ['released', 'liquidated', 'returned']))),
+      db.select({ id: itineraryOfTravel.id }).from(itineraryOfTravel).where(and(eq(itineraryOfTravel.dvId, dvId), ne(itineraryOfTravel.status, 'cancelled'))),
+    ]);
+    for (const { id } of advances) await this.tryPost(`cash advance #${id}`, () => this.postCashAdvanceGranted(id, userId));
+    for (const { id } of travels) await this.tryPost(`travel #${id} advance`, () => this.postTravelAdvanceGranted(id, userId));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Property: depreciation, semi-expendable issues and disposals
+  // ---------------------------------------------------------------------------
+
+  /** Depreciation already in the books for each asset (net credits to accumulated depreciation) */
+  private async postedDepreciation(assetNos: string[]): Promise<Map<string, number>> {
+    const accounts = PPE_ACCOUNTS.map(a => a.accumulated).filter((code): code is string => Boolean(code));
+    if (assetNos.length === 0) return new Map();
+    const rows = await db
+      .select({
+        assetNo: journalEntryLines.subsidiary,
+        net: sql<string>`SUM(${journalEntryLines.credit}) - SUM(${journalEntryLines.debit})`,
+      })
+      .from(journalEntryLines)
+      .where(and(inArray(journalEntryLines.accountCode, accounts), inArray(journalEntryLines.subsidiary, assetNos)))
+      .groupBy(journalEntryLines.subsidiary);
+    return new Map(rows.map(r => [r.assetNo ?? '', toCentavos(r.net)]));
+  }
+
+  /**
+   * Depreciation for a month, per asset: what should have accumulated by month end less what
+   * is already posted, so a skipped month is caught up the next time depreciation is posted.
+   */
+  async getDepreciationRun(year: number, month: number) {
+    const monthEnd = new Date(year, month, 0, 23, 59, 59);
+    const assets = await db
+      .select({
+        id: fixedAssets.id,
+        assetNo: fixedAssets.assetNo,
+        description: fixedAssets.description,
+        acquisitionDate: fixedAssets.acquisitionDate,
+        acquisitionCost: fixedAssets.acquisitionCost,
+        salvageValue: fixedAssets.salvageValue,
+        usefulLife: fixedAssets.usefulLife,
+        status: fixedAssets.status,
+        categoryName: assetCategories.name,
+        accountCode: assetCategories.accountCode,
+        disposalDate: sql<string | null>`(SELECT MIN(${assetDisposals.disposalDate}) FROM ${assetDisposals} WHERE ${assetDisposals.assetId} = ${fixedAssets.id})`,
+      })
+      .from(fixedAssets)
+      .leftJoin(assetCategories, eq(fixedAssets.assetCategoryId, assetCategories.id))
+      .where(and(lte(fixedAssets.acquisitionDate, monthEnd), sql`${fixedAssets.acquisitionCost} >= ${CAPITALIZATION_THRESHOLD}`))
+      .orderBy(asc(fixedAssets.assetNo));
+
+    // Disposed assets are depreciated up to the month before their disposal
+    const inService = assets.filter(a =>
+      a.status === 'active' || (a.status === 'disposed' && a.disposalDate !== null && new Date(a.disposalDate) > monthEnd)
+    );
+    const posted = await this.postedDepreciation(inService.map(a => a.assetNo));
+
+    const rows = inService
+      .map(asset => {
+        const ppe = ppeAccountFor(asset.accountCode);
+        const due = toCentavos(
+          accumulatedDepreciationThrough(
+            { acquisitionDate: asset.acquisitionDate, cost: num(asset.acquisitionCost), salvage: num(asset.salvageValue), usefulLife: asset.usefulLife },
+            year,
+            month
+          )
+        );
+        return {
+          assetId: asset.id,
+          assetNo: asset.assetNo,
+          description: asset.description,
+          categoryName: asset.categoryName,
+          ppeTitle: ppe.title,
+          accumulatedAccount: ppe.accumulated,
+          expenseAccount: ppe.depreciation,
+          amount: ppe.accumulated ? Math.max(0, due - (posted.get(asset.assetNo) ?? 0)) / 100 : 0,
+        };
+      })
+      .filter(row => row.amount > 0);
+
+    return { rows, total: rows.reduce((sum, r) => sum + toCentavos(r.amount), 0) / 100 };
+  }
+
+  /** Depreciation entries posted in a year, keyed by month */
+  async getDepreciationEntries(year: number) {
+    const rows = await db
+      .select({ id: journalEntries.id, jevNo: journalEntries.jevNo, sourceId: journalEntries.sourceId, status: journalEntries.status })
+      .from(journalEntries)
+      .where(and(eq(journalEntries.sourceType, 'depreciation'), gte(journalEntries.sourceId, year * 100 + 1), lte(journalEntries.sourceId, year * 100 + 12)));
+    return new Map(rows.map(r => [(r.sourceId ?? 0) % 100, r]));
+  }
+
+  /** Post a month's depreciation, dated the last day of the month, once the month has ended */
+  async postDepreciation(year: number, month: number, userId: number): Promise<PostResult> {
+    if (!(month >= 1 && month <= 12)) throw new Error('Choose a month');
+    const monthEnd = new Date(year, month, 0, 23, 59, 59);
+    const label = monthEnd.toLocaleDateString('en-PH', { month: 'long', year: 'numeric' });
+    const existing = await this.findBySource('depreciation', year * 100 + month);
+    if (existing) return { id: existing.id, jevNo: existing.jevNo, created: false };
+    if (monthEnd > new Date()) throw new Error(`Depreciation for ${label} can be posted once the month ends`);
+
+    const { rows } = await this.getDepreciationRun(year, month);
+    if (rows.length === 0) throw new Error(`No depreciation is due for ${label}`);
+
+    const expense = new Map<string, number>();
+    for (const row of rows) expense.set(row.expenseAccount!, (expense.get(row.expenseAccount!) ?? 0) + toCentavos(row.amount));
+
+    return this.post({
+      date: monthEnd,
+      fundClusterId: await this.defaultFundClusterId(),
+      journalType: 'general',
+      particulars: `To record depreciation of property, plant and equipment for ${label}`,
+      sourceType: 'depreciation',
+      sourceId: year * 100 + month,
+      createdBy: userId,
+      lines: [
+        ...[...expense].map(([accountCode, centavos]) => ({ accountCode, debit: centavos / 100, description: `Depreciation for ${label}` })),
+        ...rows.map(row => ({ accountCode: row.accumulatedAccount!, credit: row.amount, subsidiary: row.assetNo, description: row.description })),
+      ],
+    });
+  }
+
+  /** Semi-expendable property is expensed when first issued to an officer on an ICS */
+  async postSemiExpendableIssue(assetId: number, userId: number): Promise<PostResult> {
+    const [asset] = await db.select().from(fixedAssets).where(eq(fixedAssets.id, assetId)).limit(1);
+    if (!asset) throw new Error('Asset not found');
+    const cost = num(asset.acquisitionCost);
+    if (cost >= CAPITALIZATION_THRESHOLD) throw new Error(`${asset.assetNo} is PPE, not semi-expendable property`);
+    if (!(cost > 0)) throw new Error(`${asset.assetNo} has no cost`);
+
+    const [first] = await db
+      .select({ documentNo: propertyIssuances.documentNo, issueDate: propertyIssuances.issueDate, issuedTo: propertyIssuances.issuedTo })
+      .from(propertyIssuances)
+      .where(eq(propertyIssuances.assetId, assetId))
+      .orderBy(asc(propertyIssuances.issueDate), asc(propertyIssuances.id))
+      .limit(1);
+    if (!first) throw new Error(`${asset.assetNo} has not been issued`);
+
+    return this.post({
+      date: new Date(first.issueDate),
+      fundClusterId: await this.defaultFundClusterId(),
+      journalType: 'general',
+      particulars: `To record issue of semi-expendable property ${asset.assetNo} to ${first.issuedTo} per ${first.documentNo}`,
+      sourceType: 'semi_expendable_issue',
+      sourceId: asset.id,
+      createdBy: userId,
+      lines: [
+        { accountCode: ACCOUNTS.SEMI_EXPENDABLE_EXPENSE, debit: cost, subsidiary: asset.assetNo, description: asset.description },
+        { accountCode: ACCOUNTS.SEMI_EXPENDABLE_EQUIPMENT, credit: cost, subsidiary: asset.assetNo },
+      ],
+    });
+  }
+
+  /** The entry a disposal posts; empty when nothing is left on the books and nothing was received */
+  private async disposalEntry(disposalId: number) {
+    const [row] = await db
+      .select({
+        id: assetDisposals.id,
+        disposalNo: assetDisposals.disposalNo,
+        disposalDate: assetDisposals.disposalDate,
+        disposalMethod: assetDisposals.disposalMethod,
+        disposalValue: assetDisposals.disposalValue,
+        buyerRecipient: assetDisposals.buyerRecipient,
+        assetId: fixedAssets.id,
+        assetNo: fixedAssets.assetNo,
+        description: fixedAssets.description,
+        acquisitionCost: fixedAssets.acquisitionCost,
+        accountCode: assetCategories.accountCode,
+      })
+      .from(assetDisposals)
+      .innerJoin(fixedAssets, eq(assetDisposals.assetId, fixedAssets.id))
+      .leftJoin(assetCategories, eq(fixedAssets.assetCategoryId, assetCategories.id))
+      .where(eq(assetDisposals.id, disposalId))
+      .limit(1);
+    if (!row) throw new Error('Disposal not found');
+
+    const cost = toCentavos(row.acquisitionCost);
+    const proceeds = toCentavos(row.disposalValue);
+    const lines: JournalLineInput[] = [];
+    let carrying: number;
+
+    if (cost >= CAPITALIZATION_THRESHOLD * 100) {
+      const ppe = ppeAccountFor(row.accountCode);
+      const accumulated = ppe.accumulated ? ((await this.postedDepreciation([row.assetNo])).get(row.assetNo) ?? 0) : 0;
+      if (accumulated > 0) lines.push({ accountCode: ppe.accumulated!, debit: accumulated / 100, subsidiary: row.assetNo });
+      lines.push({ accountCode: ppe.code, credit: cost / 100, subsidiary: row.assetNo, description: row.description });
+      carrying = cost - accumulated;
+    } else {
+      // Semi-expendable property already expensed on issue has nothing left on the books
+      carrying = (await this.findBySource('semi_expendable_issue', row.assetId)) ? 0 : cost;
+      if (carrying > 0) lines.push({ accountCode: ACCOUNTS.SEMI_EXPENDABLE_EQUIPMENT, credit: carrying / 100, subsidiary: row.assetNo });
+    }
+
+    if (proceeds > 0) lines.push({ accountCode: ACCOUNTS.OTHER_RECEIVABLES, debit: proceeds / 100, subsidiary: row.buyerRecipient ?? undefined, description: 'Disposal proceeds' });
+    const gain = proceeds - carrying;
+    if (gain > 0) lines.push({ accountCode: ACCOUNTS.GAIN_ON_SALE_PPE, credit: gain / 100, subsidiary: row.assetNo });
+    if (gain < 0) lines.push({ accountCode: ACCOUNTS.LOSS_ON_SALE_PPE, debit: -gain / 100, subsidiary: row.assetNo });
+
+    return { disposal: row, lines };
+  }
+
+  /** Remove a disposed asset from the books; null when there is nothing to post */
+  async postAssetDisposal(disposalId: number, userId: number): Promise<PostResult | null> {
+    const existing = await this.findBySource('asset_disposal', disposalId);
+    if (existing) return { id: existing.id, jevNo: existing.jevNo, created: false };
+    const { disposal, lines } = await this.disposalEntry(disposalId);
+    if (lines.length < 2) return null;
+    return this.post({
+      date: new Date(disposal.disposalDate),
+      fundClusterId: await this.defaultFundClusterId(),
+      journalType: 'general',
+      particulars: `To record disposal ${disposal.disposalNo} of ${disposal.assetNo} by ${disposal.disposalMethod}`,
+      sourceType: 'asset_disposal',
+      sourceId: disposal.id,
+      createdBy: userId,
+      lines,
+    });
+  }
+
+  /** A cancelled disposal puts the asset back on the books */
+  async reverseAssetDisposal(disposalId: number, userId: number, reason: string): Promise<PostResult | null> {
+    const entry = await this.findBySource('asset_disposal', disposalId);
+    if (!entry) return null;
+    return this.reverse(entry.id, userId, reason, 'asset_disposal_reversal');
+  }
+
+  // ---------------------------------------------------------------------------
+  // Supplies inventory
+  // ---------------------------------------------------------------------------
+
+  private async stockTransaction(transactionId: number) {
+    const [row] = await db
+      .select({
+        id: inventoryTransactions.id,
+        transactionNo: inventoryTransactions.transactionNo,
+        transactionDate: inventoryTransactions.transactionDate,
+        transactionType: inventoryTransactions.transactionType,
+        quantity: inventoryTransactions.quantity,
+        unitCost: inventoryTransactions.unitCost,
+        reference: inventoryTransactions.reference,
+        requestedBy: inventoryTransactions.requestedBy,
+        itemCode: inventoryItems.itemCode,
+        itemName: inventoryItems.itemName,
+        accountCode: inventoryItems.accountCode,
+      })
+      .from(inventoryTransactions)
+      .innerJoin(inventoryItems, eq(inventoryTransactions.itemId, inventoryItems.id))
+      .where(eq(inventoryTransactions.id, transactionId))
+      .limit(1);
+    if (!row) throw new Error('Inventory transaction not found');
+    return { ...row, value: toCentavos(row.unitCost) * row.quantity, account: supplyAccountFor(row.accountCode) };
+  }
+
+  /** Stock of each item in the books (net debits to its inventory account), per fund cluster */
+  private async postedStock(itemCodes: string[]) {
+    if (itemCodes.length === 0) return [];
+    const rows = await db
+      .select({
+        itemCode: journalEntryLines.subsidiary,
+        fundClusterId: journalEntries.fundClusterId,
+        balance: sql<string>`SUM(${journalEntryLines.debit} - ${journalEntryLines.credit})`,
+      })
+      .from(journalEntryLines)
+      .innerJoin(journalEntries, eq(journalEntryLines.journalEntryId, journalEntries.id))
+      .where(and(inArray(journalEntryLines.accountCode, SUPPLY_ACCOUNTS.map(a => a.code)), inArray(journalEntryLines.subsidiary, itemCodes)))
+      .groupBy(journalEntryLines.subsidiary, journalEntries.fundClusterId);
+    return rows.map(r => ({ itemCode: r.itemCode!, fundClusterId: r.fundClusterId, balance: toCentavos(r.balance) }));
+  }
+
+  /**
+   * Supplies delivered under an IAR and received into stock: the DV charged them to expense,
+   * so move them to inventory until issued. Null for receipts not delivered under an IAR
+   * (opening stock, donations) or paid as capital outlay, which post no entry.
+   */
+  async postStockReceipt(transactionId: number, userId: number): Promise<PostResult | null> {
+    const existing = await this.findBySource('stock_receipt', transactionId);
+    if (existing) return { id: existing.id, jevNo: existing.jevNo, created: false };
+    const receipt = await this.stockTransaction(transactionId);
+    if (receipt.transactionType !== 'receipt') throw new Error(`${receipt.transactionNo} is not a receipt`);
+
+    const iarNo = receipt.reference?.includes('/L') ? receipt.reference.slice(0, receipt.reference.lastIndexOf('/L')) : null;
+    if (!iarNo) return null;
+    const [iar] = await db
+      .select({ dvId: inspectionAcceptanceReports.dvId })
+      .from(inspectionAcceptanceReports)
+      .where(eq(inspectionAcceptanceReports.iarNo, iarNo))
+      .limit(1);
+    if (!iar?.dvId) return null;
+    const dv = await this.approvedDv(iar.dvId, userId);
+    if (accountTypeOf(dv.account) !== 'expense' || receipt.value <= 0) return null;
+
+    await this.ensureAccount(receipt.account.code, receipt.account.title);
+    return this.post({
+      date: new Date(receipt.transactionDate),
+      fundClusterId: dv.fundClusterId,
+      journalType: 'general',
+      particulars: `To record receipt of ${receipt.quantity} ${receipt.itemName} into stock per ${receipt.reference} (DV ${dv.dvNo})`,
+      sourceType: 'stock_receipt',
+      sourceId: receipt.id,
+      createdBy: userId,
+      lines: [
+        { accountCode: receipt.account.code, debit: receipt.value / 100, subsidiary: receipt.itemCode, description: receipt.itemName },
+        { accountCode: dv.account, credit: receipt.value / 100, description: `Received into stock, paid by DV ${dv.dvNo}` },
+      ],
+    });
+  }
+
+  /**
+   * Supplies issued (RIS): charge them to expense out of inventory. Only stock that is in the
+   * books is expensed, so stock never moved to inventory (already expensed on its DV) is not
+   * charged twice. Null when the item has no stock in the books.
+   */
+  async postStockIssue(transactionId: number, userId: number): Promise<PostResult | null> {
+    const existing = await this.findBySource('stock_issue', transactionId);
+    if (existing) return { id: existing.id, jevNo: existing.jevNo, created: false };
+    const issue = await this.stockTransaction(transactionId);
+    if (issue.transactionType !== 'issue') throw new Error(`${issue.transactionNo} is not an issue`);
+
+    const [fund] = (await this.postedStock([issue.itemCode])).filter(s => s.balance > 0).sort((a, b) => b.balance - a.balance);
+    const amount = Math.min(issue.value, fund?.balance ?? 0);
+    if (amount <= 0) return null;
+
+    await this.ensureAccount(issue.account.expense, issue.account.title.replace('Inventory', 'Expenses'));
+    return this.post({
+      date: new Date(issue.transactionDate),
+      fundClusterId: fund.fundClusterId,
+      journalType: 'general',
+      particulars: `To record issue of ${issue.quantity} ${issue.itemName}${issue.requestedBy ? ` to ${issue.requestedBy}` : ''}${issue.reference ? ` per ${issue.reference}` : ''}`,
+      sourceType: 'stock_issue',
+      sourceId: issue.id,
+      createdBy: userId,
+      lines: [
+        { accountCode: issue.account.expense, debit: amount / 100, subsidiary: issue.itemCode, description: issue.itemName },
+        { accountCode: issue.account.code, credit: amount / 100, subsidiary: issue.itemCode },
+      ],
+    });
+  }
+
+  /** A deleted stock transaction takes its entry with it */
+  async reverseStockTransaction(transactionId: number, userId: number, reason: string): Promise<PostResult | null> {
+    const entry = (await this.findBySource('stock_receipt', transactionId)) ?? (await this.findBySource('stock_issue', transactionId));
+    if (!entry) return null;
+    return this.reverse(entry.id, userId, reason, 'stock_reversal');
+  }
+
+  /** A DV was approved: move supplies it paid for that are already in stock into inventory */
+  async postStockReceiptsForDv(dvId: number, userId: number): Promise<void> {
+    const receipts = await db
+      .select({ id: inventoryTransactions.id })
+      .from(inventoryTransactions)
+      .innerJoin(inspectionAcceptanceReports, sql`${inventoryTransactions.reference} LIKE CONCAT(${inspectionAcceptanceReports.iarNo}, '/L%')`)
+      .where(and(eq(inventoryTransactions.transactionType, 'receipt'), eq(inspectionAcceptanceReports.dvId, dvId)));
+    for (const { id } of receipts) await this.tryPost(`stock receipt #${id}`, () => this.postStockReceipt(id, userId));
   }
 
   // ---------------------------------------------------------------------------
@@ -945,12 +1565,74 @@ export class LedgerService {
       this.unpostedIds('remittance', remittances, remittances.id, eq(remittances.paymentStatus, 'Paid')),
       this.unpostedIds('ar_writeoff', accountsReceivable, accountsReceivable.id, eq(accountsReceivable.status, 'written_off')),
     ]);
+
+    const dvApproved = (dvId: SQL | Column) =>
+      sql`EXISTS (SELECT 1 FROM ${disbursementVouchers} WHERE ${disbursementVouchers.id} = ${dvId} AND ${disbursementVouchers.status} IN ('approved', 'paid'))`;
+    const [advanceGrants, advanceLiquidations, travelAdvances, travelLiquidations, semiExpendableIssues, disposalIds, stockReceipts, stockIssues] = await Promise.all([
+      this.unpostedIds('ca_granted', cashAdvances, cashAdvances.id,
+        and(inArray(cashAdvances.status, ['released', 'liquidated', 'returned']), isNotNull(cashAdvances.dvId), dvApproved(cashAdvances.dvId))),
+      this.unpostedIds('ca_liquidation', cashAdvances, cashAdvances.id,
+        and(
+          isNotNull(cashAdvances.dvId),
+          dvApproved(cashAdvances.dvId),
+          or(eq(cashAdvances.status, 'returned'), and(eq(cashAdvances.status, 'liquidated'), isNotNull(cashAdvances.totalExpenses)))
+        )),
+      this.unpostedIds('travel_advance', itineraryOfTravel, itineraryOfTravel.id,
+        and(isNotNull(itineraryOfTravel.dvId), ne(itineraryOfTravel.status, 'cancelled'), dvApproved(itineraryOfTravel.dvId))),
+      this.unpostedIds('travel_liquidation', liquidationReports, liquidationReports.id,
+        and(
+          inArray(liquidationReports.status, ['approved', 'settled']),
+          sql`EXISTS (SELECT 1 FROM ${itineraryOfTravel} WHERE ${itineraryOfTravel.id} = ${liquidationReports.iotId} AND ${dvApproved(sql`${itineraryOfTravel.dvId}`)})`
+        )),
+      this.unpostedIds('semi_expendable_issue', fixedAssets, fixedAssets.id,
+        and(
+          sql`${fixedAssets.acquisitionCost} > 0`,
+          sql`${fixedAssets.acquisitionCost} < ${CAPITALIZATION_THRESHOLD}`,
+          sql`EXISTS (SELECT 1 FROM ${propertyIssuances} WHERE ${propertyIssuances.assetId} = ${fixedAssets.id})`
+        )),
+      this.unpostedIds('asset_disposal', assetDisposals, assetDisposals.id),
+      // Receipts delivered under an IAR whose DV is approved and charged supplies to expense
+      this.unpostedIds('stock_receipt', inventoryTransactions, inventoryTransactions.id,
+        and(
+          eq(inventoryTransactions.transactionType, 'receipt'),
+          sql`EXISTS (SELECT 1 FROM ${inspectionAcceptanceReports}
+            INNER JOIN ${disbursementVouchers} ON ${disbursementVouchers.id} = ${inspectionAcceptanceReports.dvId}
+            INNER JOIN ${objectOfExpenditure} ON ${objectOfExpenditure.id} = ${disbursementVouchers.objectExpenditureId}
+            WHERE ${inventoryTransactions.reference} LIKE CONCAT(${inspectionAcceptanceReports.iarNo}, '/L%')
+              AND ${disbursementVouchers.status} IN ('approved', 'paid')
+              AND ${objectOfExpenditure.code} LIKE '5%' AND ${objectOfExpenditure.code} NOT LIKE '506%')`
+        )),
+      this.unpostedStockIssues(),
+    ]);
+    // A disposal with nothing on the books and no proceeds has no entry to post
+    const disposals: number[] = [];
+    for (const id of disposalIds) {
+      if ((await this.disposalEntry(id).catch(() => null))?.lines.length) disposals.push(id);
+    }
+
     const groups = {
       dvs, payments: paid, paymentReversals: reversed, receipts, invoices, collections: colls, deposits, ncas,
       payrolls, payrollPayouts: payouts, remittances: remits, writeOffs,
+      advanceGrants, advanceLiquidations, travelAdvances, travelLiquidations, semiExpendableIssues, disposals,
+    stockReceipts, stockIssues,
     };
     const total = Object.values(groups).reduce((sum, ids) => sum + ids.length, 0);
     return { ...groups, total };
+  }
+
+  /** Issues of items that have stock in the books, oldest first */
+  private async unpostedStockIssues(): Promise<number[]> {
+    const posted = await this.postedIds('stock_issue');
+    const issues = await db
+      .select({ id: inventoryTransactions.id, itemCode: inventoryItems.itemCode })
+      .from(inventoryTransactions)
+      .innerJoin(inventoryItems, eq(inventoryTransactions.itemId, inventoryItems.id))
+      .where(and(eq(inventoryTransactions.transactionType, 'issue'), posted.length ? notInArray(inventoryTransactions.id, posted) : undefined))
+      .orderBy(asc(inventoryTransactions.transactionDate), asc(inventoryTransactions.id));
+    const stocked = new Set(
+      (await this.postedStock([...new Set(issues.map(i => i.itemCode))])).filter(s => s.balance > 0).map(s => s.itemCode)
+    );
+    return issues.filter(i => stocked.has(i.itemCode)).map(i => i.id);
   }
 
   /** Stale payments whose issue entry exists but has not been reversed */
@@ -992,6 +1674,15 @@ export class LedgerService {
     for (const id of unposted.payrollPayouts) await run(`Payroll #${id} payout`, () => this.postPayrollPayout(id, userId));
     for (const id of unposted.remittances) await run(`Remittance #${id}`, () => this.postRemittance(id, userId));
     for (const id of unposted.writeOffs) await run(`Receivable #${id} write-off`, () => this.postArWriteOff(id, userId));
+    for (const id of unposted.advanceGrants) await run(`Cash advance #${id}`, () => this.postCashAdvanceGranted(id, userId));
+    for (const id of unposted.advanceLiquidations) await run(`Cash advance #${id} liquidation`, () => this.postCashAdvanceLiquidation(id, userId));
+    for (const id of unposted.travelAdvances) await run(`Travel #${id} advance`, () => this.postTravelAdvanceGranted(id, userId));
+    for (const id of unposted.travelLiquidations) await run(`Liquidation #${id}`, () => this.postTravelLiquidation(id, userId));
+    for (const id of unposted.semiExpendableIssues) await run(`Asset #${id} ICS issue`, () => this.postSemiExpendableIssue(id, userId));
+    for (const id of unposted.disposals) await run(`Disposal #${id}`, () => this.postAssetDisposal(id, userId));
+    // Receipts before issues, so issues find the stock in the books
+    for (const id of unposted.stockReceipts) await run(`Stock receipt #${id}`, () => this.postStockReceipt(id, userId));
+    for (const id of unposted.stockIssues) await run(`Stock issue #${id}`, () => this.postStockIssue(id, userId));
 
     return results;
   }

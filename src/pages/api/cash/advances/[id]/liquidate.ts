@@ -3,8 +3,9 @@ import { db } from '../../../../../lib/db/connection';
 import { cashAdvances } from '../../../../../lib/db/schema';
 import { eq } from 'drizzle-orm';
 import { logUpdate } from '../../../../../lib/middleware/audit-logger';
+import { cashService } from '../../../../../lib/services/cash.service';
 
-export const POST: APIRoute = async ({ params, request, locals, clientAddress }) => {
+export const POST: APIRoute = async ({ params, request, locals }) => {
   try {
     const user = locals.user;
 
@@ -81,7 +82,7 @@ export const POST: APIRoute = async ({ params, request, locals, clientAddress })
     }
 
     if (data.shortageAmount > 0) {
-      liquidationRemarks += `Shortage (Employee Paid): ₱${parseFloat(data.shortageAmount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}\n`;
+      liquidationRemarks += `Shortage (to be reimbursed on a separate DV): ₱${parseFloat(data.shortageAmount).toLocaleString('en-PH', { minimumFractionDigits: 2 })}\n`;
     }
 
     liquidationRemarks += `\nSupporting Documents:\n${data.supportingDocs}`;
@@ -90,15 +91,12 @@ export const POST: APIRoute = async ({ params, request, locals, clientAddress })
       liquidationRemarks += `\n\nAdditional Remarks:\n${data.remarks}`;
     }
 
-    // Update cash advance to liquidated
-    await db
-      .update(cashAdvances)
-      .set({
-        status: 'liquidated',
-        dateLiquidated: new Date(data.dateLiquidated),
-        remarks: liquidationRemarks,
-      })
-      .where(eq(cashAdvances.id, id));
+    // Records the figures and posts the liquidation to the ledger
+    await cashService.liquidateCashAdvance(
+      id,
+      { dateLiquidated: new Date(data.dateLiquidated), totalExpenses: parseFloat(data.totalExpenses), remarks: liquidationRemarks },
+      user.id
+    );
 
     // Log the update
     await logUpdate(
@@ -114,8 +112,7 @@ export const POST: APIRoute = async ({ params, request, locals, clientAddress })
         shortageAmount: data.shortageAmount,
       },
       user.id,
-      clientAddress,
-      request.headers.get('user-agent') || undefined
+      request
     );
 
     return new Response(

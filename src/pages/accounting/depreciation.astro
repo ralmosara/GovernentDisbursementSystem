@@ -1,0 +1,158 @@
+---
+import MainLayout from '../../layouts/MainLayout.astro';
+import PageHeader from '../../components/ui/PageHeader.astro';
+import Banner from '../../components/ui/Banner.astro';
+import EmptyState from '../../components/ui/EmptyState.astro';
+import Lozenge from '../../components/ui/Lozenge.astro';
+import { ledgerService } from '../../lib/services/ledger.service';
+import { CAPITALIZATION_THRESHOLD } from '../../lib/constants/property';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const roles = user.roles ?? [];
+const canPost = roles.some(role => role === 'accountant' || role === 'administrator');
+
+const now = new Date();
+const currentYear = now.getFullYear();
+const year = parseInt(Astro.url.searchParams.get('year') ?? '') || currentYear;
+// Default to the latest month that has ended
+const lastEnded = year < currentYear ? 12 : now.getMonth();
+const month = parseInt(Astro.url.searchParams.get('month') ?? '') || Math.max(1, lastEnded);
+
+const [entries, run, closed] = await Promise.all([
+  ledgerService.getDepreciationEntries(year),
+  ledgerService.getDepreciationRun(year, month),
+  ledgerService.isYearClosed(year),
+]);
+
+const monthName = (m: number) => new Date(year, m - 1, 1).toLocaleDateString('en-PH', { month: 'long' });
+const hasEnded = (m: number) => new Date(year, m, 0, 23, 59, 59) < now;
+const posted = entries.get(month);
+const peso = (value: number) => `₱${value.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const done = Astro.url.searchParams.get('done');
+---
+
+<MainLayout title={`Depreciation ${monthName(month)} ${year} - Philippine Government FMS`}>
+  <PageHeader
+    title="Depreciation"
+    description={`Monthly straight-line depreciation of property, plant and equipment (items costing ₱${CAPITALIZATION_THRESHOLD.toLocaleString('en-PH')} or more), posted to the general ledger.`}
+    breadcrumbs={[{ label: 'Accounting', href: '/accounting/journals' }, { label: 'Depreciation' }]}
+  >
+    <nav slot="actions" class="flex gap-1" aria-label="Fiscal year">
+      {[currentYear, currentYear - 1, currentYear - 2].map(y => (
+        <a href={`/accounting/depreciation?year=${y}`} class={`btn btn-sm ${y === year ? 'btn-secondary' : 'btn-subtle'}`} aria-current={y === year ? 'page' : undefined}>FY {y}</a>
+      ))}
+    </nav>
+  </PageHeader>
+
+  {done && posted && (
+    <Banner appearance="success" title={`Depreciation for ${monthName(month)} ${year} posted`} class="mb-6" role="status">
+      <a href={`/accounting/journals/${posted.id}`} class="underline">JEV {posted.jevNo}</a>
+    </Banner>
+  )}
+  {closed && <Banner appearance="info" title={`FY ${year} is closed`} class="mb-6">No more depreciation can be posted into it.</Banner>}
+
+  <div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+    <section class="card self-start" aria-labelledby="months-heading">
+      <div class="card-header">
+        <h2 id="months-heading" class="card-title">FY {year}</h2>
+      </div>
+      <ul class="divide-y divide-gray-200">
+        {Array.from({ length: 12 }, (_, i) => i + 1).map(m => {
+          const entry = entries.get(m);
+          return (
+            <li>
+              <a
+                href={`/accounting/depreciation?year=${year}&month=${m}`}
+                class={`flex items-center justify-between px-5 py-2.5 hover:bg-gray-50 ${m === month ? 'bg-gray-50 font-semibold' : ''}`}
+                aria-current={m === month ? 'page' : undefined}
+              >
+                <span>{monthName(m)}</span>
+                {entry ? <Lozenge status="posted" label={`JEV ${entry.jevNo}`} /> : hasEnded(m) ? <Lozenge status="pending" label="Not posted" /> : <span class="text-sm text-gray-500">Not ended</span>}
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+
+    <section class="card xl:col-span-2 min-w-0" aria-labelledby="run-heading">
+      <div class="card-header">
+        <h2 id="run-heading" class="card-title">{monthName(month)} {year}</h2>
+        {posted ? (
+          <a href={`/accounting/journals/${posted.id}`} class="btn btn-sm btn-secondary">View JEV {posted.jevNo}</a>
+        ) : canPost && !closed && hasEnded(month) && run.rows.length > 0 ? (
+          <button type="button" class="btn btn-primary btn-sm" id="post-depreciation">
+            <i class="pi pi-check" aria-hidden="true"></i>
+            Post {peso(run.total)}
+          </button>
+        ) : null}
+      </div>
+
+      {posted ? (
+        <p class="px-5 py-4 text-sm text-gray-700">
+          Depreciation for this month is in the books. Any amount still listed below is depreciation that was due
+          before this month but posted late; it will be caught up in the next month posted.
+        </p>
+      ) : !hasEnded(month) ? (
+        <p class="px-5 py-4 text-sm text-gray-700">This month hasn't ended. Depreciation can be posted from the 1st of next month.</p>
+      ) : null}
+      <p id="post-error" class="form-error hidden px-5" role="alert"></p>
+
+      {run.rows.length === 0 ? (
+        <EmptyState icon="pi-chart-line" title={posted ? 'Nothing more is due' : 'No depreciation is due'} description="Assets start depreciating the month after acquisition and stop at cost less residual value. Land is not depreciated." />
+      ) : (
+        <div class="relative overflow-x-auto">
+          <table class="table">
+            <thead>
+              <tr>
+                <th scope="col">Asset</th>
+                <th scope="col">PPE account</th>
+                <th scope="col" class="!text-right">Depreciation</th>
+              </tr>
+            </thead>
+            <tbody>
+              {run.rows.map(row => (
+                <tr>
+                  <td>
+                    <a href={`/assets/fixed/${row.assetId}`} class="font-medium hover:underline">{row.assetNo}</a>
+                    <span class="block text-sm text-gray-600">{row.description}</span>
+                  </td>
+                  <td class="text-gray-700">{row.ppeTitle}</td>
+                  <td class="text-right tabular-nums">{peso(row.amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr class="border-t-2 border-gray-200 font-semibold">
+                <th scope="row" colspan="2" class="!text-sm !text-gray-800">Total</th>
+                <td class="text-right tabular-nums">{peso(run.total)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+    </section>
+  </div>
+
+  <script define:vars={{ year, month }}>
+    const button = document.getElementById('post-depreciation');
+    button?.addEventListener('click', async () => {
+      button.disabled = true;
+      const error = document.getElementById('post-error');
+      const response = await fetch('/api/accounting/depreciation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ year, month }),
+      });
+      const result = await response.json();
+      if (response.ok) window.location.href = `/accounting/depreciation?year=${year}&month=${month}&done=1`;
+      else {
+        error.textContent = result.message;
+        error.classList.remove('hidden');
+        button.disabled = false;
+      }
+    });
+  </script>
+</MainLayout>

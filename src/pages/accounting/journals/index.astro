@@ -63,6 +63,18 @@ const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 
         unposted.collections.length && `${unposted.collections.length} collection${unposted.collections.length === 1 ? '' : 's'}`,
         unposted.deposits.length && `${unposted.deposits.length} deposit${unposted.deposits.length === 1 ? '' : 's'}`,
         unposted.ncas.length && `${unposted.ncas.length} NCA${unposted.ncas.length === 1 ? '' : 's'}`,
+        unposted.payrolls.length && `${unposted.payrolls.length} payroll${unposted.payrolls.length === 1 ? '' : 's'}`,
+        unposted.payrollPayouts.length && `${unposted.payrollPayouts.length} payroll payout${unposted.payrollPayouts.length === 1 ? '' : 's'}`,
+        unposted.remittances.length && `${unposted.remittances.length} remittance${unposted.remittances.length === 1 ? '' : 's'}`,
+        unposted.writeOffs.length && `${unposted.writeOffs.length} write-off${unposted.writeOffs.length === 1 ? '' : 's'}`,
+        (unposted.advanceGrants.length + unposted.travelAdvances.length) &&
+          `${unposted.advanceGrants.length + unposted.travelAdvances.length} cash advance${unposted.advanceGrants.length + unposted.travelAdvances.length === 1 ? '' : 's'} granted`,
+        (unposted.advanceLiquidations.length + unposted.travelLiquidations.length) &&
+          `${unposted.advanceLiquidations.length + unposted.travelLiquidations.length} liquidation${unposted.advanceLiquidations.length + unposted.travelLiquidations.length === 1 ? '' : 's'}`,
+        unposted.semiExpendableIssues.length && `${unposted.semiExpendableIssues.length} ICS issue${unposted.semiExpendableIssues.length === 1 ? '' : 's'}`,
+        unposted.disposals.length && `${unposted.disposals.length} asset disposal${unposted.disposals.length === 1 ? '' : 's'}`,
+        unposted.stockReceipts.length && `${unposted.stockReceipts.length} stock receipt${unposted.stockReceipts.length === 1 ? '' : 's'}`,
+        unposted.stockIssues.length && `${unposted.stockIssues.length} stock issue${unposted.stockIssues.length === 1 ? '' : 's'}`,
       ].filter(Boolean).join(', ')}.
       These were recorded before automatic posting existed, or their posting failed.
       <Fragment slot="actions">

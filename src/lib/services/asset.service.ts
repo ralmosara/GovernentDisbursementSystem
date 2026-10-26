@@ -23,6 +23,8 @@ import {
   type DepreciationParams,
   type MonthlyDepreciation,
 } from '../utils/depreciation-calculator';
+import { ledgerService, PPE_ACCOUNTS } from './ledger.service';
+import { SUPPLY_ACCOUNTS } from '../constants/inventory';
 
 // ============================================
 // TYPE DEFINITIONS
@@ -44,7 +46,23 @@ export interface CreateAssetCategoryData {
   usefulLife?: number;
   depreciationMethod?: 'straight_line' | 'declining_balance';
   capitalizationThreshold?: string;
+  /** PPE account (see PPE_ACCOUNTS); empty means Machinery */
+  accountCode?: string | null;
   isActive?: boolean;
+}
+
+/** Blank becomes null (Machinery); anything else must be one of the PPE accounts */
+function normalizeCategoryAccount(code: string | null | undefined): string | null {
+  if (!code) return null;
+  if (!PPE_ACCOUNTS.some(account => account.code === code)) throw new Error(`${code} is not a property, plant and equipment account`);
+  return code;
+}
+
+/** Blank becomes null (Office Supplies); anything else must be one of the supplies inventory accounts */
+function normalizeSupplyAccount(code: string | null | undefined): string | null {
+  if (!code) return null;
+  if (!SUPPLY_ACCOUNTS.some(account => account.code === code)) throw new Error(`${code} is not a supplies inventory account`);
+  return code;
 }
 
 export interface CreateFixedAssetData {
@@ -78,6 +96,7 @@ export interface CreateInventoryItemData {
   quantityOnHand?: number;
   minimumLevel?: number;
   maximumLevel?: number;
+  accountCode?: string | null;
   isActive?: boolean;
 }
 
@@ -147,6 +166,7 @@ export class AssetService {
         usefulLife: data.usefulLife,
         depreciationMethod: data.depreciationMethod,
         capitalizationThreshold: data.capitalizationThreshold,
+        accountCode: normalizeCategoryAccount(data.accountCode),
         isActive: data.isActive ?? true,
       });
 
@@ -232,7 +252,7 @@ export class AssetService {
 
       await db
         .update(assetCategories)
-        .set(data)
+        .set(data.accountCode === undefined ? data : { ...data, accountCode: normalizeCategoryAccount(data.accountCode) })
         .where(eq(assetCategories.id, id));
 
       return this.getAssetCategoryById(id);
@@ -849,6 +869,8 @@ export class AssetService {
         .set({ status: 'disposed' })
         .where(eq(fixedAssets.id, data.assetId));
 
+      await ledgerService.tryPost(`disposal ${disposalNo}`, () => ledgerService.postAssetDisposal(disposalId, userId));
+
       return { id: disposalId, disposalNo };
     } catch (error) {
       console.error('Error creating disposal:', error);
@@ -972,6 +994,18 @@ export class AssetService {
     data: Partial<CreateDisposalData>
   ): Promise<void> {
     try {
+      // Once in the books, the figures behind the entry are fixed: cancel and re-record instead
+      const [current] = await db.select().from(assetDisposals).where(eq(assetDisposals.id, id)).limit(1);
+      const posted = current ? await ledgerService.findBySource('asset_disposal', id) : null;
+      if (current && posted) {
+        const changed =
+          (data.disposalDate !== undefined && String(data.disposalDate).slice(0, 10) !== new Date(current.disposalDate).toLocaleDateString('en-CA')) ||
+          (data.disposalValue !== undefined && Number(data.disposalValue || 0) !== Number(current.disposalValue || 0));
+        if (changed) {
+          throw new Error(`Disposal ${current.disposalNo} is already in the books (JEV ${posted.jevNo}). Delete it and record the disposal again to change its date or value.`);
+        }
+      }
+
       await db
         .update(assetDisposals)
         .set({
@@ -989,12 +1023,19 @@ export class AssetService {
     }
   }
 
-  async deleteDisposal(id: number): Promise<void> {
+  async deleteDisposal(id: number, userId?: number): Promise<void> {
     try {
       // Get disposal to find the asset ID
       const disposal = await this.getDisposalById(id);
       if (!disposal) {
         throw new Error('Disposal not found');
+      }
+
+      // Put the asset back on the books before the disposal record goes
+      const posted = await ledgerService.findBySource('asset_disposal', id);
+      if (posted) {
+        if (!userId) throw new Error('Signed-in user required to reverse the disposal entry');
+        await ledgerService.reverseAssetDisposal(id, userId, `Disposal ${disposal.disposalNo} cancelled`);
       }
 
       // Delete the disposal record
@@ -1040,6 +1081,7 @@ export class AssetService {
         quantityOnHand: data.quantityOnHand || 0,
         minimumLevel: data.minimumLevel || 0,
         maximumLevel: data.maximumLevel || 0,
+        accountCode: normalizeSupplyAccount(data.accountCode),
         isActive: data.isActive !== false,
         createdBy: userId,
       });
@@ -1099,6 +1141,7 @@ export class AssetService {
         quantityOnHand: row.inventory_items.quantityOnHand,
         minimumLevel: row.inventory_items.minimumLevel,
         maximumLevel: row.inventory_items.maximumLevel,
+        accountCode: row.inventory_items.accountCode,
         isActive: row.inventory_items.isActive,
         totalValue: parseFloat(row.inventory_items.unitCost || '0') * (row.inventory_items.quantityOnHand || 0),
         stockStatus: this.getStockStatus(
@@ -1142,6 +1185,7 @@ export class AssetService {
         quantityOnHand: row.inventory_items.quantityOnHand,
         minimumLevel: row.inventory_items.minimumLevel,
         maximumLevel: row.inventory_items.maximumLevel,
+        accountCode: row.inventory_items.accountCode,
         isActive: row.inventory_items.isActive,
         totalValue: parseFloat(row.inventory_items.unitCost || '0') * (row.inventory_items.quantityOnHand || 0),
         stockStatus: this.getStockStatus(
@@ -1175,6 +1219,7 @@ export class AssetService {
           unitCost: data.unitCost,
           minimumLevel: data.minimumLevel,
           maximumLevel: data.maximumLevel,
+          accountCode: data.accountCode === undefined ? undefined : normalizeSupplyAccount(data.accountCode),
           isActive: data.isActive,
         })
         .where(eq(inventoryItems.id, id));
@@ -1354,6 +1399,13 @@ export class AssetService {
         return Number(result.insertId);
       });
 
+      // Supplies delivered under an IAR move to inventory; issues are expensed out of it
+      if (data.transactionType === 'receipt') {
+        await ledgerService.tryPost(`stock receipt ${transactionNo}`, () => ledgerService.postStockReceipt(transactionId, userId));
+      } else if (data.transactionType === 'issue') {
+        await ledgerService.tryPost(`stock issue ${transactionNo}`, () => ledgerService.postStockIssue(transactionId, userId));
+      }
+
       return { id: transactionId, transactionNo };
     } catch (error) {
       console.error('Error creating inventory transaction:', error);
@@ -1468,7 +1520,7 @@ export class AssetService {
     }
   }
 
-  async deleteInventoryTransaction(id: number): Promise<void> {
+  async deleteInventoryTransaction(id: number, userId?: number): Promise<void> {
     try {
       // Get transaction details
       const transaction = await this.getInventoryTransactionById(id);
@@ -1482,12 +1534,18 @@ export class AssetService {
         throw new Error('Adjustments cannot be deleted. Record a new adjustment with the correct count instead.');
       }
 
+      const posted = (await ledgerService.findBySource('stock_receipt', id)) || (await ledgerService.findBySource('stock_issue', id));
+      if (posted && !userId) throw new Error('Signed-in user required to reverse the stock entry');
+
       // Reverse the transaction effect on inventory and delete it atomically
       await db.transaction(async (tx) => {
         const reverse = transaction.transactionType === 'receipt' ? 'subtract' : 'add';
         await this.adjustInventoryQuantity(transaction.item.id, transaction.quantity, reverse, tx);
         await tx.delete(inventoryTransactions).where(eq(inventoryTransactions.id, id));
       });
+
+      // Take the deleted transaction out of the books too
+      if (posted) await ledgerService.reverseStockTransaction(id, userId!, `${transaction.transactionNo} deleted`);
     } catch (error) {
       console.error('Error deleting inventory transaction:', error);
       throw error;

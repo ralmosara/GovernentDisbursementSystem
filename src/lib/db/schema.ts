@@ -499,6 +499,9 @@ export const cashAdvances = mysqlTable('cash_advances', {
   status: mysqlEnum('status', ['draft', 'approved', 'released', 'liquidated', 'returned']).default('draft'),
   dvId: int('dv_id'),
   liquidationDvId: int('liquidation_dv_id'),
+  /** Expenses supported by the liquidation, and the unused balance refunded */
+  totalExpenses: decimal('total_expenses', { precision: 15, scale: 2 }),
+  refundAmount: decimal('refund_amount', { precision: 15, scale: 2 }),
   remarks: text('remarks'),
   createdBy: int('created_by').notNull(),
   createdAt: timestamp('created_at').defaultNow(),
@@ -591,6 +594,8 @@ export const assetCategories = mysqlTable('asset_categories', {
   usefulLife: int('useful_life'),
   depreciationMethod: mysqlEnum('depreciation_method', ['straight_line', 'declining_balance']),
   capitalizationThreshold: decimal('capitalization_threshold', { precision: 15, scale: 2 }),
+  /** RCA PPE account assets in this category are carried in (defaults to Machinery) */
+  accountCode: varchar('account_code', { length: 20 }),
   isActive: boolean('is_active').default(true),
   createdAt: timestamp('created_at').defaultNow(),
 });
@@ -634,6 +639,8 @@ export const inventoryItems = mysqlTable('inventory_items', {
   quantityOnHand: int('quantity_on_hand').default(0),
   minimumLevel: int('minimum_level').default(0),
   maximumLevel: int('maximum_level'),
+  // Inventory account (RCA) the item is carried in; null means Office Supplies Inventory
+  accountCode: varchar('account_code', { length: 20 }),
   isActive: boolean('is_active').default(true),
   createdBy: int('created_by'),
   createdAt: timestamp('created_at').defaultNow(),

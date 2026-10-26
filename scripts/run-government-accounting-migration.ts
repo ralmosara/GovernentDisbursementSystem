@@ -10,7 +10,7 @@ import { dirname, join } from 'path';
  * INSERT IGNORE and columns are added only when missing.
  */
 
-const MIGRATION_FILES = ['add_government_accounting.sql', 'add_procurement.sql', 'add_property_accountability.sql', 'add_missing_inventory_asset_tables.sql'];
+const MIGRATION_FILES = ['add_government_accounting.sql', 'add_procurement.sql', 'add_property_accountability.sql', 'add_missing_inventory_asset_tables.sql', 'add_ledger_completion.sql'];
 
 const COLUMNS: { table: string; name: string; definition: string }[] = [
   { table: 'disbursement_vouchers', name: 'tax_treatment', definition: 'VARCHAR(30) NULL' },
@@ -20,6 +20,13 @@ const COLUMNS: { table: string; name: string; definition: string }[] = [
   { table: 'revenue_sources', name: 'account_code', definition: 'VARCHAR(20) NULL' },
   // The inventory service records and joins on the creator, but the column was never created
   { table: 'inventory_items', name: 'created_by', definition: 'INT NULL' },
+  // PPE account each asset category is capitalised in (null means Machinery)
+  { table: 'asset_categories', name: 'account_code', definition: 'VARCHAR(20) NULL' },
+  // Liquidation figures the ledger posts from
+  { table: 'cash_advances', name: 'total_expenses', definition: 'DECIMAL(15,2) NULL' },
+  { table: 'cash_advances', name: 'refund_amount', definition: 'DECIMAL(15,2) NULL' },
+  // Inventory account each stock item is carried in (null means Office Supplies)
+  { table: 'inventory_items', name: 'account_code', definition: 'VARCHAR(20) NULL' },
 ];
 
 /** Split a migration file into statements, ignoring comment lines */

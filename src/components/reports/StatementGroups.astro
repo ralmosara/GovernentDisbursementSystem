@@ -1,0 +1,38 @@
+---
+// Table rows for statement groups: a heading per group, its accounts, and a group total
+// when the group has more than one account. One amount column per statement column.
+import type { StatementGroup } from '../../lib/services/financial-statements.service';
+import { statementAmount } from '../../lib/ui/statement';
+
+interface Props {
+  groups: StatementGroup[];
+  /** Link account lines to the general ledger */
+  ledgerLink?: (code: string) => string;
+}
+
+const { groups, ledgerLink } = Astro.props;
+---
+
+{groups.map(group => (
+  <>
+    <tr>
+      <th scope="rowgroup" class="pl-6 !text-gray-800 font-medium">{group.label}</th>
+      {group.lines.length === 1 && group.totals.map(t => <td class="text-right tabular-nums">{statementAmount(t)}</td>)}
+      {group.lines.length > 1 && group.totals.map(() => <td></td>)}
+    </tr>
+    {group.lines.length > 1 && group.lines.map(line => (
+      <tr>
+        <td class="pl-10 text-gray-700">
+          {line.code && ledgerLink ? <a href={ledgerLink(line.code)} class="hover:underline">{line.title}</a> : line.title}
+        </td>
+        {line.amounts.map(a => <td class="text-right tabular-nums text-gray-700">{statementAmount(a)}</td>)}
+      </tr>
+    ))}
+    {group.lines.length > 1 && (
+      <tr>
+        <td class="pl-6 text-gray-600">Total {group.label.toLowerCase()}</td>
+        {group.totals.map(t => <td class="text-right tabular-nums border-t border-gray-200">{statementAmount(t)}</td>)}
+      </tr>
+    )}
+  </>
+))}

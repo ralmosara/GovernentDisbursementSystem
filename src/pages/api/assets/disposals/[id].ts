@@ -77,12 +77,12 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     });
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error updating disposal:', error);
     return new Response(
-      JSON.stringify({ error: 'Failed to update disposal' }),
+      JSON.stringify({ error: error?.message || 'Failed to update disposal' }),
       {
-        status: 500,
+        status: 400,
         headers: { 'Content-Type': 'application/json' },
       }
     );
@@ -107,7 +107,7 @@ export const DELETE: APIRoute = async ({ params, locals }) => {
       });
     }
 
-    await assetService.deleteDisposal(id);
+    await assetService.deleteDisposal(id, user.id);
 
     return new Response(JSON.stringify({ success: true }), {
       status: 200,

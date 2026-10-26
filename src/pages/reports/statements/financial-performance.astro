@@ -1,0 +1,116 @@
+---
+import MainLayout from '../../../layouts/MainLayout.astro';
+import PageHeader from '../../../components/ui/PageHeader.astro';
+import FilterBar from '../../../components/ui/FilterBar.astro';
+import StatementHeader from '../../../components/reports/StatementHeader.astro';
+import StatementGroups from '../../../components/reports/StatementGroups.astro';
+import { db } from '../../../lib/db/connection';
+import { fundClusters } from '../../../lib/db/schema';
+import { financialStatementsService } from '../../../lib/services/financial-statements.service';
+import { getSetting } from '../../../lib/services/settings.service';
+import { statementAmount, longDate, dateParam, priorYear } from '../../../lib/ui/statement';
+
+const user = Astro.locals.user;
+if (!user) return Astro.redirect('/login');
+
+const params = Astro.url.searchParams;
+const today = new Date();
+const to = dateParam(params.get('to'), new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59), true);
+const from = dateParam(params.get('from'), new Date(to.getFullYear(), 0, 1), false);
+const fundClusterId = parseInt(params.get('fund') ?? '') || undefined;
+const periods = [{ from, to }, { from: priorYear(from), to: priorYear(to) }];
+
+const [statement, clusters, agencyName] = await Promise.all([
+  financialStatementsService.getFinancialPerformance(periods, fundClusterId),
+  db.select({ id: fundClusters.id, code: fundClusters.code, name: fundClusters.name }).from(fundClusters),
+  getSetting('agency_name').catch(() => ''),
+]);
+
+const cluster = clusters.find(c => c.id === fundClusterId);
+const columns = periods.map(p => (p.from.getMonth() === 0 && p.from.getDate() === 1 ? `FY ${p.to.getFullYear()}` : `${p.from.toLocaleDateString('en-PH')} – ${p.to.toLocaleDateString('en-PH')}`));
+const ledgerLink = (code: string) => `/accounting/general-ledger?account=${code}${fundClusterId ? `&fund=${fundClusterId}` : ''}`;
+---
+
+<MainLayout title="Statement of Financial Performance - Philippine Government FMS">
+  <PageHeader
+    title="Statement of Financial Performance"
+    description="Revenue and expenses for the period, with the same period last year. Year-end closing entries are excluded."
+    breadcrumbs={[{ label: 'Reports', href: '/reports' }, { label: 'Financial statements', href: '/reports/statements' }, { label: 'Financial performance' }]}
+  >
+    <button slot="actions" type="button" class="btn btn-secondary" onclick="window.print()">
+      <i class="pi pi-print" aria-hidden="true"></i>
+      Print
+    </button>
+  </PageHeader>
+
+  <FilterBar action="/reports/statements/financial-performance" resetHref="/reports/statements/financial-performance" activeCount={[params.get('from'), params.get('to'), fundClusterId].filter(Boolean).length}>
+    <div class="form-group">
+      <label for="from" class="form-label">From</label>
+      <input type="date" id="from" name="from" class="form-input" value={from.toLocaleDateString('en-CA')} />
+    </div>
+    <div class="form-group">
+      <label for="to" class="form-label">To</label>
+      <input type="date" id="to" name="to" class="form-input" value={to.toLocaleDateString('en-CA')} />
+    </div>
+    <div class="form-group">
+      <label for="fund" class="form-label">Fund cluster</label>
+      <select id="fund" name="fund" class="form-select">
+        <option value="">All funds (consolidated)</option>
+        {clusters.map(c => <option value={c.id} selected={fundClusterId === c.id}>{c.code} – {c.name}</option>)}
+      </select>
+    </div>
+  </FilterBar>
+
+  <article class="card" aria-label="Statement of Financial Performance">
+    <StatementHeader
+      agencyName={agencyName}
+      title="Statement of Financial Performance"
+      fund={cluster ? `Fund Cluster ${cluster.code} – ${cluster.name}` : 'All fund clusters'}
+      period={`For the period ${longDate(from)} to ${longDate(to)}`}
+    />
+    <div class="relative overflow-x-auto">
+      <table class="table">
+        <thead>
+          <tr>
+            <th scope="col"><span class="sr-only">Item</span></th>
+            {columns.map(c => <th scope="col" class="!text-right whitespace-nowrap">{c}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="bg-gray-50"><th scope="rowgroup" colspan={columns.length + 1} class="!text-gray-800">Revenue</th></tr>
+          <StatementGroups groups={statement.revenue} ledgerLink={ledgerLink} />
+          <tr class="font-semibold"><td>Total revenue</td>{statement.totals.revenue.map(v => <td class="text-right tabular-nums border-t border-gray-200">{statementAmount(v)}</td>)}</tr>
+        </tbody>
+        <tbody>
+          <tr class="bg-gray-50"><th scope="rowgroup" colspan={columns.length + 1} class="!text-gray-800">Less: current operating expenses</th></tr>
+          <StatementGroups groups={statement.expenses} ledgerLink={ledgerLink} />
+          <tr class="font-semibold"><td>Total current operating expenses</td>{statement.totals.expenses.map(v => <td class="text-right tabular-nums border-t border-gray-200">{statementAmount(v)}</td>)}</tr>
+        </tbody>
+        <tbody>
+          <tr class="font-semibold text-gray-800">
+            <td>Surplus/(deficit) from current operations</td>
+            {statement.totals.fromOperations.map(v => <td class="text-right tabular-nums border-t-2 border-gray-300">{statementAmount(v)}</td>)}
+          </tr>
+          {statement.gains.length > 0 && <StatementGroups groups={statement.gains} ledgerLink={ledgerLink} />}
+          {statement.losses.length > 0 && (
+            <tr><td class="pl-6 font-medium text-gray-800">Less: losses</td>{statement.totals.losses.map(v => <td class="text-right tabular-nums">{statementAmount(v)}</td>)}</tr>
+          )}
+          <tr class="font-semibold">
+            <td>Surplus/(deficit) before financial assistance/subsidy</td>
+            {statement.totals.beforeSubsidy.map(v => <td class="text-right tabular-nums border-t border-gray-200">{statementAmount(v)}</td>)}
+          </tr>
+          <tr>
+            <td class="pl-6 font-medium text-gray-800">Add: financial assistance/subsidy from National Government</td>
+            {statement.totals.subsidy.map(v => <td class="text-right tabular-nums">{statementAmount(v)}</td>)}
+          </tr>
+        </tbody>
+        <tfoot>
+          <tr class="border-t-2 border-gray-300 font-semibold">
+            <th scope="row" class="!text-sm !text-gray-800">SURPLUS/(DEFICIT) FOR THE PERIOD</th>
+            {statement.totals.surplus.map(v => <td class="text-right tabular-nums">{statementAmount(v)}</td>)}
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  </article>
+</MainLayout>

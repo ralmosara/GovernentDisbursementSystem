@@ -252,6 +252,8 @@ export class ApprovalService {
     // Fully approved: recognise the expense and liability in the books
     if (!outcome.nextStage) {
       await ledgerService.tryPost(`DV #${dvId} approval`, () => ledgerService.postDvApproval(dvId, userId));
+      await ledgerService.tryPost(`DV #${dvId} advances`, () => ledgerService.postAdvancesForDv(dvId, userId));
+      await ledgerService.tryPost(`DV #${dvId} stock receipts`, () => ledgerService.postStockReceiptsForDv(dvId, userId));
     }
 
     if (outcome.nextStage) {
