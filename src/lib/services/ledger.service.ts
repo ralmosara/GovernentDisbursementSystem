@@ -6,6 +6,7 @@ import {
   objectOfExpenditure,
   disbursementVouchers,
   payments,
+  approvalWorkflows,
   cashReceipts,
   revenueSources,
   accountsReceivable,
@@ -33,8 +34,9 @@ import {
 import { calculateGSISContribution, calculatePhilHealthContribution, calculatePagIBIGContribution } from '../utils/payroll-calculator';
 import { CAPITALIZATION_THRESHOLD, PPE_ACCOUNTS } from '../constants/property';
 import { SUPPLY_ACCOUNTS, supplyAccountFor } from '../constants/inventory';
-import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lte, like, ne, notInArray, or, sql, type Column, type SQL } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, like, ne, notInArray, or, sql, type Column, type SQL } from 'drizzle-orm';
 import { logAudit } from '../middleware/audit-logger';
+import { localTime } from '../db/local-time';
 
 /**
  * General ledger (Government Accounting Manual for NGAs, Revised Chart of Accounts).
@@ -433,6 +435,8 @@ export class LedgerService {
         totalTaxWithheld: disbursementVouchers.totalTaxWithheld,
         netAmount: disbursementVouchers.netAmount,
         responsibilityCenter: disbursementVouchers.responsibilityCenter,
+        dvDate: disbursementVouchers.dvDate,
+        certBoxDDate: disbursementVouchers.certBoxDDate,
         expenseCode: objectOfExpenditure.code,
         expenseName: objectOfExpenditure.name,
       })
@@ -457,8 +461,9 @@ export class LedgerService {
     if (tax > 0) lines.push({ accountCode: ACCOUNTS.DUE_TO_BIR, credit: tax, description: 'Taxes withheld', subsidiary: dv.payeeName });
     lines.push({ accountCode: ACCOUNTS.ACCOUNTS_PAYABLE, credit: net, subsidiary: dv.payeeName });
 
+    const approvedOn = await this.dvApprovalDate(dv.id, dv.certBoxDDate ?? dv.dvDate);
     const result = await this.post({
-      date: new Date(),
+      date: approvedOn,
       fundClusterId: dv.fundClusterId,
       journalType: 'general',
       particulars: `To recognise liability for DV ${dv.dvNo}: ${dv.particulars}`,
@@ -471,7 +476,7 @@ export class LedgerService {
     // Record the JEV on the DV (Box B accounting entry reference)
     await db
       .update(disbursementVouchers)
-      .set({ jevNo: result.jevNo, jevDate: new Date() })
+      .set({ jevNo: result.jevNo, jevDate: approvedOn })
       .where(and(eq(disbursementVouchers.id, dv.id), isNull(disbursementVouchers.jevNo)));
 
     return result;
@@ -487,6 +492,7 @@ export class LedgerService {
         amount: payments.amount,
         checkNo: payments.checkNo,
         adaReference: payments.adaReference,
+        paymentDate: payments.paymentDate,
         dvNo: disbursementVouchers.dvNo,
         fundClusterId: disbursementVouchers.fundClusterId,
         payeeName: disbursementVouchers.payeeName,
@@ -516,7 +522,7 @@ export class LedgerService {
     const amount = num(payment.amount);
 
     return this.post({
-      date: new Date(),
+      date: payment.paymentDate ? new Date(payment.paymentDate) : new Date(),
       fundClusterId: payment.fundClusterId,
       journalType: isCheck ? 'check_disbursements' : 'cash_disbursements',
       particulars: `Payment of DV ${payment.dvNo} by ${instrument}`,
@@ -562,7 +568,7 @@ export class LedgerService {
     const amount = num(ar.amount);
     return this.post({
       date: new Date(ar.invoiceDate),
-      fundClusterId: await this.defaultFundClusterId(),
+      fundClusterId: ar.fundClusterId ?? (await this.defaultFundClusterId()),
       journalType: 'general',
       particulars: `To recognise receivable ${ar.arNo}${ar.invoiceNo ? ` (Invoice ${ar.invoiceNo})` : ''}`,
       sourceType: 'ar_invoice',
@@ -586,6 +592,7 @@ export class LedgerService {
         arId: collections.arId,
         arNo: accountsReceivable.arNo,
         debtorName: accountsReceivable.debtorName,
+        fundClusterId: accountsReceivable.fundClusterId,
       })
       .from(collections)
       .innerJoin(accountsReceivable, eq(collections.arId, accountsReceivable.id))
@@ -599,7 +606,7 @@ export class LedgerService {
     const amount = num(row.amount);
     return this.post({
       date: new Date(row.collectionDate),
-      fundClusterId: await this.defaultFundClusterId(),
+      fundClusterId: row.fundClusterId ?? (await this.defaultFundClusterId()),
       journalType: 'cash_receipts',
       particulars: `Collection ${row.collectionNo} on receivable ${row.arNo}${row.orNo ? `, OR No. ${row.orNo}` : ''}`,
       sourceType: 'collection',
@@ -816,7 +823,7 @@ export class LedgerService {
 
     return this.post({
       date: ar.updatedAt ? new Date(ar.updatedAt) : new Date(),
-      fundClusterId: await this.defaultFundClusterId(),
+      fundClusterId: ar.fundClusterId ?? (await this.defaultFundClusterId()),
       journalType: 'general',
       particulars: `To write off uncollectible receivable ${ar.arNo} from ${ar.debtorName}`,
       sourceType: 'ar_writeoff',
@@ -834,6 +841,17 @@ export class LedgerService {
   // ---------------------------------------------------------------------------
 
   /** An approved DV, put in the books first, with the account it was debited to */
+  /** When a DV was fully approved: the last approval stage's date, else the given fallback */
+  private async dvApprovalDate(dvId: number, fallback: Date | string): Promise<Date> {
+    const [row] = await db
+      .select({ date: approvalWorkflows.actionDate })
+      .from(approvalWorkflows)
+      .where(and(eq(approvalWorkflows.dvId, dvId), eq(approvalWorkflows.status, 'approved'), isNotNull(approvalWorkflows.actionDate)))
+      .orderBy(desc(approvalWorkflows.actionDate))
+      .limit(1);
+    return new Date(row?.date ?? fallback);
+  }
+
   private async approvedDv(dvId: number, userId: number) {
     const [dv] = await db
       .select({
@@ -863,7 +881,7 @@ export class LedgerService {
     const dv = await this.approvedDv(dvId, userId);
     if (dv.covered) return null;
     return this.post({
-      date: new Date(),
+      date: await this.dvApprovalDate(dv.id, dv.dvDate),
       fundClusterId: dv.fundClusterId,
       journalType: 'general',
       particulars,
@@ -1416,9 +1434,11 @@ export class LedgerService {
   /** The earliest opening balance date: records dated before it are covered by the opening entry */
   async ledgerStartDate(): Promise<Date | null> {
     const [row] = await db
-      .select({ date: sql<Date | null>`MIN(${journalEntries.jevDate})` })
+      .select({ date: journalEntries.jevDate })
       .from(journalEntries)
-      .where(and(eq(journalEntries.sourceType, 'opening_balance'), eq(journalEntries.status, 'posted')));
+      .where(and(eq(journalEntries.sourceType, 'opening_balance'), eq(journalEntries.status, 'posted')))
+      .orderBy(asc(journalEntries.jevDate))
+      .limit(1);
     return row?.date ? new Date(row.date) : null;
   }
 
@@ -1431,7 +1451,7 @@ export class LedgerService {
   /**
    * Balances that existed before the ledger, suggested from the subsidiary records as of the
    * opening date: PPE at cost with depreciation accumulated to the end of the previous month,
-   * semi-expendable property not yet issued, supplies on hand, and cash advances outstanding
+   * semi-expendable property not yet issued, supplies on hand, and cash and travel advances outstanding
    * paid by no DV in the system or by one dated earlier. Each line carries its asset, item or
    * employee as subsidiary, so later depreciation, issues and liquidations continue from it.
    * Items already in the books are left out.
@@ -1452,12 +1472,12 @@ export class LedgerService {
         salvageValue: fixedAssets.salvageValue,
         usefulLife: fixedAssets.usefulLife,
         accountCode: assetCategories.accountCode,
-        issuedBefore: sql<number>`EXISTS (SELECT 1 FROM ${propertyIssuances} WHERE ${propertyIssuances.assetId} = ${fixedAssets.id} AND ${propertyIssuances.issueDate} < ${opening})`,
-        disposedBefore: sql<number>`EXISTS (SELECT 1 FROM ${assetDisposals} WHERE ${assetDisposals.assetId} = ${fixedAssets.id} AND ${assetDisposals.disposalDate} < ${opening})`,
+        issuedBefore: sql<number>`EXISTS (SELECT 1 FROM ${propertyIssuances} WHERE ${propertyIssuances.assetId} = ${fixedAssets.id} AND ${lt(propertyIssuances.issueDate, opening)})`,
+        disposedBefore: sql<number>`EXISTS (SELECT 1 FROM ${assetDisposals} WHERE ${assetDisposals.assetId} = ${fixedAssets.id} AND ${lt(assetDisposals.disposalDate, opening)})`,
       })
       .from(fixedAssets)
       .leftJoin(assetCategories, eq(fixedAssets.assetCategoryId, assetCategories.id))
-      .where(and(sql`${fixedAssets.acquisitionDate} < ${opening}`, sql`${fixedAssets.acquisitionCost} > 0`))
+      .where(and(lt(fixedAssets.acquisitionDate, opening), sql`${fixedAssets.acquisitionCost} > 0`))
       .orderBy(asc(fixedAssets.assetNo));
     const inBooks = new Set(
       assets.length
@@ -1494,7 +1514,7 @@ export class LedgerService {
     const later = await db
       .select({ itemId: inventoryTransactions.itemId, transactionType: inventoryTransactions.transactionType, quantity: inventoryTransactions.quantity, previousQuantity: inventoryTransactions.previousQuantity })
       .from(inventoryTransactions)
-      .where(sql`${inventoryTransactions.transactionDate} >= ${opening}`);
+      .where(gte(inventoryTransactions.transactionDate, opening));
     const stock = new Map((await this.postedStock(items.map(i => i.itemCode))).map(s => [s.itemCode, s.balance]));
     for (const item of items) {
       let quantity = item.quantityOnHand ?? 0;
@@ -1518,13 +1538,38 @@ export class LedgerService {
       .leftJoin(disbursementVouchers, eq(cashAdvances.dvId, disbursementVouchers.id))
       .where(
         and(
-          or(isNull(cashAdvances.dvId), sql`${disbursementVouchers.dvDate} < ${opening}`),
-          sql`${cashAdvances.dateIssued} < ${opening}`,
-          or(eq(cashAdvances.status, 'released'), and(inArray(cashAdvances.status, ['liquidated', 'returned']), sql`${cashAdvances.dateLiquidated} >= ${opening}`))
+          or(isNull(cashAdvances.dvId), lt(disbursementVouchers.dvDate, opening)),
+          lt(cashAdvances.dateIssued, opening),
+          or(eq(cashAdvances.status, 'released'), and(inArray(cashAdvances.status, ['liquidated', 'returned']), gte(cashAdvances.dateLiquidated, opening)))
         )
       );
     for (const ca of advances) {
       lines.push({ group: 'Cash advances outstanding', accountCode: ACCOUNTS.ADVANCES_OFFICERS_EMPLOYEES, debit: num(ca.amount), subsidiary: ca.employee ?? ca.caNo, description: `${ca.caNo}: ${ca.purpose}` });
+    }
+
+    // Travel advances for trips that started before the opening date and were not liquidated by then
+    const travels = await db
+      .select({
+        iotNo: itineraryOfTravel.iotNo,
+        destination: itineraryOfTravel.destination,
+        amount: sql<string>`COALESCE(${disbursementVouchers.amount}, ${itineraryOfTravel.cashAdvanceAmount})`,
+        employee: sql<string>`CONCAT(${users.firstName}, ' ', ${users.lastName})`,
+      })
+      .from(itineraryOfTravel)
+      .leftJoin(users, eq(itineraryOfTravel.employeeId, users.id))
+      .leftJoin(disbursementVouchers, eq(itineraryOfTravel.dvId, disbursementVouchers.id))
+      .where(
+        and(
+          ne(itineraryOfTravel.status, 'cancelled'),
+          sql`${itineraryOfTravel.cashAdvanceAmount} > 0`,
+          lt(itineraryOfTravel.departureDate, opening),
+          or(isNull(itineraryOfTravel.dvId), lt(disbursementVouchers.dvDate, opening)),
+          sql`NOT EXISTS (SELECT 1 FROM ${liquidationReports} WHERE ${liquidationReports.iotId} = ${itineraryOfTravel.id}
+            AND ${liquidationReports.status} IN ('approved', 'settled') AND ${lt(liquidationReports.reviewedDate, opening)})`
+        )
+      );
+    for (const trip of travels) {
+      lines.push({ group: 'Cash advances outstanding', accountCode: ACCOUNTS.ADVANCES_OFFICERS_EMPLOYEES, debit: num(trip.amount), subsidiary: trip.employee ?? trip.iotNo, description: `${trip.iotNo}: travel to ${trip.destination}` });
     }
 
     return lines;
@@ -1799,7 +1844,7 @@ export class LedgerService {
       sql`EXISTS (SELECT 1 FROM ${disbursementVouchers} WHERE ${disbursementVouchers.id} = ${dvId} AND ${disbursementVouchers.status} IN ('approved', 'paid'))`;
     // Grants follow their DV; liquidations dated before the opening balances are in them too
     const dvSinceOpening = (dvId: SQL | Column) =>
-      start ? sql`EXISTS (SELECT 1 FROM ${disbursementVouchers} WHERE ${disbursementVouchers.id} = ${dvId} AND ${disbursementVouchers.dvDate} >= ${start})` : undefined;
+      start ? sql`EXISTS (SELECT 1 FROM ${disbursementVouchers} WHERE ${disbursementVouchers.id} = ${dvId} AND ${gte(disbursementVouchers.dvDate, start)})` : undefined;
     const datedSince = (column: Column) => (start ? or(isNull(column), gte(column, start)) : undefined);
     const [advanceGrants, advanceLiquidations, travelAdvances, travelLiquidations, semiExpendableIssues, disposalIds, stockReceipts, stockIssues, stockAdjustments] = await Promise.all([
       this.unpostedIds('ca_granted', cashAdvances, cashAdvances.id,
@@ -1824,7 +1869,7 @@ export class LedgerService {
           sql`${fixedAssets.acquisitionCost} > 0`,
           sql`${fixedAssets.acquisitionCost} < ${CAPITALIZATION_THRESHOLD}`,
           sql`EXISTS (SELECT 1 FROM ${propertyIssuances} WHERE ${propertyIssuances.assetId} = ${fixedAssets.id})`,
-          start ? sql`NOT EXISTS (SELECT 1 FROM ${propertyIssuances} WHERE ${propertyIssuances.assetId} = ${fixedAssets.id} AND ${propertyIssuances.issueDate} < ${start})` : undefined
+          start ? sql`NOT EXISTS (SELECT 1 FROM ${propertyIssuances} WHERE ${propertyIssuances.assetId} = ${fixedAssets.id} AND ${lt(propertyIssuances.issueDate, start)})` : undefined
         )),
       this.unpostedIds('asset_disposal', assetDisposals, assetDisposals.id, start ? gte(assetDisposals.disposalDate, start) : undefined),
       // Receipts delivered under an IAR whose DV is approved and charged supplies to expense
@@ -1837,7 +1882,7 @@ export class LedgerService {
             INNER JOIN ${objectOfExpenditure} ON ${objectOfExpenditure.id} = ${disbursementVouchers.objectExpenditureId}
             WHERE ${inventoryTransactions.reference} LIKE CONCAT(${inspectionAcceptanceReports.iarNo}, '/L%')
               AND ${disbursementVouchers.status} IN ('approved', 'paid')
-              AND ${start ? sql`${disbursementVouchers.dvDate} >= ${start}` : sql`1 = 1`}
+              AND ${start ? gte(disbursementVouchers.dvDate, start) : sql`1 = 1`}
               AND ${objectOfExpenditure.code} LIKE '5%' AND ${objectOfExpenditure.code} NOT LIKE '506%')`
         )),
       this.unpostedStockIssues(start),
@@ -1979,7 +2024,7 @@ export class LedgerService {
   } = {}) {
     const conditions: (SQL | undefined)[] = [
       filters.fiscalYear ? eq(journalEntries.fiscalYear, filters.fiscalYear) : undefined,
-      filters.month ? sql`MONTH(${journalEntries.jevDate}) = ${filters.month}` : undefined,
+      filters.month ? sql`MONTH(${localTime(journalEntries.jevDate)}) = ${filters.month}` : undefined,
       filters.journalType ? eq(journalEntries.journalType, filters.journalType) : undefined,
       filters.fundClusterId ? eq(journalEntries.fundClusterId, filters.fundClusterId) : undefined,
       filters.search
@@ -2103,7 +2148,7 @@ export class LedgerService {
       .select({ debit: sql<string>`COALESCE(SUM(${journalEntryLines.debit}), 0)`, credit: sql<string>`COALESCE(SUM(${journalEntryLines.credit}), 0)` })
       .from(journalEntryLines)
       .innerJoin(journalEntries, eq(journalEntryLines.journalEntryId, journalEntries.id))
-      .where(and(eq(journalEntryLines.accountCode, accountCode), sql`${journalEntries.jevDate} < ${from}`, clusterFilter));
+      .where(and(eq(journalEntryLines.accountCode, accountCode), lt(journalEntries.jevDate, from), clusterFilter));
 
     const movements = await db
       .select({

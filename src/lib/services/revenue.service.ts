@@ -16,6 +16,7 @@ import {
 } from '../utils/serial-generator';
 import { logAudit } from '../middleware/audit-logger';
 import { ledgerService } from './ledger.service';
+import { localTime } from '../db/local-time';
 
 // ============================================
 // TYPE DEFINITIONS
@@ -41,6 +42,7 @@ export interface CreateRevenueEntryData {
 
 export interface CreateARData {
   revenueSourceId: number;
+  fundClusterId?: number;
   debtorName: string;
   invoiceNo?: string;
   invoiceDate: Date;
@@ -406,12 +408,12 @@ export class RevenueService {
     try {
       const result = await db
         .select({
-          month: sql<number>`MONTH(${revenueEntries.entryDate})`.as('month'),
+          month: sql<number>`MONTH(${localTime(revenueEntries.entryDate)})`.as('month'),
           total: sum(revenueEntries.amount).as('total'),
         })
         .from(revenueEntries)
         .where(eq(revenueEntries.fiscalYear, year))
-        .groupBy(sql`MONTH(${revenueEntries.entryDate})`);
+        .groupBy(sql`MONTH(${localTime(revenueEntries.entryDate)})`);
 
       // Create array for all 12 months with 0 default
       const monthlyData = Array.from({ length: 12 }, (_, i) => ({
@@ -491,6 +493,7 @@ export class RevenueService {
         arNo,
         revenueSourceId: data.revenueSourceId,
         debtorName: data.debtorName,
+        fundClusterId: data.fundClusterId ?? null,
         invoiceNo: data.invoiceNo || null,
         invoiceDate: data.invoiceDate,
         dueDate: data.dueDate,
@@ -1028,7 +1031,7 @@ export class RevenueService {
           total: sum(revenueEntries.amount).as('total'),
         })
         .from(revenueEntries)
-        .where(sql`DATE(${revenueEntries.entryDate}) = CURDATE()`);
+        .where(sql`DATE(${localTime(revenueEntries.entryDate)}) = CURDATE()`);
 
       // MTD revenue
       const mtdRevenue = await db

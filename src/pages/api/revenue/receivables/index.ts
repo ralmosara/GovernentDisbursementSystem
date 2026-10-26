@@ -29,6 +29,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       invoiceDate: new Date(data.invoiceDate),
       dueDate: new Date(data.dueDate),
       revenueSourceId: Number(data.revenueSourceId),
+      fundClusterId: Number(data.fundClusterId) || undefined,
     };
 
     const result = await revenueService.createAccountsReceivable(arData, user.id);

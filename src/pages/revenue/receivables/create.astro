@@ -2,6 +2,8 @@
 import MainLayout from '../../../layouts/MainLayout.astro';
 import ARForm from '../../../components/forms/revenue/ARForm.vue';
 import { revenueService } from '../../../lib/services/revenue.service';
+import { db } from '../../../lib/db/connection';
+import { fundClusters } from '../../../lib/db/schema';
 
 const user = Astro.locals.user;
 
@@ -9,8 +11,11 @@ if (!user) {
   return Astro.redirect('/login');
 }
 
-// Fetch revenue sources for form dropdown
-const revenueSources = await revenueService.getRevenueSources(true);
+// Fetch revenue sources and fund clusters for the form dropdowns
+const [revenueSources, clusters] = await Promise.all([
+  revenueService.getRevenueSources(true),
+  db.select({ id: fundClusters.id, code: fundClusters.code, name: fundClusters.name }).from(fundClusters),
+]);
 ---
 
 <MainLayout title="Create Accounts Receivable">
@@ -53,6 +58,7 @@ const revenueSources = await revenueService.getRevenueSources(true);
       <ARForm
         client:only="vue"
         revenueSourcesData={JSON.stringify(revenueSources)}
+        fundClustersData={JSON.stringify(clusters)}
       />
     </div>
   </div>

@@ -36,6 +36,21 @@
         <p v-if="errors.revenueSourceId" class="mt-1 text-sm text-red-600">{{ errors.revenueSourceId }}</p>
       </div>
 
+      <!-- Fund Cluster -->
+      <div v-if="fundClusters.length" class="form-group">
+        <label for="fundClusterId" class="block text-sm font-medium text-gray-700">Fund Cluster</label>
+        <select
+          id="fundClusterId"
+          v-model="formData.fundClusterId"
+          class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary-500 focus:ring-primary-500 sm:text-sm"
+        >
+          <option v-for="cluster in fundClusters" :key="cluster.id" :value="cluster.id">
+            {{ cluster.code }} - {{ cluster.name }}
+          </option>
+        </select>
+        <p class="mt-1 text-xs text-gray-500">The receivable and its collections are booked to this fund</p>
+      </div>
+
       <!-- Debtor Name -->
       <div class="form-group">
         <label for="debtorName" class="block text-sm font-medium text-gray-700">
@@ -225,12 +240,15 @@ import { ref, computed, watch, onMounted } from 'vue';
 
 interface Props {
   revenueSourcesData?: string;
+  fundClustersData?: string;
 }
 
 const props = defineProps<Props>();
+const fundClusters: { id: number; code: string; name: string }[] = props.fundClustersData ? JSON.parse(props.fundClustersData) : [];
 
 interface FormData {
   revenueSourceId: number | null;
+  fundClusterId: number | null;
   debtorName: string;
   invoiceNo: string;
   invoiceDate: string;
@@ -240,6 +258,7 @@ interface FormData {
 
 const formData = ref<FormData>({
   revenueSourceId: null,
+  fundClusterId: (fundClusters.find(c => c.code === '01') ?? fundClusters[0])?.id ?? null,
   debtorName: '',
   invoiceNo: '',
   invoiceDate: new Date().toISOString().split('T')[0],
@@ -421,7 +440,6 @@ function cancelForm() {
 }
 
 input:disabled,
-input:read-only,
 select:disabled,
 textarea:disabled,
 button:disabled {
@@ -429,6 +447,7 @@ button:disabled {
   opacity: 0.6;
 }
 
+/* Read-only values (the computed due date) stay fully legible */
 input:read-only {
   background-color: var(--ds-surface-sunken);
 }

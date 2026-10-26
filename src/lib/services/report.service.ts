@@ -8,7 +8,8 @@ import {
   fundClusters,
   objectOfExpenditure,
 } from '../db/schema';
-import { eq, and, or, sum, sql, desc, isNotNull } from 'drizzle-orm';
+import { eq, and, or, sum, sql, desc, isNotNull, lte } from 'drizzle-orm';
+import { localTime } from '../db/local-time';
 
 export interface BARReportData {
   fiscalYear: number;
@@ -193,7 +194,7 @@ export class ReportService {
       .where(
         and(
           months
-            ? sql`YEAR(${disbursementVouchers.dvDate}) = ${fiscalYear} AND MONTH(${disbursementVouchers.dvDate}) BETWEEN ${months[0]} AND ${months[1]}`
+            ? sql`YEAR(${localTime(disbursementVouchers.dvDate)}) = ${fiscalYear} AND MONTH(${localTime(disbursementVouchers.dvDate)}) BETWEEN ${months[0]} AND ${months[1]}`
             : eq(disbursementVouchers.fiscalYear, fiscalYear),
           fundClusterId ? eq(disbursementVouchers.fundClusterId, fundClusterId) : undefined,
           sql`EXISTS (SELECT 1 FROM ${payments} WHERE ${payments.dvId} = ${disbursementVouchers.id} AND ${payments.status} = 'cleared')`
@@ -380,7 +381,7 @@ export class ReportService {
           sql`NOT EXISTS (SELECT 1 FROM ${disbursementVouchers}
             INNER JOIN ${payments} ON ${payments.dvId} = ${disbursementVouchers.id} AND ${payments.status} = 'cleared'
             WHERE ${disbursementVouchers.orsBursNo} IN (${registryObligations.orsNumber}, ${registryObligations.bursNumber}))`,
-          sql`${registryObligations.obligationDate} <= ${asOfDate}`,
+          lte(registryObligations.obligationDate, asOfDate),
           fundClusterId ? sql`${fundClusters.id} = ${fundClusterId}` : sql`1=1`
         )
       );
@@ -473,8 +474,8 @@ export class ReportService {
       .innerJoin(objectOfExpenditure, eq(objectOfExpenditure.id, disbursementVouchers.objectExpenditureId))
       .where(
         and(
-          sql`YEAR(${disbursementVouchers.dvDate}) = ${year}`,
-          sql`MONTH(${disbursementVouchers.dvDate}) = ${month}`,
+          sql`YEAR(${localTime(disbursementVouchers.dvDate)}) = ${year}`,
+          sql`MONTH(${localTime(disbursementVouchers.dvDate)}) = ${month}`,
           eq(payments.status, 'cleared'),
           fundClusterId ? eq(disbursementVouchers.fundClusterId, fundClusterId) : sql`1=1`
         )

@@ -134,8 +134,7 @@ After seeding:
 - UACS object of expenditure
 
 ### COA Compliance
-- FAR No. 1, 3, 4 reports
-- BAR No. 1 report
+- FAR No. 1, 3 and 4, and BAR No. 1 (annual and quarterly), each viewable on screen and downloadable as Excel or PDF
 - Financial statements (PPSAS): financial position, financial performance, changes in net assets/equity, cash flows, and comparison of budget and actual amounts
 - 10-year audit retention
 - Philippine government standards
@@ -146,6 +145,8 @@ Run `npm run db:migrate-gov` once per environment (safe to re-run), then open
 
 - **Chart of accounts:** standard Revised Chart of Accounts (UACS) accounts, including PPE with accumulated depreciation, plus every object of expenditure as an expense account.
 - **Journal Entry Vouchers (JEV)** post automatically. Each source posts once, and mistakes are corrected with reversing entries rather than edits.
+  Each entry is dated by its source document: a DV on its final approval, a payment on its payment date, and so on,
+  so catching up older transactions puts them in the right period.
 
   | Event | Debit | Credit |
   |---|---|---|
@@ -190,6 +191,8 @@ Run `npm run db:migrate-gov` once per environment (safe to re-run), then open
 - **Disposals** can't change date or value once in the books; delete the disposal (which reverses its entry) and record it
   again. Sale proceeds are recorded as Other Receivables until collected.
 - **Supplies inventory:** each stock item names the inventory account it is carried in (Office Supplies if none).
+  Stock is costed at moving weighted average: each receipt re-averages the item's unit cost, and issues and count
+  adjustments are valued at the average in effect.
   Stock received from an IAR moves from expense to inventory once the DV is approved, and issues are expensed out of
   inventory. Issues never expense more than the item's stock in the books, so stock that was expensed on its DV (manual
   receipts, initial quantities) is not charged twice. Deleting a transaction reverses its entry. Physical-count and
@@ -197,11 +200,13 @@ Run `npm run db:migrate-gov` once per environment (safe to re-run), then open
   Miscellaneous Income, for items with stock in the books.
 - **Opening balances** (Accounting → Opening balances, accountants): one entry per fund cluster for balances that existed
   before the ledger. Lines are suggested from the records as of the opening date (PPE at cost with depreciation to the
-  previous month-end, semi-expendable property not yet issued, supplies on hand, unliquidated cash advances); add cash,
+  previous month-end, semi-expendable property not yet issued, supplies on hand, unliquidated cash and travel advances); add cash,
   payables and anything else, and the difference goes to Accumulated Surplus/(Deficit). Each asset, item and employee is
   its own subsidiary line, so depreciation, issues and liquidations continue from it. Records dated before the opening
   date are then left out of automatic posting, so pick the day the books start. Correct a posted opening entry with a
   manual JEV.
+- **Statement of Changes in Net Assets/Equity and Cash Flows** treat an opening balance entry as where the period
+  starts, not as a movement within it.
 - **Account codes:** the PPE, depreciation, gain/loss, semi-expendable, supplies inventory and Loss of Assets codes follow
   the Revised Chart of Accounts structure. Confirm them against the agency's chart before submitting statements to COA.
 - **NCA registry:** MDS checks and ADAs may not exceed the Notice of Cash Allocation remaining for the fund cluster and year. The limit applies once an NCA is recorded for that fund and year.
@@ -216,7 +221,10 @@ Run `npm run db:migrate-gov` once per environment (safe to re-run), then open
   - **Record payout** releases net pay.
   - **Record payment** on a remittance clears what is owed to that agency. BIR is paid through a Tax Remittance Advice,
     which is recognised as a subsidy from National Government and applied to the tax due in the same entry.
+- **Receivables** are booked to the fund cluster chosen on the receivable (01 if none), with their collections and write-offs.
 - **Receivable write-offs** post Dr Impairment Loss – Loans and Receivables, Cr Accounts Receivable.
+- **Times:** date and time columns are stored in UTC; reports group them by Philippine time (UTC+8), so a record made
+  just after midnight falls on the right day, month and year.
 - **Year-end closing:**
   - Closes revenue and expense accounts to Accumulated Surplus/(Deficit), with one entry per fund cluster dated 31 December.
   - Locks the year against further posting.
@@ -244,9 +252,11 @@ The chain runs purchase request → purchase order → obligation (ORS) → insp
 
 The system has comprehensive test coverage across multiple testing levels:
 
-**Unit Tests** (306 test cases, no database needed)
+**Unit Tests** (314 test cases, no database needed)
 - General ledger postings: DVs, payments, payroll, remittances, advances, depreciation, disposals, supplies inventory, count adjustments, opening balances, year-end closing
 - Financial statements: classification, comparative columns, reconciliation of equity and cash, budget and actual
+- COA report tables (FAR No. 3 and 4 grouping and totals) and their Excel/PDF rendering
+- Posting dates and moving weighted average cost
 - Serial number generation (DV, OR, CA, deposit slip, travel documents, JEV)
 - Budget service (availability, pending-obligation reservations, disbursement tracking, allotment modifications, centavo precision)
 - Access policy (who may call each state-changing API, plus a guard that every rule matches a real route)
@@ -259,6 +269,8 @@ The system has comprehensive test coverage across multiple testing levels:
 - Security integration
 
 **E2E Tests** (Playwright; need a running app, a seeded database and installed browsers)
+The DV specs log in as `staff`, `division_head`, `budget_officer`, `accountant` and `director` (password `password123`).
+Set `E2E_USERNAME` and `E2E_PASSWORD` to also run the signed-in layout and accessibility checks.
 - User authentication and session management
 - DV creation and complete lifecycle
 - Multi-user approval workflows
@@ -291,7 +303,7 @@ npm run test:ui
 - [PHASE-12-SUMMARY.md](docs/PHASE-12-SUMMARY.md) - Testing phase summary
 
 **Test Statistics:**
-- 350 unit and integration test cases (run with `npm run test:unit` and `npm run test:integration`)
+- 358 unit and integration test cases (run with `npm run test:unit` and `npm run test:integration`)
 - 6 Playwright browser profiles configured for E2E
 
 ## Documentation

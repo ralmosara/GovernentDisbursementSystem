@@ -16,8 +16,9 @@ import {
   collections,
   accountsReceivable,
 } from '../db/schema';
-import { and, eq, gte, inArray, lt, lte, notInArray, sql, type SQL } from 'drizzle-orm';
+import { and, eq, gte, inArray, lt, lte, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import { ACCOUNTS, debitAccountFor } from './ledger.service';
+import { localTime } from '../db/local-time';
 
 /**
  * General purpose financial statements (PPSAS / GAM for NGAs), built from the posted
@@ -59,6 +60,9 @@ interface GroupDef {
 }
 
 const CLOSING_SOURCES = ['closing', 'closing_reversal'];
+/** Opening balances are where a period starts, not a movement within it */
+const OPENING_SOURCES = ['opening_balance'];
+const NOT_MOVEMENTS = [...CLOSING_SOURCES, ...OPENING_SOURCES];
 const toCentavos = (value: number) => Math.round(value * 100);
 const sum = (columns: number[][]) => columns[0]?.map((_, i) => columns.reduce((total, c) => total + c[i], 0)) ?? [];
 const zeros = (n: number) => Array.from({ length: n }, () => 0);
@@ -467,12 +471,20 @@ export class FinancialStatementsService {
     return this.balances([lt(journalEntries.jevDate, date), this.fund(fundClusterId)]);
   }
 
-  /** Movements in a period, without year-end closing entries */
+  /** Balances a period starts from: everything before it, plus opening balances posted within it */
+  balancesAtStart(from: Date, to: Date, fundClusterId?: number) {
+    return this.balances([
+      or(lt(journalEntries.jevDate, from), and(inArray(journalEntries.sourceType, OPENING_SOURCES), lte(journalEntries.jevDate, to))),
+      this.fund(fundClusterId),
+    ]);
+  }
+
+  /** Movements in a period, without year-end closing or opening balance entries */
   periodMovements(from: Date, to: Date, fundClusterId?: number) {
     return this.balances([
       gte(journalEntries.jevDate, from),
       lte(journalEntries.jevDate, to),
-      notInArray(journalEntries.sourceType, CLOSING_SOURCES),
+      notInArray(journalEntries.sourceType, NOT_MOVEMENTS),
       this.fund(fundClusterId),
     ]);
   }
@@ -490,7 +502,7 @@ export class FinancialStatementsService {
 
   async getChangesInEquity(from: Date, to: Date, fundClusterId?: number) {
     const [opening, period, closing] = await Promise.all([
-      this.balancesBefore(from, fundClusterId),
+      this.balancesAtStart(from, to, fundClusterId),
       this.periodMovements(from, to, fundClusterId),
       this.balancesAsOf(to, fundClusterId),
     ]);
@@ -508,7 +520,7 @@ export class FinancialStatementsService {
         and(
           gte(journalEntries.jevDate, from),
           lte(journalEntries.jevDate, to),
-          notInArray(journalEntries.sourceType, CLOSING_SOURCES),
+          notInArray(journalEntries.sourceType, NOT_MOVEMENTS),
           this.fund(fundClusterId),
           sql`EXISTS (SELECT 1 FROM ${journalEntryLines} WHERE ${journalEntryLines.journalEntryId} = ${journalEntries.id} AND ${journalEntryLines.accountCode} LIKE '101%')`
         )
@@ -552,7 +564,7 @@ export class FinancialStatementsService {
       };
     });
 
-    const [opening, closing] = await Promise.all([this.balancesBefore(from, fundClusterId), this.balancesAsOf(to, fundClusterId)]);
+    const [opening, closing] = await Promise.all([this.balancesAtStart(from, to, fundClusterId), this.balancesAsOf(to, fundClusterId)]);
     return buildCashFlows(entries, cashTotal(opening), cashTotal(closing));
   }
 
@@ -593,11 +605,10 @@ export class FinancialStatementsService {
 
   /**
    * Budgeted receipts per revenue source against collections in the year: official receipts
-   * plus collections on receivables (which the ledger books to fund cluster 01).
+   * plus collections on receivables, in the receivable's fund cluster (01 when it names none).
    */
   private async receiptsComparison(year: number, fundClusterId?: number): Promise<ReceiptAmounts[]> {
     const [defaultFund] = await db.select({ id: fundClusters.id }).from(fundClusters).where(eq(fundClusters.code, '01')).limit(1);
-    const includeCollections = !fundClusterId || fundClusterId === defaultFund?.id;
     const [targets, receipts, collected] = await Promise.all([
       db
         .select({
@@ -611,16 +622,19 @@ export class FinancialStatementsService {
       db
         .select({ sourceId: cashReceipts.revenueSourceId, total: sql<string>`SUM(${cashReceipts.amount})` })
         .from(cashReceipts)
-        .where(and(sql`YEAR(${cashReceipts.receiptDate}) = ${year}`, fundClusterId ? eq(cashReceipts.fundClusterId, fundClusterId) : undefined))
+        .where(and(sql`YEAR(${localTime(cashReceipts.receiptDate)}) = ${year}`, fundClusterId ? eq(cashReceipts.fundClusterId, fundClusterId) : undefined))
         .groupBy(cashReceipts.revenueSourceId),
-      includeCollections
-        ? db
-            .select({ sourceId: accountsReceivable.revenueSourceId, total: sql<string>`SUM(${collections.amount})` })
-            .from(collections)
-            .innerJoin(accountsReceivable, eq(collections.arId, accountsReceivable.id))
-            .where(sql`YEAR(${collections.collectionDate}) = ${year}`)
-            .groupBy(accountsReceivable.revenueSourceId)
-        : Promise.resolve([] as { sourceId: number | null; total: string }[]),
+      db
+        .select({ sourceId: accountsReceivable.revenueSourceId, total: sql<string>`SUM(${collections.amount})` })
+        .from(collections)
+        .innerJoin(accountsReceivable, eq(collections.arId, accountsReceivable.id))
+        .where(
+          and(
+            sql`YEAR(${localTime(collections.collectionDate)}) = ${year}`,
+            fundClusterId ? sql`COALESCE(${accountsReceivable.fundClusterId}, ${defaultFund?.id ?? 0}) = ${fundClusterId}` : undefined
+          )
+        )
+        .groupBy(accountsReceivable.revenueSourceId),
     ]);
 
     const sourceIds = [...new Set([...targets, ...receipts, ...collected].map(r => r.sourceId ?? 0))];

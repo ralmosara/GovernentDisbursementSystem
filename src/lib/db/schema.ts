@@ -584,6 +584,8 @@ export const accountsReceivable = mysqlTable('accounts_receivable', {
   id: int('id').primaryKey().autoincrement(),
   arNo: varchar('ar_no', { length: 50 }).unique().notNull(),
   revenueSourceId: int('revenue_source_id').notNull(),
+  // Fund cluster the receivable and its collections are booked to; null means fund cluster 01
+  fundClusterId: int('fund_cluster_id'),
   debtorName: varchar('debtor_name', { length: 255 }).notNull(),
   invoiceNo: varchar('invoice_no', { length: 50 }),
   invoiceDate: datetime('invoice_date').notNull(),

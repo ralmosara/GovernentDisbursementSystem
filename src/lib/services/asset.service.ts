@@ -25,6 +25,7 @@ import {
 } from '../utils/depreciation-calculator';
 import { ledgerService, PPE_ACCOUNTS } from './ledger.service';
 import { SUPPLY_ACCOUNTS } from '../constants/inventory';
+import { averageAfterReceipt, averageAfterReceiptRemoved } from '../utils/inventory-cost';
 
 // ============================================
 // TYPE DEFINITIONS
@@ -1385,6 +1386,20 @@ export class AssetService {
       const transactionId = await db.transaction(async (tx) => {
         const { previousQuantity } = await this.adjustInventoryQuantity(data.itemId, data.quantity, operation, tx);
 
+        // Moving weighted average: a receipt re-averages the item's cost (the row is locked by
+        // the quantity update); everything else moves stock at the average in effect
+        const [{ unitCost: average }] = await tx
+          .select({ unitCost: inventoryItems.unitCost })
+          .from(inventoryItems)
+          .where(eq(inventoryItems.id, data.itemId));
+        const unitCost = data.transactionType === 'receipt' ? Number(data.unitCost || average).toFixed(2) : average;
+        if (data.transactionType === 'receipt') {
+          await tx
+            .update(inventoryItems)
+            .set({ unitCost: averageAfterReceipt(previousQuantity, average, data.quantity, unitCost) })
+            .where(eq(inventoryItems.id, data.itemId));
+        }
+
         const remarks = data.transactionType === 'adjustment'
           ? [`Adjusted from ${previousQuantity} to ${data.quantity}`, data.remarks].filter(Boolean).join('. ')
           : data.remarks;
@@ -1395,7 +1410,7 @@ export class AssetService {
           transactionDate: data.transactionDate,
           transactionType: data.transactionType,
           quantity: data.quantity,
-          unitCost: data.unitCost || item.unitCost,
+          unitCost,
           reference: data.reference,
           requestedBy: data.requestedBy,
           remarks,
@@ -1550,7 +1565,18 @@ export class AssetService {
       // Reverse the transaction effect on inventory and delete it atomically
       await db.transaction(async (tx) => {
         const reverse = transaction.transactionType === 'receipt' ? 'subtract' : 'add';
-        await this.adjustInventoryQuantity(transaction.item.id, transaction.quantity, reverse, tx);
+        const { previousQuantity } = await this.adjustInventoryQuantity(transaction.item.id, transaction.quantity, reverse, tx);
+        // A removed receipt comes back out of the average cost
+        if (transaction.transactionType === 'receipt') {
+          const [{ unitCost: average }] = await tx
+            .select({ unitCost: inventoryItems.unitCost })
+            .from(inventoryItems)
+            .where(eq(inventoryItems.id, transaction.item.id));
+          await tx
+            .update(inventoryItems)
+            .set({ unitCost: averageAfterReceiptRemoved(previousQuantity, average, transaction.quantity, transaction.unitCost ?? average) })
+            .where(eq(inventoryItems.id, transaction.item.id));
+        }
         await tx.delete(inventoryTransactions).where(eq(inventoryTransactions.id, id));
       });
 

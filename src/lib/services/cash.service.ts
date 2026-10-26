@@ -17,6 +17,7 @@ import {
 import { eq, and, or, desc, sum, sql, isNotNull, isNull, gte, lte, inArray, notInArray } from 'drizzle-orm';
 import { generateORNumber, generateDepositSlipNumber, generateCANumber } from '../utils/serial-generator';
 import { ledgerService } from './ledger.service';
+import { localTime } from '../db/local-time';
 
 // ============================================
 // TYPE DEFINITIONS
@@ -625,7 +626,7 @@ export class CashService {
       .where(
         and(
           eq(cashReceipts.fundClusterId, fundClusterId),
-          sql`DATE(${cashReceipts.receiptDate}) = DATE(${date})`
+          sql`DATE(${localTime(cashReceipts.receiptDate)}) = DATE(${date})`
         )
       );
 
@@ -641,7 +642,7 @@ export class CashService {
         and(
           eq(disbursementVouchers.fundClusterId, fundClusterId),
           eq(disbursementVouchers.status, 'paid'),
-          sql`DATE(${disbursementVouchers.dvDate}) = DATE(${date})`
+          sql`DATE(${localTime(disbursementVouchers.dvDate)}) = DATE(${date})`
         )
       );
 

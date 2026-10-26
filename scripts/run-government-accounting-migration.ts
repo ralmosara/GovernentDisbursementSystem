@@ -31,6 +31,8 @@ const COLUMNS: { table: string; name: string; definition: string }[] = [
   { table: 'inventory_transactions', name: 'previous_quantity', definition: 'INT NULL' },
   // Allotment as first released, kept when it is later modified (null means never modified)
   { table: 'registry_allotments', name: 'original_amount', definition: 'DECIMAL(15,2) NULL' },
+  // Fund cluster a receivable is booked to (null means fund cluster 01)
+  { table: 'accounts_receivable', name: 'fund_cluster_id', definition: 'INT NULL' },
 ];
 
 /** Split a migration file into statements, ignoring comment lines */
