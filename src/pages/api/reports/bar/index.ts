@@ -1,6 +1,9 @@
 import type { APIRoute } from 'astro';
 import { reportService } from '../../../../lib/services/report.service';
 import { createBARWorkbook } from '../../../../lib/utils/excel-templates';
+import { buildCoaReport } from '../../../../lib/reports/coa-reports';
+import { tableToPdf } from '../../../../lib/reports/table-export';
+import { getSetting } from '../../../../lib/services/settings.service';
 
 export const GET: APIRoute = async ({ request, locals, url }) => {
   try {
@@ -57,11 +60,15 @@ export const GET: APIRoute = async ({ request, locals, url }) => {
     }
 
     if (format === 'pdf') {
-      // PDF generation will be implemented in later phase
-      return new Response(
-        JSON.stringify({ message: 'PDF format not yet implemented. Please use Excel format.' }),
-        { status: 501, headers: { 'Content-Type': 'application/json' } }
-      );
+      const params = new URLSearchParams({ year: fiscalYear, fund: fundClusterId ?? '' });
+      const pdf = tableToPdf(await buildCoaReport('bar-annual', params), (await getSetting('agency_name').catch(() => '')) ?? '');
+      return new Response(pdf, {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/pdf',
+          'Content-Disposition': `attachment; filename="BAR_No1_FY${fiscalYear}${reportData.fundCluster ? `_FC${reportData.fundCluster.code}` : ''}.pdf"`,
+        },
+      });
     }
 
     return new Response(

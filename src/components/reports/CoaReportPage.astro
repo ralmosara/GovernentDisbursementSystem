@@ -1,0 +1,105 @@
+---
+import MainLayout from '../../layouts/MainLayout.astro';
+import PageHeader from '../ui/PageHeader.astro';
+import FilterBar from '../ui/FilterBar.astro';
+import Banner from '../ui/Banner.astro';
+import ReportTableView from './ReportTableView.astro';
+import { db } from '../../lib/db/connection';
+import { fundClusters } from '../../lib/db/schema';
+import { buildCoaReport, reportParams, type CoaReport, type ReportTable } from '../../lib/reports/coa-reports';
+import { getSetting } from '../../lib/services/settings.service';
+
+// Page shell for a COA report: filters, Excel/PDF/print actions and the report table
+interface Props {
+  report: CoaReport;
+  title: string;
+  description: string;
+  filters: ('year' | 'quarter' | 'month' | 'asOf' | 'fund')[];
+}
+
+const { report, title, description, filters } = Astro.props;
+const params = Astro.url.searchParams;
+const current = reportParams(report, params) as { fundClusterId?: number; year?: number; quarter?: number; month?: number; asOf?: Date };
+
+let table: ReportTable | null = null;
+let error = '';
+try {
+  table = await buildCoaReport(report, params);
+} catch (e) {
+  console.error(`Error building ${report}:`, e);
+  error = e instanceof Error ? e.message : 'The report could not be generated';
+}
+const [clusters, agencyName] = await Promise.all([
+  db.select({ id: fundClusters.id, code: fundClusters.code, name: fundClusters.name }).from(fundClusters),
+  getSetting('agency_name').catch(() => ''),
+]);
+
+const thisYear = new Date().getFullYear();
+const years = Array.from({ length: 6 }, (_, i) => thisYear - i);
+const months = Array.from({ length: 12 }, (_, i) => ({ value: i + 1, label: new Date(2000, i, 1).toLocaleDateString('en-PH', { month: 'long' }) }));
+const query = new URLSearchParams(params);
+query.set('report', report);
+const exportHref = (format: 'excel' | 'pdf') => {
+  query.set('format', format);
+  return `/api/reports/export?${query}`;
+};
+const activeCount = filters.filter(f => params.get(f)).length;
+---
+
+<MainLayout title={`${title} - Philippine Government FMS`}>
+  <PageHeader title={title} description={description} breadcrumbs={[{ label: 'Reports', href: '/reports' }, { label: title }]}>
+    <div slot="actions" class="flex flex-wrap gap-2">
+      <a href={exportHref('excel')} class="btn btn-secondary"><i class="pi pi-file-excel" aria-hidden="true"></i> Excel</a>
+      <a href={exportHref('pdf')} class="btn btn-secondary"><i class="pi pi-file-pdf" aria-hidden="true"></i> PDF</a>
+      <button type="button" class="btn btn-secondary" onclick="window.print()"><i class="pi pi-print" aria-hidden="true"></i> Print</button>
+    </div>
+  </PageHeader>
+
+  <FilterBar action={Astro.url.pathname} resetHref={Astro.url.pathname} activeCount={activeCount}>
+    {filters.includes('year') && (
+      <div class="form-group">
+        <label for="year" class="form-label">Year</label>
+        <select id="year" name="year" class="form-select">
+          {years.map(y => <option value={y} selected={y === current.year}>{y}</option>)}
+        </select>
+      </div>
+    )}
+    {filters.includes('quarter') && (
+      <div class="form-group">
+        <label for="quarter" class="form-label">Quarter</label>
+        <select id="quarter" name="quarter" class="form-select">
+          {[1, 2, 3, 4].map(q => <option value={q} selected={q === current.quarter}>Q{q}</option>)}
+        </select>
+      </div>
+    )}
+    {filters.includes('month') && (
+      <div class="form-group">
+        <label for="month" class="form-label">Month</label>
+        <select id="month" name="month" class="form-select">
+          {months.map(m => <option value={m.value} selected={m.value === current.month}>{m.label}</option>)}
+        </select>
+      </div>
+    )}
+    {filters.includes('asOf') && (
+      <div class="form-group">
+        <label for="asOf" class="form-label">As of</label>
+        <input type="date" id="asOf" name="asOf" class="form-input" value={current.asOf?.toLocaleDateString('en-CA')} />
+      </div>
+    )}
+    {filters.includes('fund') && (
+      <div class="form-group">
+        <label for="fund" class="form-label">Fund cluster</label>
+        <select id="fund" name="fund" class="form-select">
+          <option value="">All fund clusters</option>
+          {clusters.map(c => <option value={c.id} selected={current.fundClusterId === c.id}>{c.code} – {c.name}</option>)}
+        </select>
+      </div>
+    )}
+  </FilterBar>
+
+  {error ? (
+    <Banner appearance="error" title="The report could not be generated">{error}</Banner>
+  ) : (
+    table && <ReportTableView table={table} agencyName={agencyName ?? ''} />
+  )}
+</MainLayout>

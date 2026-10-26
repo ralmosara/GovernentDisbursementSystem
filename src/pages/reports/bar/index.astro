@@ -101,6 +101,10 @@ const fiscalYears = Array.from({ length: 5 }, (_, i) => currentYear - i);
               <i class="pi pi-download mr-2"></i>
               Download Excel
             </button>
+            <button type="button" id="download-pdf-btn" class="btn btn-secondary">
+              <i class="pi pi-file-pdf mr-2"></i>
+              Download PDF
+            </button>
           </div>
         </form>
       </div>
@@ -265,6 +269,13 @@ const fiscalYears = Array.from({ length: 5 }, (_, i) => currentYear - i);
       } finally {
         loading.classList.add('hidden');
       }
+    });
+
+    // Download PDF: a plain navigation, so the browser saves the attachment
+    document.getElementById('download-pdf-btn')?.addEventListener('click', () => {
+      const params = getReportParams();
+      params.set('format', 'pdf');
+      window.location.href = `/api/reports/bar?${params}`;
     });
 
     // Auto-preview on load if fiscal year is in URL

@@ -1,0 +1,68 @@
+---
+import type { Cell, ReportColumn, ReportTable } from '../../lib/reports/coa-reports';
+import { statementAmount } from '../../lib/ui/statement';
+
+// A COA report table, with the agency header, as shown on screen and printed
+interface Props {
+  table: ReportTable;
+  agencyName?: string;
+}
+
+const { table, agencyName } = Astro.props;
+const numeric = (column: ReportColumn) => column.type && column.type !== 'text';
+const show = (value: Cell, column: ReportColumn) => {
+  if (value === null || value === '') return '';
+  if (typeof value !== 'number') return value;
+  if (column.type === 'money') return statementAmount(value);
+  if (column.type === 'percent') return `${(value * 100).toFixed(2)}%`;
+  return value.toLocaleString('en-PH');
+};
+const empty = table.sections.every(s => s.rows.length === 0);
+---
+
+<article class="card" aria-label={table.title}>
+  <header class="text-center px-5 pt-6 pb-4 border-b border-gray-200">
+    {agencyName && <p class="font-semibold text-gray-800">{agencyName}</p>}
+    <h2 class="text-base font-bold text-gray-900 uppercase">{table.title}</h2>
+    {table.subtitle.map(line => <p class="text-sm text-gray-700">{line}</p>)}
+    <p class="text-xs text-gray-500 mt-1">(In Philippine Peso)</p>
+  </header>
+  <div class="relative overflow-x-auto">
+    <table class="table">
+      <thead>
+        <tr>
+          {table.columns.map(c => <th scope="col" class={numeric(c) ? '!text-right whitespace-nowrap' : ''}>{c.header}</th>)}
+        </tr>
+      </thead>
+      {empty ? (
+        <tbody><tr><td colspan={table.columns.length} class="text-center text-gray-500 py-10">No records for this period.</td></tr></tbody>
+      ) : (
+        table.sections.map(section => (
+          <tbody>
+            {section.label && (
+              <tr class="bg-gray-50"><th scope="rowgroup" colspan={table.columns.length} class="!text-gray-800">{section.label}</th></tr>
+            )}
+            {section.rows.map(row => (
+              <tr>{row.map((value, i) => <td class={numeric(table.columns[i]) ? 'text-right tabular-nums whitespace-nowrap' : 'text-sm'}>{show(value, table.columns[i])}</td>)}</tr>
+            ))}
+            {section.total && (
+              <tr class="font-semibold">{section.total.map((value, i) => <td class={`border-t border-gray-200 ${numeric(table.columns[i]) ? 'text-right tabular-nums whitespace-nowrap' : 'text-sm'}`}>{show(value, table.columns[i])}</td>)}</tr>
+            )}
+          </tbody>
+        ))
+      )}
+      {table.total && (
+        <tfoot>
+          <tr class="border-t-2 border-gray-300 font-semibold">
+            {table.total.map((value, i) => <td class={numeric(table.columns[i]) ? 'text-right tabular-nums whitespace-nowrap' : 'text-sm'}>{show(value, table.columns[i])}</td>)}
+          </tr>
+        </tfoot>
+      )}
+    </table>
+  </div>
+  {table.notes && table.notes.length > 0 && (
+    <footer class="px-5 py-3 border-t border-gray-200 text-xs text-gray-600 space-y-1">
+      {table.notes.map(note => <p>{note}</p>)}
+    </footer>
+  )}
+</article>
