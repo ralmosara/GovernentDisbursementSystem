@@ -230,8 +230,9 @@ describe('cash advances', () => {
   function liquidate(advance: ReturnType<typeof ca>) {
     vi.spyOn(ledgerService, 'postDvApproval').mockResolvedValue({ id: 1, jevNo: 'dv', created: false });
     const post = posted();
-    // Each DV lookup is followed by the opening-balance date check, as is the liquidation itself
-    queuedResults.push([advance], [advance], [dv], [], [], [dv], []);
+    // Each DV lookup is followed by the opening-balance date check; the grant then reads the DV approval date,
+    // and the liquidation checks its own date against the opening balances
+    queuedResults.push([advance], [advance], [dv], [], [], [], [dv], []);
     return { post, run: ledgerService.postCashAdvanceLiquidation(7, 1) };
   }
 
@@ -669,4 +670,104 @@ describe('opening balances', () => {
     expect(await ledgerService.postStockIssue(40, 1)).toBeNull();
     expect(post).not.toHaveBeenCalled();
   });
+});
+
+// ---------------------------------------------------------------------------
+// Posting dates and supplies costing
+// ---------------------------------------------------------------------------
+
+describe('posting dates', () => {
+  it('dates a DV approval when the DV was approved, not when it is posted', async () => {
+    const post = posted();
+    const approved = new Date(2025, 2, 14, 10, 30);
+    queuedResults.push(
+      [{ id: 3, dvNo: '0003-03-2025', fundClusterId: 1, payeeName: 'ABC Trading', particulars: 'Supplies', amount: '1000.00', totalTaxWithheld: '0', netAmount: '1000.00', responsibilityCenter: null, dvDate: new Date(2025, 2, 1), certBoxDDate: null, expenseCode: '5020301000', expenseName: 'Office Supplies Expenses' }],
+      [],
+      [{ date: approved }]
+    );
+    await ledgerService.postDvApproval(3, 1);
+    expect(post.mock.calls[0][0].date).toEqual(approved);
+  });
+
+  it('falls back to the DV date when no approval stage is dated', async () => {
+    const post = posted();
+    queuedResults.push(
+      [{ id: 3, dvNo: '0003-03-2025', fundClusterId: 1, payeeName: 'ABC Trading', particulars: 'Supplies', amount: '1000.00', totalTaxWithheld: '0', netAmount: '1000.00', responsibilityCenter: null, dvDate: new Date(2025, 2, 1), certBoxDDate: null, expenseCode: '5020301000', expenseName: 'Office Supplies Expenses' }],
+      [],
+      [{ date: null }]
+    );
+    await ledgerService.postDvApproval(3, 1);
+    expect(post.mock.calls[0][0].date).toEqual(new Date(2025, 2, 1));
+  });
+
+  it('dates a payment on its payment date', async () => {
+    vi.spyOn(ledgerService, 'postDvApproval').mockResolvedValue({ id: 1, jevNo: 'dv', created: false });
+    const post = posted();
+    queuedResults.push([{ id: 9, dvId: 3, paymentType: 'check_mds', amount: '1000.00', checkNo: '000123', adaReference: null, paymentDate: new Date(2025, 2, 20), dvNo: '0003-03-2025', fundClusterId: 1, payeeName: 'ABC Trading' }]);
+    await ledgerService.postPaymentIssued(9, 1);
+    expect(post.mock.calls[0][0].date).toEqual(new Date(2025, 2, 20));
+  });
+});
+
+describe('moving weighted average cost', () => {
+  it('re-averages the unit cost on each receipt', async () => {
+    const { averageAfterReceipt } = await import('../../src/lib/utils/inventory-cost');
+    expect(averageAfterReceipt(10, '100.00', 10, '120.00')).toBe('110.00');
+    expect(averageAfterReceipt(0, '100.00', 5, '80.50')).toBe('80.50');
+    expect(averageAfterReceipt(3, '10.00', 0, '99.00')).toBe('10.00');
+  });
+
+  it('takes a deleted receipt back out of the average', async () => {
+    const { averageAfterReceipt, averageAfterReceiptRemoved } = await import('../../src/lib/utils/inventory-cost');
+    const average = averageAfterReceipt(10, '100.00', 10, '120.00');
+    expect(averageAfterReceiptRemoved(20, average, 10, '120.00')).toBe('100.00');
+    expect(averageAfterReceiptRemoved(10, average, 10, '120.00')).toBe(average);
+  });
+});
+
+describe('COA report tables', () => {
+  it('groups FAR No. 4 by object of expenditure with subtotals and a total', async () => {
+    const { reportService } = await import('../../src/lib/services/report.service');
+    const { buildCoaReport } = await import('../../src/lib/reports/coa-reports');
+    const dv = (dvNo: string, amount: string) => ({ dvNo, dvDate: new Date(2025, 4, 5), payeeName: 'ABC', particulars: 'x', amount, fundClusterCode: '01', paymentType: 'check_mds', checkNumber: '1' });
+    vi.spyOn(reportService, 'generateFARNo4').mockResolvedValue({
+      period: { year: 2025, month: 5, monthName: 'May' },
+      byObjectOfExpenditure: [{ code: '5020301000', name: 'Office Supplies', disbursements: [dv('D1', '100.00'), dv('D2', '50.25')], total: 150.25 }],
+      summary: { totalCount: 2, totalAmount: 150.25 },
+    } as any);
+    const table = await buildCoaReport('far-4', new URLSearchParams('year=2025&month=5'));
+    expect(table.subtitle[0]).toBe('For the month of May 2025');
+    expect(table.sections[0].rows).toHaveLength(2);
+    expect(table.sections[0].total?.at(-1)).toBe(150.25);
+    expect(table.total?.at(-1)).toBe(150.25);
+    expect(table.filename).toBe('FAR-No4-2025-05');
+  });
+
+  it('ages FAR No. 3 obligations into buckets, leaving out empty ones', async () => {
+    const { reportService } = await import('../../src/lib/services/report.service');
+    const { buildCoaReport } = await import('../../src/lib/reports/coa-reports');
+    const obligation = { orsBursNo: 'ORS-1', obligationDate: new Date(2025, 0, 2), payee: 'XYZ', particulars: 'p', fundClusterCode: '01', age: 120, amount: '222.00' };
+    vi.spyOn(reportService, 'generateFARNo3').mockResolvedValue({
+      details: { current: [], days31to60: [], days61to90: [], over90days: [obligation] },
+      grandTotal: { count: 1, amount: 222 },
+    } as any);
+    const table = await buildCoaReport('far-3', new URLSearchParams('asOf=2025-05-02'));
+    expect(table.sections.map(s => s.label)).toEqual(['Over 90 days']);
+    expect(table.total?.slice(-2)).toEqual([1, 222]);
+  });
+
+  it('renders a report table to Excel and PDF', async () => {
+    const { tableToPdf, tableToWorkbook } = await import('../../src/lib/reports/table-export');
+    const table = {
+      title: 'FAR No. 1',
+      subtitle: ['Fiscal Year 2025'],
+      columns: [{ header: 'Fund' }, { header: 'Appropriations', type: 'money' as const }],
+      sections: [{ rows: [['01 – Regular', 1000]] }],
+      total: ['Total', 1000],
+      filename: 'FAR-No1-FY2025',
+    };
+    const workbook = await tableToWorkbook(table, 'Agency');
+    expect(workbook.worksheets[0].getCell('B7').value).toBe(1000);
+    expect(new TextDecoder().decode(tableToPdf(table).slice(0, 5))).toBe('%PDF-');
+  }, 60_000); // the first import of the Excel and PDF libraries is slow
 });

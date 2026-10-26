@@ -381,14 +381,12 @@ const stats = [
 
             <dl class="mt-4 space-y-2.5">
               {cycleTimes.stages.map(stage => (
-                <div>
-                  <div class="flex justify-between text-xs">
-                    <dt class="text-gray-600">{stage.label}</dt>
-                    <dd class="font-medium text-gray-800 tabular-nums">{stage.count ? formatHours(stage.medianHours) : '—'}</dd>
-                  </div>
-                  <div class="mt-1 h-1.5 rounded bg-gray-100" aria-hidden="true">
+                <div class="grid grid-cols-[1fr_auto] gap-y-1 text-xs">
+                  <dt class="text-gray-600">{stage.label}</dt>
+                  <dd class="font-medium text-gray-800 tabular-nums">{stage.count ? formatHours(stage.medianHours) : '—'}</dd>
+                  <dd class="col-span-2 h-1.5 rounded bg-gray-100" aria-hidden="true">
                     <div class="h-full rounded bg-primary-600" style={`width: ${stage.count ? Math.max(2, (stage.medianHours / slowestStageHours) * 100) : 0}%`}></div>
-                  </div>
+                  </dd>
                 </div>
               ))}
             </dl>

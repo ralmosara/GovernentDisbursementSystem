@@ -127,6 +127,7 @@ test.describe('Role-Based Access Control', () => {
     await page.fill('input[name="username"]', 'staff');
     await page.fill('input[type="password"]', 'password123');
     await page.click('button[type="submit"]');
+    await expect(page).toHaveURL(/\/dashboard/);
 
     // Try to access admin page
     await page.goto('/admin/users');
@@ -142,6 +143,7 @@ test.describe('Role-Based Access Control', () => {
     await page.fill('input[name="username"]', 'admin');
     await page.fill('input[type="password"]', 'password123');
     await page.click('button[type="submit"]');
+    await expect(page).toHaveURL(/\/dashboard/);
 
     // Access admin pages
     await page.goto('/admin/users');
@@ -173,14 +175,16 @@ test.describe('Security Features', () => {
   });
 
   test('should implement rate limiting on login attempts', async ({ page }) => {
-    await page.goto('/login');
+    // Wait for the login script, so each attempt is a fetch and the page stays put
+    await page.goto('/login', { waitUntil: 'networkidle' });
 
-    // Make multiple failed login attempts
+    // Make multiple failed login attempts, waiting for each response. A throwaway username, so
+    // the lockout does not lock out accounts other tests log in with.
+    const probe = `rate-limit-probe-${Date.now()}`;
     for (let i = 0; i < 6; i++) {
-      await page.fill('input[name="username"]', 'admin');
+      await page.fill('input[name="username"]', probe);
       await page.fill('input[type="password"]', 'wrongpassword' + i);
-      await page.click('button[type="submit"]');
-      await page.waitForTimeout(500);
+      await Promise.all([page.waitForResponse(r => r.url().includes('/api/auth/login')), page.click('button[type="submit"]')]);
     }
 
     // Should show rate limit message or temporarily block
